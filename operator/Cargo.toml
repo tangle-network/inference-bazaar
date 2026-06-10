@@ -1,0 +1,34 @@
+# Surplus operator.
+#
+# Two binaries, mirroring the llm-inference-blueprint split:
+#   - `surplus-operator-lite`: HTTP-only operator (market API + sidecar wiring +
+#     settlement intents), no Tangle substrate. This is what runs in local e2e
+#     and the first testnet smoke; it depends only on stable crates so it builds
+#     fast and is easy to reason about.
+#   - `surplus-operator` (added next): the full BlueprintRunner that registers
+#     on-chain via blueprint-sdk and listens for jobs. Gated behind the
+#     `blueprint` feature so the lite path never pulls the alpha SDK.
+[package]
+name = "surplus-operator"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "surplus-operator-lite"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.7", features = ["json", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+
+[features]
+# Full on-chain operator (BlueprintRunner + tangle-inference-core). Off by
+# default so `cargo build` of the lite operator stays light.
+blueprint = []

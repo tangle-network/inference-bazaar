@@ -46,6 +46,25 @@ importers:
         specifier: ^3.0.0
         version: 3.2.6(@types/node@25.9.2)(tsx@4.22.4)(yaml@2.9.0)
 
+  packages/mm-sidecar:
+    dependencies:
+      '@surplus/market-core':
+        specifier: workspace:*
+        version: link:../market-core
+    devDependencies:
+      '@types/node':
+        specifier: ^25.9.2
+        version: 25.9.2
+      tsx:
+        specifier: ^4.19.0
+        version: 4.22.4
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.6(@types/node@25.9.2)(tsx@4.22.4)(yaml@2.9.0)
+
   packages/router-bridge:
     devDependencies:
       '@types/node':

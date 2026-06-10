@@ -3,3 +3,9 @@ dist/
 *.tsbuildinfo
 .env
 .env.*
+
+# Rust build output (kept outside the blueprint repos per the no-touch rule)
+.cargo-tangle-target/
+.cargo-op-target/
+operator/target/
+target/

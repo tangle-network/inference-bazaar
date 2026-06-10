@@ -1,0 +1,62 @@
+# Surplus blueprint manifest (consumed by `cargo tangle blueprint deploy`).
+#
+# The market-maker operator for inference-token credits. Jobs mirror the
+# ai-trading-blueprint lifecycle but for a token-credit market: list an
+# instrument, start/stop making a market, push a reference price, and tick.
+#
+# This is the manifest shape; wiring the on-chain job handlers (the full
+# `surplus-operator` bin behind the `blueprint` feature) is the next step after
+# the lite operator e2e passes.
+
+[blueprint]
+name = "surplus"
+description = "Open market for AI inference — buy/sell prepaid inference token credits, operators make markets."
+author = "Tangle"
+license = "MIT OR Apache-2.0"
+category = "inference-market"
+
+[blueprint.operator]
+# The full operator binary registered on-chain (built with --features blueprint).
+binary = "surplus-operator"
+# HTTP market API the operator serves (see operator/src/main.rs).
+http_port = 9100
+
+# Jobs the blueprint exposes. IDs follow the trading-blueprint convention
+# (provision/configure/start/stop/status + a periodic tick).
+[[blueprint.jobs]]
+id = 0
+name = "list_instrument"
+description = "List a (model, tokenKind) credit market with tick size + min qty."
+
+[[blueprint.jobs]]
+id = 1
+name = "configure"
+description = "Set quoting params + risk limits for an instrument."
+
+[[blueprint.jobs]]
+id = 2
+name = "start_making"
+description = "Begin making a market in an instrument (enable the tick)."
+
+[[blueprint.jobs]]
+id = 3
+name = "stop_making"
+description = "Stop making a market (pull quotes, disable the tick)."
+
+[[blueprint.jobs]]
+id = 4
+name = "status"
+description = "Operator health, instruments, inventory, PnL."
+
+[[blueprint.jobs]]
+id = 30
+name = "workflow_tick"
+description = "Periodic tick: pull reference price, fetch sidecar quotes, place/update quotes."
+
+# Settlement supports BOTH rails — chosen per order, never hard-wired.
+[blueprint.settlement]
+rails = ["router-credits", "shielded"]
+# Router rail: the live Tangle Router / platform balance (Stripe + on-ramp).
+router_url = "https://router.tangle.tools"
+# Shielded rail: on-chain ShieldedCredits (set per network at deploy time).
+shielded_credits_address = ""

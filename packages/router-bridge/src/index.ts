@@ -1,5 +1,20 @@
 export { OperatorMemory } from './memory'
 export {
+  RouterCreditsRail,
+  SettlementRouter,
+  ShieldedRail,
+  splitFee,
+  type FeePolicy,
+  type RouterCreditsOrder,
+  type RouterSettlementPort,
+  type SettlementOrder,
+  type SettlementRail,
+  type SettlementRailKind,
+  type SettlementReceipt,
+  type ShieldedChainPort,
+  type ShieldedOrder,
+} from './settlement'
+export {
   TorRedemptionClient,
   type RedemptionOperator,
   type RedemptionResult,
