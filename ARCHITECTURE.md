@@ -61,7 +61,7 @@ to list; it never invents a price from nothing.
 packages/
   market-core/     domain: orderbook, quoting, risk, ledger, simulator   (no deps)
   mm-loop/         THE LOOP: market-making on @tangle-network/agent-runtime
-  router-bridge/   Tangle Router client, ShieldedCredits SpendAuth, onion routing
+  router-bridge/   Tangle Router client, ShieldedCredits SpendAuth, Tor (Arti) privacy
 ```
 
 ### `@surplus/market-core` — the market
@@ -95,7 +95,8 @@ is a `runLoop` driven loop. See [The loop](#the-loop).
 - **`SpendAuth`** — a byte-for-byte mirror of tangle-router's
   `lib/shielded/spend-auth.ts` EIP-712 typed data, so marketplace settlement
   signs exactly what operators and the `ShieldedCredits` contract already verify.
-- **Onion routing** — the seller-privacy layer. See [Privacy](#privacy-onion-routing-on-the-sell-side).
+- **Tor privacy** — `TorTransport` (tunnel via Arti's SOCKS proxy) +
+  `selectOperators` / `OperatorMemory` anti-stickiness. See [Privacy](#privacy-tor-via-arti-on-the-sell-side).
 
 ---
 
@@ -221,91 +222,62 @@ data — **drift is a fund-loss bug**; change only in lockstep with the router.
 
 ---
 
-## Privacy: onion routing on the sell side
+## Privacy: Tor (via Arti) on the sell side
 
-> *The user's request:* when people sell unused tokens, preserve their privacy
-> so the router doesn't keep routing them to the same operators, which would let
-> those operators correlate and de-anonymize the seller.
+> *The ask:* when people sell unused tokens, preserve their privacy so the
+> router doesn't keep routing them to the same operators, which would let those
+> operators correlate and de-anonymize the seller.
 
 A shielded credit account hides *identity on-chain*. It does **not** hide the
-*fulfillment path*: when surplus inference is redeemed, some operator runs it. If
-the router always picked the cheapest/closest operator, a seller's flow would
-concentrate on a few operators who could correlate timing + volume + content and
-re-link the seller across redemptions — defeating the shielded account.
+*fulfillment path*: when surplus inference is redeemed, some operator runs it,
+sees the seller's IP, and — if always the same operator — can correlate timing +
+volume across redemptions and re-link the seller. Two separable problems, solved
+by two layers:
 
-`@surplus/router-bridge/onion` closes this with two composed mechanisms:
+### 1. Network anonymity → Tor, via Arti (not hand-rolled)
 
-### 1. Anti-sticky circuit selection (`selectCircuit`)
+We do **not** roll our own onion crypto. Network-layer anonymity is delegated to
+**Tor** through **Arti** (`arti-client`, the Tor Project's Rust Tor
+implementation). Operators are reached either as Tor **onion services**
+(`http://<...>.onion`) or as clearnet HTTPS via a Tor exit, so the operator never
+learns the seller's IP and no on-path observer links the two. Tor brings the
+things a bespoke overlay can't: a real anonymity set, relay diversity, guard
+nodes, path constraints, directory-authority consensus, and years of audit.
 
-Picks `length` distinct relays (operators), weighting each **away** from relays
-this seller used recently:
+`@surplus/router-bridge` ships `TorTransport`: an HTTP(S) transport that tunnels
+every request through Arti's local **SOCKS5** proxy (RFC 1928 — a wire protocol,
+not cryptography; all anonymity is Tor's). The destination is sent as a hostname
+so `.onion` names resolve inside Tor, never locally. Point `socksPort` at Arti's
+listener (default 9150). Tested against a real in-process SOCKS5 conversation —
+the same bytes Arti speaks; tests do **not** contact the live Tor network.
+
+### 2. Operator-selection anti-stickiness → ours (Tor can't do it)
+
+Tor anonymizes the pipe; it does **not** choose *which marketplace operator*
+fulfills a redemption. That choice is ours, and left naive it re-introduces
+concentration. `selectOperators` picks fulfilling operators weighted **away**
+from the ones this seller used recently:
 
 ```
-weight(relay) = max(ε, 1 − penalty · recencyWeight(relay))
+weight(op) = max(ε, 1 − penalty · recencyWeight(op))
 ```
 
-`recencyWeight` decays linearly with position in the seller's recent-relay list
-(last-used penalized most). Selection is weighted-random over the remaining
-weight, so flow **spreads across the operator set** instead of sticking — proven
-by the `spreads flow away from recently-used relays` test (400 redemptions: the
-two recently-used relays are selected materially less than a fresh one). `ε > 0`
-keeps a fully-penalized relay *possible* — availability beats a perfect avoid.
+`recencyWeight` decays linearly with position in the seller's recent-operator
+list (last-used penalized most); `ε > 0` keeps a fully-penalized operator
+*possible* (availability beats a perfect avoid). `OperatorMemory` persists that
+recent list per seller — keyed by the shielded commitment — so the spread holds
+**across** redemptions instead of re-rolling each time. `TorRedemptionClient`
+composes the two: select an anti-sticky operator, reach it through Tor.
 
-### 2. Layered onion envelopes (`wrapOnion` / `peelOnion`)
+Tested (12 tests): the SOCKS5 handshake + HTTP tunnel round-trips through the
+proxy; redemptions spread across operators; and the memory is bounded and
+per-seller.
 
-Each request is wrapped in nested **x25519 + HKDF-SHA256 + ChaCha20-Poly1305**
-layers, one per relay (Node `node:crypto`, no third-party crypto dep):
-
-- The sender mints a fresh **ephemeral** x25519 key per layer, ECDHs against the
-  relay's long-term public key, derives a per-layer AEAD key via HKDF.
-- Relay *i* decrypts exactly one layer, learning **only its next hop** — never
-  the origin, never the final payload, never any other hop.
-- The **exit** relay recovers the inference request. No single relay sees both
-  *who sent it* and *what it is*. Tampering fails the AEAD auth tag.
-
-### 3. The return path (`sealReply` / `openReply`)
-
-A redemption needs a *response* back, and it must not create a new linkage. When
-the sender wraps the onion it keeps the per-hop AEAD keys (`wrapOnion` returns
-`hopKeys`); each relay re-encrypts the response under its own key on the way
-back, so the reply is bound to the same circuit but **only the original sender —
-who holds every hop key — can peel it**. No relay learns both endpoints on the
-return trip either.
-
-### 4. Length padding (`padToCell` / `unpadCell`)
-
-Requests and responses are padded to a fixed cell size before wrapping, so an
-onion's wire length does not leak the content size — closing the obvious
-traffic-analysis side channel that survives encryption.
-
-### The working network
-
-`@surplus/router-bridge` ships the full relay network, not just the crypto:
-
-- **`OnionRelay`** — peels one layer, **forwards blindly** to the next hop or
-  fulfills at the exit, **rejects replays** (a captured onion can't be
-  re-injected to probe the path or re-bill a payment), and seals the response on
-  the return trip.
-- **`OnionTransport` + `InMemoryOnionNetwork`** — the transport seam. In-memory
-  for tests/local dev; in production each relay is a separate operator process
-  and the transport is HTTP (POST the message to `https://<operator>/onion`,
-  read back the reply cell). The relay logic and crypto are identical.
-- **`CircuitMemory`** — per-seller recent-relay history, keyed by the seller's
-  shielded commitment, so anti-stickiness persists **across** redemptions
-  instead of re-rolling each time.
-- **`OnionClient`** — one `send` = one private redemption: select an anti-sticky
-  circuit, pad + wrap, dispatch to the first hop, peel the layered response.
-
-Tested end to end (18 tests): a 3-hop circuit round-trips request **and**
-response; the exit sees the request but not the origin while the entry sees the
-origin but not the request; replays are rejected; padding holds wire length
-constant across different content; and over 30 redemptions flow spreads across
-all 8 operators instead of collapsing onto a sticky few.
-
-> **Reuses, doesn't replace.** The relay set is drawn from the router's existing
-> operator registry; operators run the `OnionRelay` handler behind an `/onion`
-> endpoint. The only remaining integration is the operator-service HTTP wiring
-> (the in-memory transport already proves the protocol).
+> **Feature-flag it.** `PRIVACY_MODE = tor | off`. `tor` routes through Arti;
+> `off` is direct (dev/trusted networks). Caveat: Tor adds real latency, so the
+> live token-by-token streaming path may run direct while redemption/settlement
+> runs over Tor. Depend on the published `arti-client` crate from crates.io — not
+> a GitHub mirror.
 
 ---
 
@@ -324,7 +296,7 @@ tokens; reusing the inference blueprints for the operator/sell side.
 | `trading-blueprint-lib` jobs (provision/start/stop) | marketplace jobs (list instrument / start MM / stop / status)| migrate |
 | `TradingVault` + validator-signed envelope          | token-credit vault + validator-gated lot settlement         | migrate |
 | `arena/` React Router 7 + blueprint-ui UI           | marketplace arena (leaderboard, books, MM dashboards)       | clone  |
-| operator TLV registration (`registration.rs`)       | operator registration (capacity, models, relay pubkey)      | migrate |
+| operator TLV registration (`registration.rs`)       | operator registration (capacity, models, `.onion` address)  | migrate |
 
 ### From `llm-inference-blueprint` / `modal-inference-blueprint` (the sell side)
 
@@ -342,11 +314,13 @@ The operator who *sells* tokens **is** an inference operator. Reuse, don't reinv
 ### Tangle Router (the clearing house)
 
 - `RouterClient` reads `/v1/models` (reference price) and `/api/operators`
-  (sellers + relay set). **built.**
+  (sellers + their `.onion`/endpoint set). **built.**
 - Buyers spend through the router's OpenAI-compatible API (Rail 1). The
   marketplace settles the discount.
-- Onion relays are drawn from the router's operator registry. **selection +
-  envelope crypto built; relay forwarding is operator-service work.**
+- Privacy is Tor via Arti: operators run as onion services / behind Arti, the
+  seller reaches them through `TorTransport`. **transport + anti-stickiness
+  selection built; running Arti + publishing operator `.onion`s is
+  operator-service work.**
 
 ---
 
@@ -355,7 +329,7 @@ The operator who *sells* tokens **is** an inference operator. Reuse, don't reinv
 ```bash
 pnpm install
 pnpm -r typecheck      # strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes
-pnpm -r test           # 42 tests across the three packages
+pnpm -r test           # 36 tests across the three packages
 pnpm demo:mm           # run the market-making loop against the simulator
 ```
 

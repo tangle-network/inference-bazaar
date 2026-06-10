@@ -1,33 +1,10 @@
-export { OnionClient, type OnionClientOptions, type OnionSendResult } from './client'
-export { CircuitMemory } from './memory'
-export { InMemoryOnionNetwork } from './network'
+export { OperatorMemory } from './memory'
 export {
-  CELL_SIZE,
-  decodeReplyCell,
-  encodeReplyCell,
-  generateRelayKeypair,
-  openReply,
-  openReplyLayer,
-  padToCell,
-  peelOnion,
-  sealReply,
-  selectCircuit,
-  unpadCell,
-  wrapOnion,
-  type CircuitSelectionOptions,
-  type OnionMessage,
-  type PeelResult,
-  type Relay,
-  type RelayKeypair,
-  type ReplyCell,
-  type WrappedOnion,
-} from './onion'
-export {
-  OnionRelay,
-  type ExitHandler,
-  type OnionRelayOptions,
-  type OnionTransport,
-} from './relay'
+  TorRedemptionClient,
+  type RedemptionOperator,
+  type RedemptionResult,
+  type TorRedemptionOptions,
+} from './redemption'
 export {
   RouterClient,
   usdPerTokenToMicroPerM,
@@ -37,6 +14,11 @@ export {
   type RouterOperator,
 } from './router-client'
 export {
+  selectOperators,
+  type OperatorRef,
+  type SelectOperatorsOptions,
+} from './selection'
+export {
   buildSpendAuthMessage,
   SHIELDED_CREDITS_DOMAIN,
   SPEND_AUTH_TYPES,
@@ -44,3 +26,10 @@ export {
   tokenLotCostBaseUnits,
   type SpendAuthPayload,
 } from './spend-auth'
+export {
+  socks5Connect,
+  TorTransport,
+  type TorConfig,
+  type TorRequestInit,
+  type TorResponse,
+} from './tor'

@@ -16,7 +16,7 @@ modal-inference** blueprints for the sell side.
 packages/
   market-core/     orderbook · A–S quoting · risk gate · ledger · seeded simulator
   mm-loop/         the market-making LOOP, on @tangle-network/agent-runtime/loops
-  router-bridge/   Tangle Router client · ShieldedCredits SpendAuth · onion routing
+  router-bridge/   Tangle Router client · ShieldedCredits SpendAuth · Tor (Arti) privacy
 ```
 
 The **market-making loop** is the centerpiece: one market-making session is one
@@ -24,16 +24,18 @@ The **market-making loop** is the centerpiece: one market-making session is one
 kernel — a deterministic Avellaneda–Stoikov quoter, or a sandboxed agent — both
 gated by the same fail-closed risk desk.
 
-The **onion routing** layer keeps sellers private: anti-sticky relay selection
-plus layered x25519 / ChaCha20-Poly1305 envelopes, so redeeming surplus
-inference doesn't repeatedly route a seller to the same operators (which would
-let them correlate and de-anonymize the seller).
+The **privacy** layer keeps sellers anonymous via **Tor** (through Arti, the Tor
+Project's Rust implementation): requests tunnel through Arti's SOCKS proxy to
+operators reached as `.onion` services, and anti-sticky operator selection stops
+a seller's redemptions from concentrating on the same operators (which would let
+them correlate and de-anonymize the seller). No hand-rolled crypto — Tor does the
+anonymity; we only choose which operator fulfills.
 
 ## Quick start
 
 ```bash
 pnpm install
-pnpm -r test           # 42 tests
+pnpm -r test           # 36 tests
 pnpm demo:mm           # market-making session against the simulator
 ```
 
@@ -73,5 +75,5 @@ against the marketplace blueprint's HTTP API to make markets for real. Swap
 
 See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the full system: what's traded,
 the loop's control flow and why it's shaped that way, the two payment rails
-(Stripe/platform credits and on-chain ShieldedCredits/x402), the onion-routing
+(Stripe/platform credits and on-chain ShieldedCredits/x402), the Tor-via-Arti
 privacy layer, and the blueprint migration map with exact source paths.

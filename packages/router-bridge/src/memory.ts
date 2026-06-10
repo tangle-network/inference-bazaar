@@ -1,15 +1,15 @@
 /**
- * Per-seller circuit memory. Anti-stickiness is only meaningful if "recently
+ * Per-seller operator memory. Anti-stickiness only means something if "recently
  * used" persists ACROSS redemptions — otherwise every request re-rolls from a
  * clean slate and concentration reappears. This holds a bounded, most-recent-
- * first list of relay ids per seller identity, feeding `selectCircuit` and
- * updated after each send.
+ * first list of operator ids per seller identity, feeding `selectOperators` and
+ * updated after each redemption.
  *
  * Identity is an opaque key — use the seller's shielded credit commitment, so
  * the memory is keyed by the same anonymous handle the payment rail uses and
  * never by a real-world identity.
  */
-export class CircuitMemory {
+export class OperatorMemory {
   private readonly maxRecent: number
   private readonly recentByIdentity = new Map<string, string[]>()
 
@@ -18,15 +18,15 @@ export class CircuitMemory {
     this.maxRecent = maxRecent
   }
 
-  /** Recently-used relay ids for an identity, most-recent-first. */
+  /** Recently-used operator ids for an identity, most-recent-first. */
   recent(identity: string): string[] {
     return this.recentByIdentity.get(identity)?.slice() ?? []
   }
 
-  /** Record a circuit's relays as used, newest first, bounded to `maxRecent`. */
-  record(identity: string, relayIds: string[]): void {
+  /** Record operators as used, newest first, bounded to `maxRecent`. */
+  record(identity: string, operatorIds: string[]): void {
     const prior = this.recentByIdentity.get(identity) ?? []
-    const merged = [...relayIds, ...prior].slice(0, this.maxRecent)
+    const merged = [...operatorIds, ...prior].slice(0, this.maxRecent)
     this.recentByIdentity.set(identity, merged)
   }
 
