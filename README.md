@@ -33,7 +33,7 @@ let them correlate and de-anonymize the seller).
 
 ```bash
 pnpm install
-pnpm -r test           # 36 tests
+pnpm -r test           # 42 tests
 pnpm demo:mm           # market-making session against the simulator
 ```
 

@@ -263,15 +263,49 @@ layers, one per relay (Node `node:crypto`, no third-party crypto dep):
 - The **exit** relay recovers the inference request. No single relay sees both
   *who sent it* and *what it is*. Tampering fails the AEAD auth tag.
 
-Tested end to end: a 3-hop circuit delivers the payload, the first relay sees
-only `next` (not the secret), a wrong key cannot peel, and a flipped ciphertext
-byte is rejected.
+### 3. The return path (`sealReply` / `openReply`)
 
-> **Scope.** This is the application-layer onion protocol — envelope crypto +
-> selection policy — that the marketplace and the operator relay implement. It
-> reuses the router's existing operator registry as the relay set; it does not
-> replace the router's transport. Wiring relays to actually forward peeled
-> envelopes is operator-service work (see migration map).
+A redemption needs a *response* back, and it must not create a new linkage. When
+the sender wraps the onion it keeps the per-hop AEAD keys (`wrapOnion` returns
+`hopKeys`); each relay re-encrypts the response under its own key on the way
+back, so the reply is bound to the same circuit but **only the original sender —
+who holds every hop key — can peel it**. No relay learns both endpoints on the
+return trip either.
+
+### 4. Length padding (`padToCell` / `unpadCell`)
+
+Requests and responses are padded to a fixed cell size before wrapping, so an
+onion's wire length does not leak the content size — closing the obvious
+traffic-analysis side channel that survives encryption.
+
+### The working network
+
+`@surplus/router-bridge` ships the full relay network, not just the crypto:
+
+- **`OnionRelay`** — peels one layer, **forwards blindly** to the next hop or
+  fulfills at the exit, **rejects replays** (a captured onion can't be
+  re-injected to probe the path or re-bill a payment), and seals the response on
+  the return trip.
+- **`OnionTransport` + `InMemoryOnionNetwork`** — the transport seam. In-memory
+  for tests/local dev; in production each relay is a separate operator process
+  and the transport is HTTP (POST the message to `https://<operator>/onion`,
+  read back the reply cell). The relay logic and crypto are identical.
+- **`CircuitMemory`** — per-seller recent-relay history, keyed by the seller's
+  shielded commitment, so anti-stickiness persists **across** redemptions
+  instead of re-rolling each time.
+- **`OnionClient`** — one `send` = one private redemption: select an anti-sticky
+  circuit, pad + wrap, dispatch to the first hop, peel the layered response.
+
+Tested end to end (18 tests): a 3-hop circuit round-trips request **and**
+response; the exit sees the request but not the origin while the entry sees the
+origin but not the request; replays are rejected; padding holds wire length
+constant across different content; and over 30 redemptions flow spreads across
+all 8 operators instead of collapsing onto a sticky few.
+
+> **Reuses, doesn't replace.** The relay set is drawn from the router's existing
+> operator registry; operators run the `OnionRelay` handler behind an `/onion`
+> endpoint. The only remaining integration is the operator-service HTTP wiring
+> (the in-memory transport already proves the protocol).
 
 ---
 
@@ -321,7 +355,7 @@ The operator who *sells* tokens **is** an inference operator. Reuse, don't reinv
 ```bash
 pnpm install
 pnpm -r typecheck      # strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes
-pnpm -r test           # 36 tests across the three packages
+pnpm -r test           # 42 tests across the three packages
 pnpm demo:mm           # run the market-making loop against the simulator
 ```
 

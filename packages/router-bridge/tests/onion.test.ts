@@ -24,7 +24,7 @@ describe('onion wrap/peel', () => {
     const circuit: Relay[] = keys.map((k) => ({ id: k.id, publicKey: k.publicKey }))
     const payload = Buffer.from('inference-request:claude-opus-4-8:prompt-hash-abc')
 
-    let message = wrapOnion(circuit, payload)
+    let message = wrapOnion(circuit, payload).message
     const path: string[] = []
     let exitPayload: Buffer | undefined
     let hopId: string | null = circuit[0]!.id
@@ -48,7 +48,7 @@ describe('onion wrap/peel', () => {
     const keys = ['a', 'b', 'c'].map(generateRelayKeypair)
     const circuit: Relay[] = keys.map((k) => ({ id: k.id, publicKey: k.publicKey }))
     const secret = Buffer.from('TOP-SECRET-INFERENCE')
-    const message = wrapOnion(circuit, secret)
+    const message = wrapOnion(circuit, secret).message
 
     // First relay's view: knows next = 'b', payload is still an onion (not the secret).
     const first = peelOnion(keys[0]!.privateKey, message)
@@ -61,7 +61,7 @@ describe('onion wrap/peel', () => {
 
   it('tampering with ciphertext is rejected by the auth tag', () => {
     const relay = generateRelayKeypair('solo')
-    const message = wrapOnion([{ id: relay.id, publicKey: relay.publicKey }], Buffer.from('x'))
+    const message = wrapOnion([{ id: relay.id, publicKey: relay.publicKey }], Buffer.from('x')).message
     const tampered = { ...message, ciphertext: message.ciphertext.replace(/.$/, '0') }
     expect(() => peelOnion(relay.privateKey, tampered)).toThrow()
   })
