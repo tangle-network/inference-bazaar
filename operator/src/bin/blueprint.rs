@@ -29,6 +29,10 @@ use surplus_operator::{http, Venue};
 pub const LIST_INSTRUMENT_JOB: u8 = 0;
 pub const STATUS_JOB: u8 = 4;
 pub const WORKFLOW_TICK_JOB: u8 = 30;
+/// Compact-definition deployments (live chains, where 25 reserved filler jobs
+/// would cost real storage gas) place workflow_tick at positional index 5.
+/// Both indices route to the same handler.
+pub const WORKFLOW_TICK_JOB_COMPACT: u8 = 5;
 
 // --- ABI types for on-chain job encoding ---
 sol! {
@@ -135,6 +139,7 @@ pub fn router() -> Router {
         .route(LIST_INSTRUMENT_JOB, list_instrument.layer(TangleLayer))
         .route(STATUS_JOB, status.layer(TangleLayer))
         .route(WORKFLOW_TICK_JOB, workflow_tick.layer(TangleLayer))
+        .route(WORKFLOW_TICK_JOB_COMPACT, workflow_tick.layer(TangleLayer))
 }
 
 // --- Background service: the venue HTTP server ---

@@ -1,8 +1,9 @@
-# Deployable Surplus blueprint definition (cargo tangle blueprint deploy tangle
-# --definition deploy/blueprint-definition.toml). This is the on-chain shape;
-# blueprint.toml stays the human manifest. Job indices are POSITIONAL on-chain:
-# 0-4 are the lifecycle jobs, 5-29 are reserved no-ops, 30 is workflow_tick —
-# matching the WORKFLOW_TICK_JOB=30 convention the operator's router expects.
+# Compact Surplus blueprint definition for live chains (Base Sepolia).
+# Same blueprint as deploy/blueprint-definition.toml minus the 25 reserved
+# filler jobs: on a live chain the stored definition blob costs real gas and
+# the padded 31-job table exceeds the node's ~16.7M per-tx cap. Here
+# workflow_tick is POSITIONAL INDEX 5; the operator binary routes both 5
+# (compact) and 30 (padded devnet convention) to the same handler.
 
 metadata_uri = "https://github.com/tangle-network/surplus"
 manager = "0x0000000000000000000000000000000000000000"
@@ -36,57 +37,6 @@ description = "Stop making a market (pull quotes, disable the tick)."
 [[jobs]]
 name = "status"
 description = "Operator health, instruments, inventory, PnL."
-
-[[jobs]]
-name = "reserved_5"
-[[jobs]]
-name = "reserved_6"
-[[jobs]]
-name = "reserved_7"
-[[jobs]]
-name = "reserved_8"
-[[jobs]]
-name = "reserved_9"
-[[jobs]]
-name = "reserved_10"
-[[jobs]]
-name = "reserved_11"
-[[jobs]]
-name = "reserved_12"
-[[jobs]]
-name = "reserved_13"
-[[jobs]]
-name = "reserved_14"
-[[jobs]]
-name = "reserved_15"
-[[jobs]]
-name = "reserved_16"
-[[jobs]]
-name = "reserved_17"
-[[jobs]]
-name = "reserved_18"
-[[jobs]]
-name = "reserved_19"
-[[jobs]]
-name = "reserved_20"
-[[jobs]]
-name = "reserved_21"
-[[jobs]]
-name = "reserved_22"
-[[jobs]]
-name = "reserved_23"
-[[jobs]]
-name = "reserved_24"
-[[jobs]]
-name = "reserved_25"
-[[jobs]]
-name = "reserved_26"
-[[jobs]]
-name = "reserved_27"
-[[jobs]]
-name = "reserved_28"
-[[jobs]]
-name = "reserved_29"
 
 [[jobs]]
 name = "workflow_tick"

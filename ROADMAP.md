@@ -24,8 +24,9 @@ to the phase that delivers it.
 - [ ] **G3 — Buyers definitely get their spend.** A credit is a claim on a bonded
   operator; refusal of a valid credit is slashable; unfulfillable → escrow
   refund. *(Phase 4 + 6, settlement-agent)*
-- [ ] **G4 — The venue runs on-chain.** `workflow_tick` is triggered by a real
-  on-chain job on a deployed blueprint, not an HTTP poke. *(Phase 3)*
+- [x] **G4 — The venue runs on-chain.** `workflow_tick` is triggered by a real
+  on-chain job on a deployed blueprint, not an HTTP poke. *(Phase 3 — done on
+  devnet AND Base Sepolia; result txs in the Phase 3 boxes.)*
 - [ ] **G5 — Money is real.** Settlement clears on at least one rail against a
   real chain / the live router, not a stub. *(Phase 3 + 4)*
 - [ ] **G6 — Contracts audited.** Every contract on the value path has a review
@@ -69,7 +70,7 @@ to the phase that delivers it.
   binary boots the real blueprint CLI (`surplus-operator run --data-dir
   --http-rpc-url`).
 
-## Phase 3 — On-chain devnet bring-up + trigger 🔜 `surplus`
+## Phase 3 — On-chain devnet bring-up + trigger ✅ `surplus`
 
 - [x] **Local devnet up.** `cargo tangle harness up` runs Anvil + Tangle. **Done:**
   harness.toml committed; chain answers (snapshot chain id 31337), blueprint
@@ -91,9 +92,15 @@ to the phase that delivers it.
   `WorkflowTickResult { quoting: true, rationale: "q=0.00 lots,
   reservation=15000000, halfSpread=45563" }` and the book shows the MM's
   two-sided quotes (bid 14_954_000 / ask 15_046_000, 50k tokens per side).
-- [ ] **Base Sepolia deploy (G5).** Repeat deploy/register against chain 84532
-  using the committed tnt-core manifest. **Done when:** `workflow_tick`
-  triggers on Base Sepolia and the tx is linkable.
+- [x] **Base Sepolia deploy (G5).** **Done:** blueprintId 17 on chain 84532
+  (create tx `0xfe7f7ad0…`, compact 6-job definition — the padded 31-job table
+  exceeds the node's ~16.7M per-tx cap, so live chains use
+  `deploy/blueprint-definition.sepolia.toml` with workflow_tick at positional
+  index 5; the binary routes both 5 and 30). Operator `0x2420FF…` bonded 10k
+  TNT via `registerOperatorWithAsset`, registered, service 3 approved + Active.
+  `workflow_tick` job tx `0xdef6ebfa…` → on-chain result tx `0x323f9d6e…`,
+  book quoting bid 14_954_000 / ask 15_046_000.
+  <https://sepolia.basescan.org/tx/0xdef6ebfae28b66e571e830b2c24f069d9597a502d5154a0b6728877ee02c26a2>
 
 ## Phase 4 — RFQ + atomic settlement spine 🔁 `settlement-agent`
 
@@ -193,7 +200,7 @@ to the phase that delivers it.
 | 0 Engine (TS) | ✅ done | — |
 | 1 Orderbook + venue | ✅ done | — |
 | 2 Venue in blueprint | ✅ done | — |
-| 3 On-chain bring-up | ◕ devnet G4 done; Base Sepolia (G5) left | G4, G5 |
+| 3 On-chain bring-up | ✅ done — devnet + Base Sepolia, G4 closed | G4, G5 |
 | 4 RFQ + settlement | 🔁 in progress (`settlement-agent`) | G2 |
 | 5 Redemption spendable | ◔ 3/4 — sim proof + shielded-rail planner done; live wiring left | **G1** |
 | 6 Guarantees + abuse | ◔ redemption caps done; slashing/default in contracts (settlement-agent, in flight) | G3, G7 |
