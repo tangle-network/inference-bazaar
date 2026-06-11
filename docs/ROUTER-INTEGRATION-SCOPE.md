@@ -13,6 +13,18 @@ shielded pool required unless they want privacy.
 
 ## PR 1 — Plain-USDC pay-per-call rail (the missing "normal crypto" route)
 
+> **Status: IMPLEMENTED (operator side), in review.** The operator + library legs
+> are built, tested, and PR'd:
+> - `tangle-inference-core#1` — persistent replay store + dual-rail
+>   `CompositeProvider` + `PaymentMode::Both` (16 lib + 47 integration tests green).
+> - `llm-inference-blueprint#13` — `ChatCompletionRequest.payment` + the Direct
+>   branch, additive to shielded (26/26 server_tests green).
+>
+> A buyer can now pay per call in plain USDC to a decentralized vLLM operator with
+> no shielded pool. **Remaining:** step 2 below (the router's `/v1/chat/completions`
+> forward path for the direct/x402 proof) — the live Next.js route, deferred to a
+> reviewed PR.
+
 **Why:** today the only crypto rail forces a VAnchor shielded-pool deposit first.
 This adds the low-friction "sign one payment per call" UX. The verification
 primitive already exists and is tested — this PR *wires* it.
