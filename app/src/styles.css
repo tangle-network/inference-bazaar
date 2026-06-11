@@ -1,0 +1,189 @@
+/*
+ * Surplus design tokens — the live shell palette (ported obsidian-terminal).
+ * Dark is default; [data-theme="light"] remaps. Everything visible reads --s-*.
+ */
+:root,
+[data-theme='dark'] {
+  --s-bg: #0a1716;
+  --s-bg-grad-1: #0b1a18;
+  --s-bg-grad-2: #081310;
+  --s-surface: #10211f;
+  --s-panel: #132927;
+  --s-panel-strong: #1b3936;
+  --s-border: #294340;
+  --s-border-hover: rgba(80, 210, 193, 0.5);
+  --s-divider: #213734;
+
+  --s-text: #f6fefd;
+  --s-text-secondary: #c2cecb;
+  --s-text-muted: #8a9794;
+  --s-text-subtle: #5f6c69;
+
+  --s-accent: #50d2c1;
+  --s-accent-strong: #6fe0d2;
+  --s-accent-soft: #103631;
+  --s-accent-text: #06100e;
+
+  --s-brand: #9b7cff;
+  --s-brand-strong: #b196ff;
+  --s-brand-soft: #221a3d;
+
+  --s-emerald: #3ddc97;
+  --s-emerald-soft: #103226;
+  --s-crimson: #ff5d6c;
+  --s-crimson-soft: #341620;
+  --s-amber: #f2c066;
+  --s-amber-soft: #322910;
+  --s-blue: #5bb6ff;
+
+  --s-shadow-pop: 0 18px 60px rgba(0, 0, 0, 0.45);
+  --header-h: 56px;
+}
+
+[data-theme='light'] {
+  --s-bg: #eef4f2;
+  --s-bg-grad-1: #f3f8f6;
+  --s-bg-grad-2: #e6efec;
+  --s-surface: #ffffff;
+  --s-panel: #ffffff;
+  --s-panel-strong: #eef4f2;
+  --s-border: #d2e0dc;
+  --s-border-hover: rgba(13, 159, 140, 0.55);
+  --s-divider: #e0eae7;
+
+  --s-text: #0c1a18;
+  --s-text-secondary: #38474400;
+  --s-text-secondary: #3a4a47;
+  --s-text-muted: #5e6e6a;
+  --s-text-subtle: #8a9794;
+
+  --s-accent: #0d9f8c;
+  --s-accent-strong: #0b8a79;
+  --s-accent-soft: #d6f1ec;
+  --s-accent-text: #ffffff;
+
+  --s-brand: #6d28d9;
+  --s-brand-strong: #5b21b6;
+  --s-brand-soft: #ede7fb;
+
+  --s-emerald: #06965e;
+  --s-emerald-soft: #d6f3e6;
+  --s-crimson: #c7374d;
+  --s-crimson-soft: #fbe1e5;
+  --s-amber: #9b6a11;
+  --s-amber-soft: #f6ecd2;
+  --s-blue: #1f7fd0;
+
+  --s-shadow-pop: 0 18px 46px rgba(15, 35, 42, 0.16);
+}
+
+* {
+  box-sizing: border-box;
+  border-color: var(--s-border);
+}
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: var(--s-text);
+  background:
+    radial-gradient(1200px 600px at 80% -10%, color-mix(in srgb, var(--s-accent) 7%, transparent), transparent 60%),
+    radial-gradient(900px 500px at 0% 110%, color-mix(in srgb, var(--s-brand) 7%, transparent), transparent 55%),
+    linear-gradient(180deg, var(--s-bg-grad-1), var(--s-bg-grad-2));
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+.font-display {
+  font-family: 'Outfit', system-ui, sans-serif;
+}
+.font-data {
+  font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
+  font-feature-settings: 'tnum';
+}
+.font-body {
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--s-border);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--s-border-hover);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+input,
+select,
+button,
+textarea {
+  font-family: inherit;
+}
+button {
+  cursor: pointer;
+}
+
+/* Range slider — themed track + thumb, used by the usage/discount sliders. */
+input[type='range'].s-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--s-border);
+  outline: none;
+}
+input[type='range'].s-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--s-accent);
+  border: 3px solid var(--s-bg);
+  box-shadow: 0 0 0 1px var(--s-accent);
+  cursor: pointer;
+}
+input[type='range'].s-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--s-accent);
+  border: 3px solid var(--s-bg);
+  cursor: pointer;
+}
+
+@keyframes s-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.s-fade-up {
+  animation: s-fade-up 0.28s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes s-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.s-pulse {
+  animation: s-pulse 2s ease-in-out infinite;
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@surplus/app",
+  "private": true,
+  "type": "module",
+  "description": "Surplus Intelligence — marketplace UI for prepaid inference-token credits.",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --port 4173",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.9.5",
+    "tailwind-merge": "^3.2.0"
+  },
+  "devDependencies": {
+    "@iconify-json/ph": "^1.2.2",
+    "@types/node": "^22.19.21",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@unocss/preset-wind4": "^66.5.10",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.8.0",
+    "unocss": "^66.5.10",
+    "vite": "^6.0.0"
+  }
+}

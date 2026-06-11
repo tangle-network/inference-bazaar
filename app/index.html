@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Surplus — open market for AI inference</title>
+    <meta
+      name="description"
+      content="Buy discounted AI inference, sell your surplus, market-make the spread. Prepaid inference-token credits, redeemable through the Tangle Router."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      // Pre-hydration theme boot: ?theme= wins (iframe embed), then storage, then OS.
+      (function () {
+        try {
+          var p = new URLSearchParams(location.search).get('theme')
+          var t = p || localStorage.getItem('surplus_theme') ||
+            (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+          document.documentElement.setAttribute('data-theme', t)
+        } catch (e) {}
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
