@@ -6,6 +6,33 @@
 > touching the router or pitching the payment model — it corrects several
 > intuitions that turn out to be wrong in the code.
 
+## Locked architecture (decided 2026-06-11)
+
+The market structure is settled. Two independent axes — don't conflate them:
+
+- **Liquidity (two layers).** *Within* a service instance, operators share **one
+  order book per instrument** via a rotating epoch-matcher over that instance's
+  bonded operators, using `blueprint-networking`'s PKI-gated gossip mesh exactly as
+  designed (per-instance scoped). *Across* instances, the single market is the
+  **global `SurplusSettlement` contract** + blueprint-wide **NBBO aggregation** +
+  **portable signed orders** executed by a smart-order-router. There is **no**
+  global matching mesh and **no** privileged venue — cross-instance convergence is
+  settlement + aggregation, not one giant matcher. (Why: the matcher's trust /
+  slashing boundary *is* the operator-set agreement, i.e. the instance; the gossip
+  mesh is per-instance by design; the settlement contract is already global. See
+  [`specs/shared-clob.md`](specs/shared-clob.md).)
+- **Role.** Every operator is **both** a market-maker **and** an inference server.
+  A seller backs the lots it issues by serving the model itself (the
+  `llm-inference-blueprint` / `tangle-inference-core` stack imported **as a
+  library**; vLLM or external OpenAI-compatible backend, configurable). The only
+  singular role is *matcher-for-the-epoch*, which rotates.
+
+Build order: (1) `BookClient` seam in `crates/orderbook` → (2) inference-as-library
+in `surplus/operator` (operators serve + back their own lots) → (3) per-instance
+epoch matcher + gossip + Attested→Proven batch settlement → (4) cross-instance NBBO
+aggregation + SOR. The per-operator-island book that exists today is the Phase-A
+interim, **not** the target.
+
 ## Why this felt confusing (it's not you — the seams are real but unwired)
 
 The system has **three half-connected pieces**, each owned by a different repo,
@@ -126,13 +153,24 @@ The distinction, in code:
 **Surplus makes the operator's spare capacity a tradeable, discounted instrument.**
 That's the special part: the credit a buyer holds is a claim on a *bonded* operator,
 and "route me to the cheapest operator for this model" becomes a market outcome.
-But note two corrections the audit forced:
+Two things to hold precisely:
 
-1. The **surplus market-venue operator** (orderbook/MM in `surplus/operator`) and
-   the **inference operator** (vLLM in `llm-inference-blueprint`) are **different
-   roles**. The market-venue makes markets in credit lots; it does **not** serve
-   `/chat/completions`. Redemption connects a lot to an *inference* operator.
-   Keep them distinct in your head — conflating them is half the confusion.
+1. **A seller operator *is* an inference operator.** An operator that issues credit
+   lots must serve the inference those lots redeem to — it imports the
+   `llm-inference-blueprint` / `tangle-inference-core` serving stack **as a library**
+   and runs the model itself (vLLM subprocess or an external OpenAI-compatible
+   backend, both configurable). Selling a lot you can't redeem isn't a market;
+   serving is what *backs* the lot, and redemption serves against the operator's
+   own local backend — not a remote router.
+   > Correcting an earlier note here that said the market-venue operator "does **not**
+   > serve `/chat/completions`" and is a "different role" from the inference operator.
+   > That was wrong and contradicted `ARCHITECTURE.md:360` ("the operator who **sells**
+   > tokens **is** an inference operator. Reuse, don't reinvent"). The real, orthogonal
+   > distinction is **matcher vs. participant**: per service instance, one operator runs
+   > the shared order book for an epoch (the matcher, rotating on-chain), while **every**
+   > operator is both a market-maker *and* an inference server. See
+   > [`docs/specs/shared-clob.md`](specs/shared-clob.md) and the locked architecture note
+   > at the top of this file.
 2. The router-bridge `selectOperators()` deliberately routes **away** from
    recently-used operators for **seller privacy** (anti-stickiness,
    `selection.ts:6-10`) — that is the opposite of "cheapest-routing" and must not
