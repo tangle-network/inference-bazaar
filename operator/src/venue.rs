@@ -49,6 +49,7 @@ impl std::fmt::Display for VenueError {
 impl std::error::Error for VenueError {}
 
 pub(crate) struct InstrumentVenue {
+    pub(crate) instrument: Instrument,
     pub(crate) book: NativeBook,
     pub(crate) ref_mid: f64,
     pub(crate) inventory_tokens: i64,
@@ -108,8 +109,13 @@ impl Venue {
         self.seq.fetch_add(1, Ordering::Relaxed) as i64
     }
 
+    /// All live instruments — config defaults plus runtime `list_instrument`
+    /// registrations (the on-chain job), sorted for stable output.
     pub fn instruments(&self) -> Vec<Instrument> {
-        self.cfg.instruments.clone()
+        let venues = self.venues.lock().unwrap();
+        let mut out: Vec<Instrument> = venues.values().map(|v| v.instrument.clone()).collect();
+        out.sort_by(|a, b| a.id.cmp(&b.id));
+        out
     }
 
     /// Register a new instrument at runtime (the `list_instrument` job).
@@ -306,6 +312,7 @@ impl Venue {
 impl InstrumentVenue {
     fn from(inst: &Instrument) -> Self {
         InstrumentVenue {
+            instrument: inst.clone(),
             book: NativeBook::new(inst.id.clone(), inst.tick_size, inst.min_qty),
             ref_mid: 0.0,
             inventory_tokens: 0,

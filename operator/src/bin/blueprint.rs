@@ -87,17 +87,55 @@ pub async fn list_instrument(
     TangleArg(req): TangleArg<ListInstrumentRequest>,
 ) -> Result<TangleResult<Ack>, RunnerError> {
     let v = venue()?;
-    v.register_instrument(Instrument {
+    let inst = Instrument {
         id: req.instrumentId.clone(),
         model_id: req.modelId,
         token_kind: req.tokenKind,
         tick_size: req.tickSize,
         min_qty: req.minQty,
-    });
+    };
+    v.register_instrument(inst.clone());
+    persist_instrument(&inst);
     Ok(TangleResult(Ack {
         ok: true,
         instrumentId: req.instrumentId,
     }))
+}
+
+// --- Instrument persistence ---------------------------------------------------
+//
+// On-chain `list_instrument` calls are processed once (the consumer submits a
+// result, so they never replay). The venue book is in-memory, so a restart
+// would silently drop every listed market. Listings are therefore journaled
+// to `$DATA_DIR/instruments.json` and re-registered on boot.
+
+fn instruments_path() -> Option<std::path::PathBuf> {
+    std::env::var("DATA_DIR").ok().map(|d| std::path::Path::new(&d).join("instruments.json"))
+}
+
+/// Serializes concurrent job handlers — read-modify-write on the journal file
+/// would otherwise lose listings when a burst of jobs lands in one block.
+static PERSIST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn persist_instrument(inst: &Instrument) {
+    let Some(path) = instruments_path() else { return };
+    let _guard = PERSIST_LOCK.lock().unwrap();
+    let mut all = load_instruments();
+    all.retain(|i| i.id != inst.id);
+    all.push(inst.clone());
+    if let Ok(json) = serde_json::to_vec_pretty(&all) {
+        if let Err(e) = std::fs::write(&path, json) {
+            tracing::warn!("failed to persist instruments: {e}");
+        }
+    }
+}
+
+fn load_instruments() -> Vec<Instrument> {
+    let Some(path) = instruments_path() else { return Vec::new() };
+    std::fs::read(&path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
 }
 
 /// Operator status (job 4).
@@ -209,6 +247,10 @@ async fn main() -> Result<(), blueprint_sdk::Error> {
     setup_log();
 
     let venue = Arc::new(Venue::from_env());
+    // Restore on-chain listings journaled by previous runs (see persist_instrument).
+    for inst in load_instruments() {
+        venue.register_instrument(inst);
+    }
     let addr = std::env::var("SURPLUS_OPERATOR_ADDR").unwrap_or_else(|_| "127.0.0.1:9100".into());
 
     let env = BlueprintEnvironment::load()?;

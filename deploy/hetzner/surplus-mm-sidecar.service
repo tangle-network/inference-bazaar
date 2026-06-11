@@ -1,0 +1,12 @@
+[Unit]
+Description=Surplus MM sidecar (quoting brain)
+After=network.target
+
+[Service]
+Environment=SURPLUS_MM_SIDECAR_PORT=9310
+ExecStart=/usr/bin/node /opt/surplus/sidecar.mjs
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
