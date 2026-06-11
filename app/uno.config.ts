@@ -3,11 +3,12 @@ import { defineConfig, presetIcons, transformerDirectives } from 'unocss'
 import { presetWind4 } from 'unocss/preset-wind4'
 
 /*
- * OBSIDIAN TERMINAL — Surplus
- * The ai-trading-blueprints arena system, faithfully: deep obsidian blue-black
- * base (#0A0A0F depth layers), violet primary actions, electric emerald gains /
- * crimson losses / amber rankings, glass-card surfaces with backdrop blur and
- * semantic glow shadows. Numbers are mono (IBM Plex Mono, tabular).
+ * VIOLET TERMINAL — Surplus
+ * A purple-native take on the arena's terminal system: a dark aubergine base
+ * (clearly purple, not near-black), light-violet primary actions, periwinkle
+ * brand (the Tangle mark's violet→blue), emerald gains / crimson losses / amber
+ * highlights, glass-card surfaces with backdrop blur and semantic glow shadows.
+ * Numbers are mono (IBM Plex Mono, tabular).
  */
 
 export default defineConfig({
@@ -50,13 +51,13 @@ export default defineConfig({
   ],
   theme: {
     colors: {
-      // Obsidian Terminal hues (ai-trading-blueprints arena), usable directly.
-      emerald: { DEFAULT: '#00FF88', soft: 'rgba(0,255,136,0.10)' },
-      crimson: { DEFAULT: '#FF4D6A', soft: 'rgba(255,59,92,0.12)' },
-      amber: { DEFAULT: '#FFB800', soft: 'rgba(255,184,0,0.10)' },
-      accent: { DEFAULT: '#A370FF' },
-      brand: { DEFAULT: '#00B4FF' },
-      violet: { DEFAULT: '#8B5CF6', 400: '#A370FF' },
+      // Violet Terminal hues, usable directly.
+      emerald: { DEFAULT: '#3DDC97', soft: 'rgba(61,220,151,0.12)' },
+      crimson: { DEFAULT: '#FF5D7A', soft: 'rgba(255,93,122,0.13)' },
+      amber: { DEFAULT: '#FFC15E', soft: 'rgba(255,193,94,0.12)' },
+      accent: { DEFAULT: '#B69DFF' },
+      brand: { DEFAULT: '#8090FF' },
+      violet: { DEFAULT: '#9B7CFF', 400: '#B69DFF' },
     },
   },
   preflights: [

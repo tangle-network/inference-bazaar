@@ -5,8 +5,9 @@ import { Identicon } from '@tangle-network/blueprint-ui/components'
 import type { Address } from 'viem'
 import { PageHeader } from '~/components/PageHeader'
 import { Panel, Stat } from '~/components/ui'
-import { truncAddr } from '~/lib/format'
-import { CHAIN } from '~/lib/api'
+import { compactUsd, tokens, truncAddr } from '~/lib/format'
+import { CHAIN, useInstruments } from '~/lib/api'
+import { instrumentHash, SETTLEMENT, SETTLEMENT_ABI, useMyLots } from '~/lib/settlement'
 
 const ERC20_ABI = [
   {
@@ -30,6 +31,16 @@ export default function PortfolioPage() {
     chainId: CHAIN.id,
     query: { enabled: !!address },
   })
+  const settlementBalance = useReadContract({
+    address: SETTLEMENT.address,
+    abi: SETTLEMENT_ABI,
+    functionName: 'balances',
+    args: address ? [address] : undefined,
+    chainId: CHAIN.id,
+    query: { enabled: !!address },
+  })
+  const lots = useMyLots(address)
+  const instruments = useInstruments()
 
   if (!isConnected || !address) {
     return (
@@ -68,12 +79,23 @@ export default function PortfolioPage() {
       />
 
       <div className="px-4 py-4 sm:px-6">
-        <div className="panel grid grid-cols-2 divide-x divide-[var(--s-divider)] sm:grid-cols-3">
+        <div className="panel grid grid-cols-2 divide-x divide-[var(--s-divider)] sm:grid-cols-4">
+          <Stat
+            label="Settlement balance"
+            value={settlementBalance.data !== undefined ? compactUsd(Number(settlementBalance.data)) : '…'}
+            tone="accent"
+            sub="deposited tsUSD"
+          />
+          <Stat
+            label="Credit lots"
+            value={lots.isLoading ? '…' : (lots.data?.length ?? 0)}
+            tone="emerald"
+            sub="held on-chain"
+          />
           <Stat
             label="ETH"
             value={eth.data ? Number(formatUnits(eth.data.value, eth.data.decimals)).toFixed(4) : '…'}
-            tone="accent"
-            sub="gas on Base Sepolia"
+            sub="gas"
           />
           <Stat
             label="TNT"
@@ -82,17 +104,48 @@ export default function PortfolioPage() {
             }
             sub="restaking asset"
           />
-          <Stat label="Network" value="Base Sepolia" sub={`#${CHAIN.id}`} />
         </div>
 
-        <Panel className="mt-4" title="Credits">
-          <div className="px-4 py-10 text-center">
-            <p className="font-data text-[13px] text-[var(--s-text-muted)]">
-              No credits held yet. Fills you make on the venue settle into collateral-backed credit
-              lots through the settlement spine — they'll appear here with their strike, remaining
-              quota, and expiry.
-            </p>
-          </div>
+        <Panel className="mt-4" title="Credit lots — on-chain">
+          {lots.isLoading && (
+            <div className="px-4 py-8 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+              Scanning SurplusSettlement fills…
+            </div>
+          )}
+          {lots.isSuccess && (lots.data?.length ?? 0) === 0 && (
+            <div className="px-4 py-8 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+              No credit lots in this wallet. A firm buy settles into a lot here, with its quantity,
+              cost basis, expiry, and issuer.
+            </div>
+          )}
+          {(lots.data ?? []).map((lot) => {
+            const inst = (instruments.data ?? []).find((i) => instrumentHash(i.id) === lot.instrument)
+            return (
+              <div key={lot.lotId} className="flex flex-wrap items-center gap-4 border-b border-[var(--s-divider)] px-4 py-3.5 font-data text-[14px] last:border-0">
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-[var(--s-text)]">{inst?.id ?? `${lot.instrument.slice(0, 18)}…`}</div>
+                  <div className="mt-0.5 text-[12px] text-[var(--s-text-muted)]">
+                    issuer {truncAddr(lot.issuer)} ·{' '}
+                    {Number(lot.expiry) * 1000 > Date.now()
+                      ? `expires in ${Math.max(1, Math.round((Number(lot.expiry) * 1000 - Date.now()) / 86_400_000))}d`
+                      : 'expired — refund claimable'}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="tabular-nums font-bold text-[var(--s-text)]">{tokens(Number(lot.qtyTokens))} tok</div>
+                  <div className="text-[12px] tabular-nums text-[var(--s-text-muted)]">basis {compactUsd(Number(lot.notionalMicro))}</div>
+                </div>
+                <a
+                  className="font-data text-[12px] text-[var(--s-accent)] hover:underline"
+                  href={`${CHAIN.explorer}/tx/${lot.txHash}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  settlement tx ↗
+                </a>
+              </div>
+            )
+          })}
         </Panel>
 
         <Panel className="mt-4" title="On-chain">

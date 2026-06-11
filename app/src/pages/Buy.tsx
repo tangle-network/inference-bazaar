@@ -7,13 +7,8 @@ import { Panel, Slider } from '~/components/ui'
 import { ProviderLogo } from '~/lib/logos'
 import { cn } from '~/lib/cn'
 import { compactUsd, pct, pricePerM, tokens } from '~/lib/format'
-import {
-  placeOrder,
-  useBook,
-  useCatalog,
-  useInstruments,
-  type BookLevel,
-} from '~/lib/api'
+import { CHAIN, useBook, useCatalog, useInstruments, type BookLevel } from '~/lib/api'
+import { STEP_LABEL, useFirmTrade, type TradeProgress, type TradeReceipt } from '~/lib/trade'
 
 /**
  * Inference burns input AND output tokens on every call — so you buy usage,
@@ -100,35 +95,32 @@ export default function BuyPage() {
   }, [entry, inputM, outputM, inBook.data, outBook.data])
 
   const { address, isConnected } = useAccount()
-  const [busy, setBusy] = useState(false)
-  const [done, setDone] = useState<string | null>(null)
+  const { buyLeg } = useFirmTrade()
+  const [progress, setProgress] = useState<(TradeProgress & { leg?: string }) | null>(null)
+  const [receipts, setReceipts] = useState<TradeReceipt[]>([])
   const [error, setError] = useState<string | null>(null)
+  const busy = progress !== null
 
   async function execute() {
     if (!address || !quote || !modelId) return
-    setBusy(true)
     setError(null)
-    setDone(null)
+    setReceipts([])
     try {
-      let fills = 0
+      const done: TradeReceipt[] = []
       for (const leg of quote.legs) {
-        if (leg.covered <= 0 || leg.worstPrice <= 0) continue
-        await placeOrder({
-          instrumentId: `${modelId}:${leg.kind}`,
-          side: 'buy',
-          price: leg.worstPrice,
-          qtyTokens: leg.covered,
-          owner: address,
-        })
-        fills++
+        if (leg.covered <= 0) continue
+        const r = await buyLeg(`${modelId}:${leg.kind}`, leg.covered, (p) =>
+          setProgress({ ...p, leg: leg.kind }),
+        )
+        done.push(r)
       }
-      setDone(`${fills} leg${fills === 1 ? '' : 's'} filled on the live book.`)
+      setReceipts(done)
       void outBook.refetch()
       void inBook.refetch()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(e instanceof Error ? e.message.split('\n')[0]! : String(e))
     } finally {
-      setBusy(false)
+      setProgress(null)
     }
   }
 
@@ -202,7 +194,7 @@ export default function BuyPage() {
           </Panel>
 
           {entry && quote && (
-            <Panel title="Quote — both legs, live books">
+            <Panel title="Firm quote — both legs">
               <div className="px-4 py-4">
                 <table className="w-full border-collapse font-data text-[14px]">
                   <thead>
@@ -255,7 +247,7 @@ export default function BuyPage() {
                     <ConnectKitButton.Custom>
                       {({ show }) => (
                         <button onClick={show} className="btn-primary h-12 w-full !text-[15px]">
-                          <span className="i-ph:wallet text-[17px]" /> Connect to fill both legs
+                          <span className="i-ph:wallet text-[17px]" /> Connect to execute
                         </button>
                       )}
                     </ConnectKitButton.Custom>
@@ -265,13 +257,30 @@ export default function BuyPage() {
                       disabled={busy || quote.legs.every((l) => l.covered === 0)}
                       className="btn-primary h-12 w-full !text-[15px]"
                     >
-                      {busy ? 'Filling…' : `Fill both legs · ${compactUsd(quote.costMicro)}`}
+                      {busy
+                        ? `${progress!.leg ? progress!.leg + ' leg — ' : ''}${STEP_LABEL[progress!.step]}…`
+                        : `Execute firm · ${compactUsd(quote.costMicro)}`}
                     </button>
                   )}
                 </div>
-                {done && (
+                {receipts.length > 0 && (
                   <div className="mt-3 rounded-[8px] border border-[var(--s-emerald)]/30 bg-[var(--s-emerald-soft)] px-3 py-2.5 font-data text-[13px] text-[var(--s-emerald)]">
-                    {done} Settlement intents queued in the operator outbox.
+                    Settled on Base Sepolia:{' '}
+                    {receipts.map((r, i) => (
+                      <span key={r.instrumentId}>
+                        {i > 0 && ' · '}
+                        {r.instrumentId.split(':')[1]} {compactUsd(r.costMicro)}
+                        {r.settleTx && (
+                          <>
+                            {' '}
+                            <a className="underline" href={`${CHAIN.explorer}/tx/${r.settleTx}`} target="_blank" rel="noreferrer">
+                              tx ↗
+                            </a>
+                          </>
+                        )}
+                      </span>
+                    ))}
+                    {' '}Credit lots are in your portfolio.
                   </div>
                 )}
                 {error && (

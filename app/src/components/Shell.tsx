@@ -3,6 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { cn } from '~/lib/cn'
 import { toggleTheme, useTheme } from '~/lib/theme'
 import { WalletButton } from '~/components/WalletButton'
+import { SurplusBrand } from '~/components/TangleLogo'
 import { CHAIN, useVenueHealth } from '~/lib/api'
 
 /** Measured, not asserted: live venue health + latency. */
@@ -37,28 +38,6 @@ const NAV = [
   { to: '/activity', label: 'Activity', icon: 'i-ph:pulse' },
   { to: '/portfolio', label: 'Portfolio', icon: 'i-ph:wallet' },
 ]
-
-function BrandMark() {
-  return (
-    <div className="flex items-center gap-2.5">
-      <div
-        className="flex h-8 w-8 items-center justify-center rounded-[7px] font-display text-[18px] font-extrabold"
-        style={{
-          background: 'linear-gradient(140deg, var(--s-accent), var(--s-brand))',
-          color: 'var(--s-accent-text)',
-        }}
-      >
-        S
-      </div>
-      <div className="leading-none">
-        <div className="font-display text-[15px] font-bold tracking-tight text-[var(--s-text)]">Surplus</div>
-        <div className="mt-0.5 font-data text-[9px] uppercase tracking-[0.2em] text-[var(--s-text-muted)]">
-          Inference Market
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function ThemeButton() {
   const theme = useTheme()
@@ -115,7 +94,7 @@ export function Shell({ children }: { children: ReactNode }) {
       {/* Sidebar — desktop */}
       <aside className="hidden w-60 shrink-0 flex-col border-r border-[var(--s-border)] bg-[color-mix(in_srgb,var(--s-surface)_70%,transparent)] px-3 py-4 lg:flex">
         <div className="px-1.5">
-          <BrandMark />
+          <SurplusBrand />
         </div>
         <div className="mt-6 px-1">
           <div className="mono-label mb-2 px-2">Market</div>
@@ -152,7 +131,7 @@ export function Shell({ children }: { children: ReactNode }) {
             >
               <span className="i-ph:list-dashes text-[18px]" />
             </button>
-            <BrandMark />
+            <SurplusBrand />
           </div>
           <VenueStatus />
           <div className="flex items-center gap-2">

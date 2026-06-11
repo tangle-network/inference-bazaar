@@ -6,8 +6,9 @@ import { formatUnits } from 'viem'
 import { PageHeader } from '~/components/PageHeader'
 import { Badge, Panel, Stat } from '~/components/ui'
 import { cn } from '~/lib/cn'
-import { truncAddr } from '~/lib/format'
+import { compactUsd, truncAddr } from '~/lib/format'
 import { CHAIN, useInstruments, useVenueHealth, VENUE_URL } from '~/lib/api'
+import { SETTLEMENT, SETTLEMENT_ABI } from '~/lib/settlement'
 
 const TANGLE_ABI = [
   {
@@ -57,6 +58,13 @@ export default function OperatorsPage() {
   })
   const health = useVenueHealth()
   const instruments = useInstruments()
+  const issuerFunds = useReadContracts({
+    contracts: addrs.flatMap((a) => [
+      { address: SETTLEMENT.address, abi: SETTLEMENT_ABI, functionName: 'collateral' as const, args: [a] as const, chainId: CHAIN.id },
+      { address: SETTLEMENT.address, abi: SETTLEMENT_ABI, functionName: 'liability' as const, args: [a] as const, chainId: CHAIN.id },
+    ]),
+    query: { enabled: addrs.length > 0 },
+  })
 
   return (
     <div>
@@ -127,9 +135,22 @@ export default function OperatorsPage() {
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="mono-label">Bond</div>
+                  <div className="mono-label">Restake bond</div>
                   <div className="font-data text-[15px] font-bold tabular-nums text-[var(--s-text)]">
                     {bond !== undefined ? `${Number(formatUnits(bond, 18)).toLocaleString()} TNT` : '…'}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="mono-label">Issuance collateral</div>
+                  <div className="font-data text-[15px] font-bold tabular-nums text-[var(--s-emerald)]">
+                    {issuerFunds.data?.[i * 2]?.result !== undefined
+                      ? compactUsd(Number(issuerFunds.data[i * 2]!.result))
+                      : '…'}
+                  </div>
+                  <div className="font-data text-[11px] tabular-nums text-[var(--s-text-muted)]">
+                    {issuerFunds.data?.[i * 2 + 1]?.result !== undefined
+                      ? `liability ${compactUsd(Number(issuerFunds.data[i * 2 + 1]!.result))}`
+                      : ''}
                   </div>
                 </div>
               </div>
@@ -138,8 +159,9 @@ export default function OperatorsPage() {
         </Panel>
 
         <div className={cn('panel mt-4 px-4 py-3 font-data text-[13px] text-[var(--s-text-muted)]')}>
-          Operator refusal of a valid credit is slashable through the blueprint service manager;
-          buyer principal is protected by issuer collateral regardless.{' '}
+          Every lot is cash-collateralized at mint: the contract rejects issuance unless collateral
+          covers outstanding liability plus the default penalty. Refusal to serve is slashable;
+          principal never depends on the slash.{' '}
           <a
             href={`${CHAIN.explorer}/address/${CHAIN.staking}`}
             target="_blank"

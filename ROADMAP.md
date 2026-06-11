@@ -19,16 +19,23 @@ to the phase that delivers it.
 - [ ] **G1 — A credit is spendable.** A bought credit redeems into real metered
   inference through the Tangle Router, debiting its token quota at the locked
   price. *(Phase 5)*
-- [ ] **G2 — Atomic fills.** A match settles all-or-nothing: buyer escrow → credit
-  issued → payment released, or none of it. *(Phase 4, settlement-agent)*
+- [x] **G2 — Atomic fills.** A match settles all-or-nothing: buyer escrow → credit
+  issued → payment released, or none of it. *(Phase 4 — injected-failure tests in
+  Settlement.t.sol, and demonstrated live on Base Sepolia: settleFills tx
+  `0x15a70fa6…` debited the buyer, paid the issuer minus fee, and minted lot
+  `0xd66a3647…` in one transaction.)*
 - [ ] **G3 — Buyers definitely get their spend.** A credit is a claim on a bonded
   operator; refusal of a valid credit is slashable; unfulfillable → escrow
   refund. *(Phase 4 + 6, settlement-agent)*
 - [x] **G4 — The venue runs on-chain.** `workflow_tick` is triggered by a real
   on-chain job on a deployed blueprint, not an HTTP poke. *(Phase 3 — done on
   devnet AND Base Sepolia; result txs in the Phase 3 boxes.)*
-- [ ] **G5 — Money is real.** Settlement clears on at least one rail against a
-  real chain / the live router, not a stub. *(Phase 3 + 4)*
+- [x] **G5 — Money is real.** Settlement clears on at least one rail against a
+  real chain / the live router, not a stub. *(Done: SurplusSettlement
+  `0x1cD49739…` + MockUSD live on Base Sepolia; the Hetzner venue quotes signed
+  firm orders; scripts/e2e-firm-buy.mjs executed a real RFQ→sign→fill→
+  settleFills buy — tx `0x15a70fa6…`, buyer balance 13,246,000→0, issuer
+  +12,981,080 (2% fee), collateral-backed lot minted.)*
 - [ ] **G6 — Contracts audited.** Every contract on the value path has a review
   sign-off. *(Phase 8)*
 - [ ] **G7 — Abuse-bounded.** Rate limits, per-key spend caps, and double-spend

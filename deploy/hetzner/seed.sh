@@ -34,3 +34,6 @@ for m in json.load(sys.stdin)['data']:
   curl -sf --max-time 15 -X POST "$VENUE/mm-tick" -H 'content-type: application/json' \
     -d "{\"instrumentId\":\"$IID\"}" >/dev/null
 done
+
+# Submit any paired signed fills on-chain (settleFills on SurplusSettlement).
+curl -sf --max-time 30 -X POST "$VENUE/settlement/flush" >/dev/null || true

@@ -1,167 +1,174 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAccount } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import { PageHeader } from '~/components/PageHeader'
-import { Panel, Slider } from '~/components/ui'
+import { Panel } from '~/components/ui'
 import { ProviderLogo } from '~/lib/logos'
 import { cn } from '~/lib/cn'
-import { compactUsd, pct, pricePerM, tokens } from '~/lib/format'
-import { placeOrder, useBook, useCatalog, useInstruments } from '~/lib/api'
+import { compactUsd, pricePerM, tokens } from '~/lib/format'
+import { CHAIN, useBook, useCatalog, useInstruments } from '~/lib/api'
+import { useMyLots, type CreditLot } from '~/lib/settlement'
+import { instrumentHash } from '~/lib/settlement'
+import { STEP_LABEL, useFirmTrade, type TradeProgress, type TradeReceipt } from '~/lib/trade'
 
 /**
- * Selling = placing a real ask on the live book, under your wallet address,
- * at your discount to the router list price. It rests until a buyer crosses.
+ * Selling is transferring something you provably hold: a credit lot on
+ * SurplusSettlement. The operator bids firm; your signed sell order moves the
+ * lot and pays your settlement balance, atomically on-chain. Fresh issuance
+ * (selling capacity you serve) is the operator path — it requires posted
+ * collateral.
  */
 export default function SellPage() {
+  const { address, isConnected } = useAccount()
   const catalog = useCatalog()
   const instruments = useInstruments()
-  const { address, isConnected } = useAccount()
+  const lots = useMyLots(address)
+  const { sellLot } = useFirmTrade()
 
-  const live = useMemo(() => {
-    if (!instruments.data || !catalog.data) return []
-    return instruments.data
-      .map((i) => ({ instrument: i, model: catalog.data!.get(i.model_id)! }))
-      .filter((x) => !!x.model)
-      .sort((a, b) => a.instrument.id.localeCompare(b.instrument.id))
-  }, [instruments.data, catalog.data])
+  // Resolve each held lot back to its live instrument by hash.
+  const sellable = useMemo(() => {
+    if (!lots.data || !instruments.data) return []
+    const byHash = new Map(instruments.data.map((i) => [instrumentHash(i.id), i]))
+    return lots.data
+      .map((lot) => ({ lot, instrument: byHash.get(lot.instrument) ?? null }))
+      .filter((x) => x.instrument !== null && x.lot.qtyTokens > 0n)
+  }, [lots.data, instruments.data])
 
-  const [instrumentId, setInstrumentId] = useState<string | null>(null)
-  const selected = live.find((l) => l.instrument.id === instrumentId) ?? live[0] ?? null
-  const activeId = selected?.instrument.id ?? null
+  const [selected, setSelected] = useState<CreditLot | null>(null)
+  const active = selected ?? sellable[0]?.lot ?? null
+  const activeInstrument = sellable.find((s) => s.lot.lotId === active?.lotId)?.instrument ?? null
+  const book = useBook(activeInstrument?.id ?? null)
+  const bestBid = book.data?.book.bids[0]?.price ?? null
 
-  const [qtyM, setQtyM] = useState(10)
-  const [discountPct, setDiscountPct] = useState(15)
-
-  const book = useBook(activeId)
-  const list = selected
-    ? selected.instrument.token_kind === 'output'
-      ? selected.model.outputMicroPerM
-      : selected.model.inputMicroPerM
-    : 0
-  const tick = selected?.instrument.tick_size ?? 1000
-  const askPrice = Math.max(tick, Math.round((list * (1 - discountPct / 100)) / tick) * tick)
-  const qtyTokens = qtyM * 1_000_000
-  const notional = Math.round((askPrice * qtyTokens) / 1e6)
-  const bestAsk = book.data?.book.asks[0]?.price ?? null
-
-  const [busy, setBusy] = useState(false)
-  const [done, setDone] = useState<string | null>(null)
+  const [progress, setProgress] = useState<TradeProgress | null>(null)
+  const [receipt, setReceipt] = useState<TradeReceipt | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  async function listSupply() {
-    if (!address || !activeId) return
-    setBusy(true)
+  async function execute() {
+    if (!active || !activeInstrument) return
     setError(null)
-    setDone(null)
+    setReceipt(null)
     try {
-      await placeOrder({
-        instrumentId: activeId,
-        side: 'sell',
-        price: askPrice,
-        qtyTokens,
-        owner: address,
-      })
-      setDone('Your ask is resting on the live book.')
-      void book.refetch()
+      const r = await sellLot(activeInstrument.id, active.lotId, Number(active.qtyTokens), setProgress)
+      setReceipt(r)
+      void lots.refetch()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(e instanceof Error ? e.message.split('\n')[0]! : String(e))
     } finally {
-      setBusy(false)
+      setProgress(null)
     }
+  }
+
+  if (!isConnected) {
+    return (
+      <div>
+        <PageHeader title="Sell" subtitle="Sell credit lots you hold back to the market, firm." />
+        <div className="flex flex-col items-center gap-4 px-6 py-20 text-center">
+          <span className="i-ph:storefront text-[40px] text-[var(--s-text-subtle)]" />
+          <p className="max-w-sm font-body text-[14px] text-[var(--s-text-muted)]">
+            Connect to see the credit lots you hold on SurplusSettlement.
+          </p>
+          <ConnectKitButton.Custom>
+            {({ show }) => (
+              <button onClick={show} className="btn-primary h-11">
+                <span className="i-ph:wallet text-[16px]" /> Connect wallet
+              </button>
+            )}
+          </ConnectKitButton.Custom>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div>
       <PageHeader
-        title="Sell surplus"
-        subtitle="List unused inference on the live book at your discount. Fills settle through the collateral-backed spine."
+        title="Sell"
+        subtitle="Sell credit lots you hold back to the market. Transfers settle atomically on-chain."
+        right={
+          <Link to="/operators/register" className="btn-secondary h-10">
+            Issue as operator
+          </Link>
+        }
       />
 
       <div className="grid grid-cols-1 gap-4 px-4 py-4 sm:px-6 lg:grid-cols-12">
-        <Panel title="Market" className="lg:col-span-4" bodyClassName="max-h-[560px] overflow-y-auto">
-          {live.length === 0 && (
+        <Panel title="Your credit lots" className="lg:col-span-5" bodyClassName="max-h-[560px] overflow-y-auto">
+          {lots.isLoading && (
             <div className="px-4 py-10 text-center font-data text-[13px] text-[var(--s-text-muted)]">
-              {instruments.isError ? 'Venue offline.' : 'Loading live markets…'}
+              Reading your lots from Base Sepolia…
             </div>
           )}
-          {live.map(({ instrument, model }) => (
-            <button
-              key={instrument.id}
-              onClick={() => setInstrumentId(instrument.id)}
-              className={cn(
-                'flex w-full items-center gap-3 border-b border-[var(--s-divider)] px-4 py-3 text-left transition-colors last:border-0',
-                instrument.id === activeId ? 'bg-[var(--s-accent-soft)]' : 'hover:bg-[var(--s-panel)]',
-              )}
-            >
-              <ProviderLogo provider={model.provider} size={28} />
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-body text-[14px] font-semibold text-[var(--s-text)]">
-                  {model.name}
+          {lots.isSuccess && sellable.length === 0 && (
+            <div className="px-4 py-10 text-center">
+              <p className="font-data text-[13px] text-[var(--s-text-muted)]">
+                No credit lots in this wallet. Buy a market to hold transferable, on-chain credits —
+                they appear here the moment settlement lands.
+              </p>
+              <Link to="/buy" className="btn-primary mt-4 h-10 inline-flex">
+                Buy inference
+              </Link>
+            </div>
+          )}
+          {sellable.map(({ lot, instrument }) => {
+            const model = catalog.data?.get(instrument!.model_id)
+            const isActive = active?.lotId === lot.lotId
+            return (
+              <button
+                key={lot.lotId}
+                onClick={() => setSelected(lot)}
+                className={cn(
+                  'flex w-full items-center gap-3 border-b border-[var(--s-divider)] px-4 py-3.5 text-left transition-colors last:border-0',
+                  isActive ? 'bg-[var(--s-accent-soft)]' : 'hover:bg-[var(--s-panel)]',
+                )}
+              >
+                {model && <ProviderLogo provider={model.provider} size={30} />}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-body text-[14px] font-semibold text-[var(--s-text)]">
+                    {model?.name ?? instrument!.model_id} · {instrument!.token_kind}
+                  </div>
+                  <div className="font-data text-[12px] text-[var(--s-text-muted)]">
+                    {tokens(Number(lot.qtyTokens))} tokens · paid {compactUsd(Number(lot.notionalMicro))}
+                  </div>
                 </div>
-                <div className="font-data text-[12px] uppercase text-[var(--s-text-muted)]">
-                  {instrument.token_kind}
-                </div>
-              </div>
-              {instrument.id === activeId && <span className="i-ph:check text-[16px] text-[var(--s-accent)]" />}
-            </button>
-          ))}
+                {isActive && <span className="i-ph:check text-[16px] text-[var(--s-accent)]" />}
+              </button>
+            )
+          })}
         </Panel>
 
-        <div className="flex flex-col gap-4 lg:col-span-8">
-          <Panel title="Your ask">
-            <div className="grid gap-6 px-4 py-5 sm:grid-cols-2">
-              <div>
-                <div className="flex items-baseline justify-between">
-                  <span className="mono-label">Quantity</span>
-                  <span className="font-data text-[16px] font-bold tabular-nums text-[var(--s-text)]">
-                    {tokens(qtyTokens)}
-                  </span>
-                </div>
-                <Slider value={qtyM} min={1} max={200} onChange={setQtyM} className="mt-3" />
+        <div className="lg:col-span-7">
+          {active && activeInstrument && (
+            <Panel title="Firm sale">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-3 px-4 py-4 font-data text-[14px] sm:grid-cols-3">
+                <PV k="Lot size" v={`${tokens(Number(active.qtyTokens))} tok`} />
+                <PV k="Operator bid" v={bestBid != null ? pricePerM(bestBid) : '—'} tone="emerald" />
+                <PV
+                  k="Est. proceeds"
+                  v={bestBid != null ? compactUsd(Math.round((bestBid * Number(active.qtyTokens)) / 1e6)) : '—'}
+                />
               </div>
-              <div>
-                <div className="flex items-baseline justify-between">
-                  <span className="mono-label">Discount to list</span>
-                  <span className="font-data text-[16px] font-bold tabular-nums text-[var(--s-emerald)]">
-                    {discountPct}%
-                  </span>
-                </div>
-                <Slider value={discountPct} min={1} max={60} onChange={setDiscountPct} className="mt-3" />
-              </div>
-            </div>
-          </Panel>
-
-          {selected && (
-            <Panel title="Listing preview — against the live book">
-              <div className="grid grid-cols-2 gap-x-6 gap-y-3 px-4 py-4 font-data text-[14px] sm:grid-cols-4">
-                <PV k="Router list" v={pricePerM(list)} muted />
-                <PV k="Your ask" v={pricePerM(askPrice)} tone="emerald" />
-                <PV k="Current best ask" v={bestAsk != null ? pricePerM(bestAsk) : '—'} />
-                <PV k="Notional" v={compactUsd(notional)} />
-              </div>
-              {bestAsk != null && askPrice >= bestAsk && (
-                <div className="mx-4 mb-3 rounded-[8px] bg-[var(--s-amber-soft)] px-3 py-2 font-data text-[12px] text-[var(--s-amber)]">
-                  Priced behind the current best ask — you'll queue at {pct(1 - askPrice / list, 1)} off
-                  list until deeper levels fill.
-                </div>
-              )}
               <div className="px-4 pb-4">
-                {!isConnected ? (
-                  <ConnectKitButton.Custom>
-                    {({ show }) => (
-                      <button onClick={show} className="btn-primary h-12 w-full !text-[15px]">
-                        <span className="i-ph:wallet text-[17px]" /> Connect to list
-                      </button>
-                    )}
-                  </ConnectKitButton.Custom>
-                ) : (
-                  <button onClick={listSupply} disabled={busy} className="btn-primary h-12 w-full !text-[15px]">
-                    {busy ? 'Placing…' : `List ${tokens(qtyTokens)} at ${pricePerM(askPrice)}`}
-                  </button>
-                )}
-                {done && (
+                <button
+                  onClick={execute}
+                  disabled={progress !== null || bestBid == null}
+                  className="btn-primary h-12 w-full !text-[15px]"
+                >
+                  {progress ? `${STEP_LABEL[progress.step]}…` : 'Request firm bid · sell lot'}
+                </button>
+                {receipt && (
                   <div className="mt-3 rounded-[8px] border border-[var(--s-emerald)]/30 bg-[var(--s-emerald-soft)] px-3 py-2.5 font-data text-[13px] text-[var(--s-emerald)]">
-                    {done}
+                    Sold {tokens(receipt.qtyTokens)} at {pricePerM(receipt.priceMicroPerM)} ·{' '}
+                    {compactUsd(receipt.costMicro)} credited to your settlement balance.
+                    {receipt.settleTx && (
+                      <>
+                        {' '}
+                        <a className="underline" href={`${CHAIN.explorer}/tx/${receipt.settleTx}`} target="_blank" rel="noreferrer">
+                          Settlement transaction ↗
+                        </a>
+                      </>
+                    )}
                   </div>
                 )}
                 {error && (
@@ -169,6 +176,10 @@ export default function SellPage() {
                     {error}
                   </div>
                 )}
+                <p className="mt-4 font-body text-[12px] leading-relaxed text-[var(--s-text-subtle)]">
+                  The operator's bid is an EIP-712 signed order. Your signed sell pairs with it and
+                  settleFills transfers the lot and pays you in one transaction.
+                </p>
               </div>
             </Panel>
           )}
@@ -178,17 +189,11 @@ export default function SellPage() {
   )
 }
 
-function PV({ k, v, tone, muted }: { k: string; v: string; tone?: 'emerald'; muted?: boolean }) {
+function PV({ k, v, tone }: { k: string; v: string; tone?: 'emerald' }) {
   return (
     <div>
       <div className="mono-label">{k}</div>
-      <div
-        className={cn(
-          'mt-1 text-[17px] font-bold tabular-nums',
-          muted && 'line-through decoration-[var(--s-text-subtle)]/50',
-        )}
-        style={{ color: tone ? 'var(--s-emerald)' : muted ? 'var(--s-text-muted)' : 'var(--s-text)' }}
-      >
+      <div className="mt-1 text-[17px] font-bold tabular-nums" style={{ color: tone ? 'var(--s-emerald)' : 'var(--s-text)' }}>
         {v}
       </div>
     </div>
