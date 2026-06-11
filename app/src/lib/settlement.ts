@@ -116,11 +116,16 @@ export async function requestRfq(params: {
   instrumentId: string
   side: 'buy' | 'sell'
   qtyTokens: number
+  venueUrl?: string
 }): Promise<RfqQuote> {
-  const res = await fetch(`${VENUE_URL}/rfq`, {
+  const res = await fetch(`${params.venueUrl ?? VENUE_URL}/rfq`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(params),
+    body: JSON.stringify({
+      instrumentId: params.instrumentId,
+      side: params.side,
+      qtyTokens: params.qtyTokens,
+    }),
   })
   if (!res.ok) throw new Error(`RFQ: ${await res.text()}`)
   return res.json() as Promise<RfqQuote>
@@ -132,8 +137,9 @@ export async function fillRfq(params: {
   makerSignature: Hex
   taker: WireOrder
   takerSignature: Hex
+  venueUrl?: string
 }): Promise<Record<string, unknown>> {
-  const res = await fetch(`${VENUE_URL}/rfq/fill`, {
+  const res = await fetch(`${params.venueUrl ?? VENUE_URL}/rfq/fill`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -145,8 +151,8 @@ export async function fillRfq(params: {
   return res.json() as Promise<Record<string, unknown>>
 }
 
-export async function flushSettlement(): Promise<Record<string, unknown>> {
-  const res = await fetch(`${VENUE_URL}/settlement/flush`, { method: 'POST' })
+export async function flushSettlement(venueUrl?: string): Promise<Record<string, unknown>> {
+  const res = await fetch(`${venueUrl ?? VENUE_URL}/settlement/flush`, { method: 'POST' })
   if (!res.ok) throw new Error(`flush: ${await res.text()}`)
   return res.json() as Promise<Record<string, unknown>>
 }

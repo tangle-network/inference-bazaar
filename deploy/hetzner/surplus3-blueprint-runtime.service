@@ -1,5 +1,5 @@
 [Unit]
-Description=Surplus blueprint runtime (Base Sepolia blueprint 17 service 3)
+Description=Surplus venue 2 (Base Sepolia blueprint 17 service 3, operator 0x2420)
 After=network.target surplus-mm-sidecar.service
 Wants=surplus-mm-sidecar.service
 
@@ -7,10 +7,10 @@ Wants=surplus-mm-sidecar.service
 Environment=RUST_LOG=info,surplus_operator=debug
 Environment=HTTP_RPC_URL=https://base-sepolia-rpc.publicnode.com/
 Environment=WS_RPC_URL=wss://base-sepolia.drpc.org/
-Environment=KEYSTORE_URI=/opt/surplus/keystore
-Environment=DATA_DIR=/opt/surplus/data
+Environment=KEYSTORE_URI=/opt/surplus3/keystore
+Environment=DATA_DIR=/opt/surplus3/data
 Environment=BLUEPRINT_ID=17
-Environment=SERVICE_ID=4
+Environment=SERVICE_ID=3
 Environment=TANGLE_CONTRACT=0x8299d60f373f3a4a8c4878e335cb9d840e6e3730
 Environment=STAKING_CONTRACT=0x91b1186f4f31d6e02e481c0af29c7244a3fe417d
 Environment=STATUS_REGISTRY_CONTRACT=0x2a7ceb96a9b18721b5bbb0022b4d358b3c50bcb2
@@ -18,9 +18,9 @@ Environment=PROTOCOL=tangle
 Environment=TEST_MODE=true
 Environment=SURPLUS_SIDECAR_URL=http://127.0.0.1:9310
 Environment=SURPLUS_ROUTER_URL=https://router.tangle.tools
-Environment=SURPLUS_OPERATOR_ADDR=127.0.0.1:9400
-Environment=SURPLUS_MM_SIZE=2000000
-Environment=SURPLUS_MM_LEVELS=4
+Environment=SURPLUS_OPERATOR_ADDR=127.0.0.1:9500
+Environment=SURPLUS_MM_SIZE=1500000
+Environment=SURPLUS_MM_LEVELS=3
 Environment=SURPLUS_CHAIN_ID=84532
 Environment=SURPLUS_SETTLEMENT_ADDR=0x1cD49739e9CF48C4906aDb44021dd8cE0d8aBa64
 Environment=SURPLUS_OPERATOR_KEY=<issuer-key>

@@ -6,13 +6,40 @@ import { DepthChart } from '~/components/DepthChart'
 import { ProviderLogo } from '~/lib/logos'
 import { cn } from '~/lib/cn'
 import { compactUsd, pct, pricePerM, tokens } from '~/lib/format'
-import {
-  deriveRow,
-  useBooks,
-  useCatalog,
-  useInstruments,
-  type MarketRow,
-} from '~/lib/api'
+import { useCatalog, type CatalogModel, type VenueInstrument } from '~/lib/api'
+import { useAggBooks, useAggInstruments, useVenueRegistry, type AggBook } from '~/lib/venues'
+
+interface MarketRow {
+  instrument: VenueInstrument
+  model: CatalogModel
+  book: AggBook | null
+  listMicroPerM: number
+  bestAsk: number | null
+  bestBid: number | null
+  discount: number | null
+  liquidityTokens: number
+  liquidityNotionalMicro: number
+  venuesQuoting: number
+}
+
+function deriveRow(instrument: VenueInstrument, model: CatalogModel, book: AggBook | null): MarketRow {
+  const list = instrument.token_kind === 'output' ? model.outputMicroPerM : model.inputMicroPerM
+  const bestAsk = book?.asks[0]?.price ?? null
+  const bestBid = book?.bids[0]?.price ?? null
+  const levels = book ? [...book.bids, ...book.asks] : []
+  return {
+    instrument,
+    model,
+    book,
+    listMicroPerM: list,
+    bestAsk,
+    bestBid,
+    discount: bestAsk !== null && list > 0 ? 1 - bestAsk / list : null,
+    liquidityTokens: levels.reduce((s, l) => s + l.qty, 0),
+    liquidityNotionalMicro: levels.reduce((s, l) => s + Math.round((l.price * l.qty) / 1e6), 0),
+    venuesQuoting: book?.perVenue.length ?? 0,
+  }
+}
 
 type SortKey = 'discount' | 'liquidity' | 'price'
 type Kind = 'output' | 'input'
@@ -25,12 +52,13 @@ export default function MarketsPage() {
   const [expanded, setExpanded] = useState<string | null>(null)
 
   const catalog = useCatalog()
-  const instruments = useInstruments()
+  const registry = useVenueRegistry()
+  const instruments = useAggInstruments(registry.data)
   const ids = useMemo(
     () => (instruments.data ?? []).filter((i) => i.token_kind === kind).map((i) => i.id),
     [instruments.data, kind],
   )
-  const books = useBooks(ids)
+  const books = useAggBooks(registry.data, ids)
 
   const rows: MarketRow[] = useMemo(() => {
     if (!instruments.data || !catalog.data) return []
@@ -262,7 +290,7 @@ function Row({
         </td>
         <td className="px-4 py-3">
           {book ? (
-            <DepthChart bids={book.book.bids} asks={book.book.asks} height={40} mini />
+            <DepthChart bids={book.bids} asks={book.asks} height={40} mini />
           ) : (
             <span className="font-data text-[12px] text-[var(--s-text-subtle)]">no book</span>
           )}
@@ -284,16 +312,18 @@ function Row({
           <td colSpan={7} className="px-4 py-4">
             <div className="grid gap-4 lg:grid-cols-2">
               <div>
-                <div className="mono-label mb-2">Live book · {instrument.id}</div>
-                <DepthChart bids={book.book.bids} asks={book.book.asks} height={150} formatX={pricePerM} />
+                <div className="mono-label mb-2">
+                  Aggregated book · {instrument.id} · {book.perVenue.length} venue{book.perVenue.length === 1 ? '' : 's'}
+                </div>
+                <DepthChart bids={book.bids} asks={book.asks} height={150} formatX={pricePerM} />
               </div>
               <div className="grid grid-cols-2 gap-x-6 gap-y-2 self-center font-data text-[13px]">
-                <KV k="Best bid" v={book.book.bids[0] ? pricePerM(book.book.bids[0].price) : '—'} tone="emerald" />
-                <KV k="Best ask" v={book.book.asks[0] ? pricePerM(book.book.asks[0].price) : '—'} tone="crimson" />
+                <KV k="Best bid" v={book.bids[0] ? pricePerM(book.bids[0].price) : '—'} tone="emerald" />
+                <KV k="Best ask (NBBO)" v={book.asks[0] ? pricePerM(book.asks[0].price) : '—'} tone="crimson" />
                 <KV k="Reference" v={pricePerM(book.refMid)} />
-                <KV k="Last trade" v={book.book.last_trade_price ? pricePerM(book.book.last_trade_price) : 'none yet'} />
-                <KV k="Bid depth" v={`${tokens(book.book.bids.reduce((s, l) => s + l.qty, 0))} tok`} />
-                <KV k="Ask depth" v={`${tokens(book.book.asks.reduce((s, l) => s + l.qty, 0))} tok`} />
+                <KV k="Operators quoting" v={String(book.perVenue.length)} />
+                <KV k="Bid depth" v={`${tokens(book.bids.reduce((s, l) => s + l.qty, 0))} tok`} />
+                <KV k="Ask depth" v={`${tokens(book.asks.reduce((s, l) => s + l.qty, 0))} tok`} />
               </div>
             </div>
           </td>

@@ -11,6 +11,7 @@ import { CHAIN, useBook, useCatalog, useInstruments } from '~/lib/api'
 import { useMyLots, type CreditLot } from '~/lib/settlement'
 import { instrumentHash } from '~/lib/settlement'
 import { STEP_LABEL, useFirmTrade, type TradeProgress, type TradeReceipt } from '~/lib/trade'
+import { useVenueRegistry } from '~/lib/venues'
 
 /**
  * Selling is transferring something you provably hold: a credit lot on
@@ -25,6 +26,7 @@ export default function SellPage() {
   const instruments = useInstruments()
   const lots = useMyLots(address)
   const { sellLot } = useFirmTrade()
+  const registry = useVenueRegistry()
 
   // Resolve each held lot back to its live instrument by hash.
   const sellable = useMemo(() => {
@@ -50,7 +52,13 @@ export default function SellPage() {
     setError(null)
     setReceipt(null)
     try {
-      const r = await sellLot(activeInstrument.id, active.lotId, Number(active.qtyTokens), setProgress)
+      const r = await sellLot(
+        activeInstrument.id,
+        active.lotId,
+        Number(active.qtyTokens),
+        setProgress,
+        registry.data ?? [],
+      )
       setReceipt(r)
       void lots.refetch()
     } catch (e) {

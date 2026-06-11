@@ -9,6 +9,7 @@ import { cn } from '~/lib/cn'
 import { compactUsd, pct, pricePerM, tokens } from '~/lib/format'
 import { CHAIN, useBook, useCatalog, useInstruments, type BookLevel } from '~/lib/api'
 import { STEP_LABEL, useFirmTrade, type TradeProgress, type TradeReceipt } from '~/lib/trade'
+import { useVenueRegistry } from '~/lib/venues'
 
 /**
  * Inference burns input AND output tokens on every call — so you buy usage,
@@ -96,6 +97,7 @@ export default function BuyPage() {
 
   const { address, isConnected } = useAccount()
   const { buyLeg } = useFirmTrade()
+  const registry = useVenueRegistry()
   const [progress, setProgress] = useState<(TradeProgress & { leg?: string }) | null>(null)
   const [receipts, setReceipts] = useState<TradeReceipt[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -109,8 +111,11 @@ export default function BuyPage() {
       const done: TradeReceipt[] = []
       for (const leg of quote.legs) {
         if (leg.covered <= 0) continue
-        const r = await buyLeg(`${modelId}:${leg.kind}`, leg.covered, (p) =>
-          setProgress({ ...p, leg: leg.kind }),
+        const r = await buyLeg(
+          `${modelId}:${leg.kind}`,
+          leg.covered,
+          (p) => setProgress({ ...p, leg: leg.kind }),
+          registry.data ?? [],
         )
         done.push(r)
       }

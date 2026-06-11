@@ -8,8 +8,9 @@ import { DepthChart } from '~/components/DepthChart'
 import { ProviderLogo } from '~/lib/logos'
 import { cn } from '~/lib/cn'
 import { compactUsd, pct, pricePerM, tokens } from '~/lib/format'
-import { CHAIN, useBook, useCatalog, useInstruments } from '~/lib/api'
+import { CHAIN, useCatalog, useInstruments } from '~/lib/api'
 import { STEP_LABEL, useFirmTrade, type TradeProgress, type TradeReceipt } from '~/lib/trade'
+import { useVenueRegistry, useAggBook } from '~/lib/venues'
 
 type Kind = 'output' | 'input'
 
@@ -24,13 +25,14 @@ export default function ModelMarketPage() {
 
   const catalog = useCatalog()
   const instruments = useInstruments()
+  const registry = useVenueRegistry()
   const model = catalog.data?.get(modelId)
   const instrumentId = `${modelId}:${kind}`
   const hasInstrument = (instruments.data ?? []).some((i) => i.id === instrumentId)
-  const book = useBook(hasInstrument ? instrumentId : null)
+  const agg = useAggBook(registry.data, hasInstrument ? instrumentId : null)
 
   const list = model ? (kind === 'output' ? model.outputMicroPerM : model.inputMicroPerM) : 0
-  const bestAsk = book.data?.book.asks[0]?.price ?? null
+  const bestAsk = agg.data?.asks[0]?.price ?? null
   const discount = bestAsk != null && list > 0 ? 1 - bestAsk / list : null
 
   if (catalog.isLoading || instruments.isLoading) {
@@ -51,16 +53,12 @@ export default function ModelMarketPage() {
     )
   }
 
-  const levels = book.data ? [...book.data.book.bids, ...book.data.book.asks] : []
+  const levels = agg.data ? [...agg.data.bids, ...agg.data.asks] : []
   const liquidityMicro = levels.reduce((s, l) => s + Math.round((l.price * l.qty) / 1e6), 0)
-  const spread =
-    book.data?.book.asks[0] && book.data.book.bids[0]
-      ? book.data.book.asks[0].price - book.data.book.bids[0].price
-      : null
-  const mid =
-    book.data?.book.asks[0] && book.data.book.bids[0]
-      ? (book.data.book.asks[0].price + book.data.book.bids[0].price) / 2
-      : null
+  const bestBid = agg.data?.bids[0]?.price ?? null
+  const spread = bestAsk != null && bestBid != null ? bestAsk - bestBid : null
+  const mid = bestAsk != null && bestBid != null ? (bestAsk + bestBid) / 2 : null
+  const venuesQuoting = agg.data?.perVenue.length ?? 0
 
   return (
     <div>
@@ -118,13 +116,13 @@ export default function ModelMarketPage() {
         <Stat label="Mid" value={mid != null ? pricePerM(mid) : '—'} />
         <Stat
           label="Spread"
-          value={spread != null && mid ? `${((spread / mid) * 10_000).toFixed(0)} bps` : '—'}
+          value={
+            spread == null || !mid ? '—' : spread < 0 ? 'crossed' : `${((spread / mid) * 10_000).toFixed(0)} bps`
+          }
+          sub={spread != null && spread < 0 ? 'venues disagree — arbitrage open' : undefined}
         />
-        <Stat label="Book liquidity" value={book.data ? compactUsd(liquidityMicro) : '—'} />
-        <Stat
-          label="Last trade"
-          value={book.data?.book.last_trade_price ? pricePerM(book.data.book.last_trade_price) : 'none yet'}
-        />
+        <Stat label="Book liquidity" value={agg.data ? compactUsd(liquidityMicro) : '—'} />
+        <Stat label="Venues quoting" value={agg.data ? venuesQuoting : '—'} sub="across operators" />
       </div>
 
       {/* Main grid */}
@@ -136,12 +134,12 @@ export default function ModelMarketPage() {
         >
           {!hasInstrument ? (
             <EmptyNote text={`${kind} side not listed for this model yet.`} />
-          ) : book.isLoading ? (
-            <EmptyNote text="Loading book…" />
-          ) : book.isError ? (
-            <EmptyNote text="Venue unreachable." />
+          ) : agg.isError ? (
+            <EmptyNote text="No venue reachable." />
+          ) : !agg.data ? (
+            <EmptyNote text="Aggregating venues…" />
           ) : (
-            <Orderbook bids={book.data!.book.bids} asks={book.data!.book.asks} />
+            <Orderbook bids={agg.data.bids} asks={agg.data.asks} />
           )}
         </Panel>
 
@@ -151,8 +149,8 @@ export default function ModelMarketPage() {
             right={discount != null ? <Badge tone="emerald">{pct(discount, 1)} off list</Badge> : undefined}
           >
             <div className="px-3 py-4">
-              {book.data ? (
-                <DepthChart bids={book.data.book.bids} asks={book.data.book.asks} height={230} formatX={pricePerM} />
+              {agg.data ? (
+                <DepthChart bids={agg.data.bids} asks={agg.data.asks} height={230} formatX={pricePerM} />
               ) : (
                 <EmptyNote text={hasInstrument ? 'Loading…' : 'Not listed.'} />
               )}
@@ -182,8 +180,9 @@ export default function ModelMarketPage() {
             kind={kind}
             listMicroPerM={list}
             bestAsk={bestAsk}
-            askDepth={book.data?.book.asks ?? []}
-            onFilled={() => book.refetch()}
+            askDepth={agg.data?.asks ?? []}
+            venues={registry.data ?? []}
+            onFilled={() => agg.refetch()}
           />
         </div>
       </div>
@@ -203,6 +202,7 @@ function TradeTicket({
   listMicroPerM,
   bestAsk,
   askDepth,
+  venues,
   onFilled,
 }: {
   instrumentId: string
@@ -210,6 +210,7 @@ function TradeTicket({
   listMicroPerM: number
   bestAsk: number | null
   askDepth: { price: number; qty: number }[]
+  venues: import('~/lib/venues').Venue[]
   onFilled: () => void
 }) {
   const { isConnected } = useAccount()
@@ -222,14 +223,14 @@ function TradeTicket({
   const qtyTokens = qtyM * 1_000_000
   const estCostMicro = bestAsk != null ? Math.round((bestAsk * qtyTokens) / 1e6) : 0
   const listCostMicro = Math.round((listMicroPerM * qtyTokens) / 1e6)
-  const savings = listCostMicro - estCostMicro
+  const savings = bestAsk != null ? listCostMicro - estCostMicro : 0
   const busy = progress !== null
 
   async function execute() {
     setError(null)
     setReceipt(null)
     try {
-      const r = await buyLeg(instrumentId, qtyTokens, setProgress)
+      const r = await buyLeg(instrumentId, qtyTokens, setProgress, venues)
       setReceipt(r)
       onFilled()
     } catch (e) {
