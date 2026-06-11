@@ -1,73 +1,93 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Identicon } from '@tangle-network/blueprint-ui/components'
+import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '~/components/PageHeader'
-import { Badge, Mark, Segmented, Sparkline, Stat } from '~/components/ui'
-import { CAPABILITY_META, CAPABILITY_ORDER } from '~/lib/capabilities'
+import { Badge, Segmented, Stat } from '~/components/ui'
+import { DepthChart } from '~/components/DepthChart'
+import { ProviderLogo } from '~/lib/logos'
 import { cn } from '~/lib/cn'
 import { compactUsd, pct, pricePerM, tokens } from '~/lib/format'
-import { getMarkets, getOffers, VENUES } from '~/lib/mock'
-import type { Capability, ModelMarket, TokenKind } from '~/lib/types'
+import {
+  deriveRow,
+  useBooks,
+  useCatalog,
+  useInstruments,
+  type MarketRow,
+} from '~/lib/api'
 
-type SortKey = 'discount' | 'liquidity' | 'volume' | 'price'
+type SortKey = 'discount' | 'liquidity' | 'price'
+type Kind = 'output' | 'input'
 
 export default function MarketsPage() {
-  const [kind, setKind] = useState<TokenKind>('output')
+  const navigate = useNavigate()
+  const [kind, setKind] = useState<Kind>('output')
   const [query, setQuery] = useState('')
-  const [caps, setCaps] = useState<Set<Capability>>(new Set())
   const [sort, setSort] = useState<SortKey>('discount')
   const [expanded, setExpanded] = useState<string | null>(null)
 
-  const markets = useMemo(() => getMarkets(kind), [kind])
+  const catalog = useCatalog()
+  const instruments = useInstruments()
+  const ids = useMemo(
+    () => (instruments.data ?? []).filter((i) => i.token_kind === kind).map((i) => i.id),
+    [instruments.data, kind],
+  )
+  const books = useBooks(ids)
 
-  const filtered = useMemo(() => {
+  const rows: MarketRow[] = useMemo(() => {
+    if (!instruments.data || !catalog.data) return []
     const q = query.trim().toLowerCase()
-    let rows = markets.filter((mm) => {
-      if (q && !mm.model.name.toLowerCase().includes(q) && !mm.model.id.toLowerCase().includes(q) && !mm.lab.name.toLowerCase().includes(q))
-        return false
-      for (const c of caps) if (!mm.model.capabilities.includes(c)) return false
-      return true
-    })
-    rows = rows.sort((a, b) => {
+    let out = instruments.data
+      .filter((i) => i.token_kind === kind)
+      .map((i) => {
+        const model = catalog.data.get(i.model_id)
+        if (!model) return null
+        return deriveRow(i, model, books.data?.get(i.id) ?? null)
+      })
+      .filter((r): r is MarketRow => r !== null)
+    if (q) {
+      out = out.filter(
+        (r) =>
+          r.model.name.toLowerCase().includes(q) ||
+          r.model.id.toLowerCase().includes(q) ||
+          r.model.provider.toLowerCase().includes(q),
+      )
+    }
+    return out.sort((a, b) => {
       switch (sort) {
         case 'liquidity':
-          return b.stats.liquidityTokens - a.stats.liquidityTokens
-        case 'volume':
-          return b.stats.volume24hMicro - a.stats.volume24hMicro
+          return b.liquidityNotionalMicro - a.liquidityNotionalMicro
         case 'price':
-          return a.stats.bestOut - b.stats.bestOut
+          return (a.bestAsk ?? Infinity) - (b.bestAsk ?? Infinity)
         default:
-          return b.stats.bestDiscount - a.stats.bestDiscount
+          return (b.discount ?? -1) - (a.discount ?? -1)
       }
     })
-    return rows
-  }, [markets, query, caps, sort])
+  }, [instruments.data, catalog.data, books.data, kind, query, sort])
 
-  const featured = useMemo(() => {
-    const top = (key: (m: ModelMarket) => number) => [...markets].sort((a, b) => key(b) - key(a))[0]!
+  const totals = useMemo(() => {
+    const withBook = rows.filter((r) => r.book)
     return {
-      byDiscount: top((m) => m.stats.bestDiscount),
-      byLiquidity: top((m) => m.stats.liquidityTokens),
-      byVolume: top((m) => m.stats.volume24hMicro),
-      totalLiquidity: markets.reduce((s, m) => s + m.stats.liquidityNotionalMicro, 0),
-      totalVol: markets.reduce((s, m) => s + m.stats.volume24hMicro, 0),
+      markets: rows.length,
+      liquidityMicro: withBook.reduce((s, r) => s + r.liquidityNotionalMicro, 0),
+      bestDiscount: withBook.reduce<MarketRow | null>(
+        (best, r) => ((r.discount ?? -1) > (best?.discount ?? -1) ? r : best),
+        null,
+      ),
+      deepest: withBook.reduce<MarketRow | null>(
+        (best, r) => (r.liquidityNotionalMicro > (best?.liquidityNotionalMicro ?? -1) ? r : best),
+        null,
+      ),
     }
-  }, [markets])
+  }, [rows])
 
-  function toggleCap(c: Capability) {
-    setCaps((prev) => {
-      const next = new Set(prev)
-      if (next.has(c)) next.delete(c)
-      else next.add(c)
-      return next
-    })
-  }
+  const loading = catalog.isLoading || instruments.isLoading
+  const venueDown = instruments.isError
+  const routerDown = catalog.isError
 
   return (
     <div>
       <PageHeader
         title="Markets"
-        subtitle="Buy discounted inference, sell your surplus. Every market trades prepaid token credits against the model's router list price."
+        subtitle="Prepaid inference token credits, quoted live below each model's router list price."
         right={
           <Segmented
             value={kind}
@@ -75,40 +95,43 @@ export default function MarketsPage() {
             options={[
               { value: 'output', label: 'Output' },
               { value: 'input', label: 'Input' },
-              { value: 'cache', label: 'Cache' },
             ]}
           />
         }
       />
 
       <div className="px-4 py-4 sm:px-6">
-        {/* Featured strip */}
+        {(venueDown || routerDown) && (
+          <div className="panel mb-4 flex items-center gap-3 border-[var(--s-crimson)]/30 px-4 py-3">
+            <span className="i-ph:pulse text-[18px] text-[var(--s-crimson)]" />
+            <span className="font-data text-[13px] text-[var(--s-text-secondary)]">
+              {venueDown ? 'Venue API unreachable.' : 'Router catalog unreachable.'} Live data
+              resumes automatically when the source recovers.
+            </span>
+          </div>
+        )}
+
+        {/* Live market totals — derived from the book, not asserted. */}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <FeatureTile
             icon="i-ph:fire"
             tone="amber"
             label="Top discount"
-            value={pct(featured.byDiscount.stats.bestDiscount, 0)}
-            model={featured.byDiscount}
+            value={totals.bestDiscount?.discount != null ? pct(totals.bestDiscount.discount, 1) : '—'}
+            row={totals.bestDiscount}
+            onOpen={(r) => navigate(`/m/${r.instrument.id}`)}
           />
           <FeatureTile
             icon="i-ph:drop"
             tone="accent"
-            label="Deepest liquidity"
-            value={tokens(featured.byLiquidity.stats.liquidityTokens)}
-            valueSuffix=" tok"
-            model={featured.byLiquidity}
+            label="Deepest book"
+            value={totals.deepest ? compactUsd(totals.deepest.liquidityNotionalMicro) : '—'}
+            row={totals.deepest}
+            onOpen={(r) => navigate(`/m/${r.instrument.id}`)}
           />
-          <FeatureTile
-            icon="i-ph:trend-up"
-            tone="brand"
-            label="24h volume leader"
-            value={compactUsd(featured.byVolume.stats.volume24hMicro)}
-            model={featured.byVolume}
-          />
-          <div className="panel grid grid-cols-2 divide-x divide-[var(--s-divider)]">
-            <Stat label="Total liquidity" value={compactUsd(featured.totalLiquidity)} tone="accent" />
-            <Stat label="24h volume" value={compactUsd(featured.totalVol)} />
+          <div className="panel grid grid-cols-2 divide-x divide-[var(--s-divider)] lg:col-span-2">
+            <Stat label="Markets" value={loading ? '…' : totals.markets} tone="accent" />
+            <Stat label="Book liquidity" value={loading ? '…' : compactUsd(totals.liquidityMicro)} />
           </div>
         </div>
 
@@ -119,42 +142,11 @@ export default function MarketsPage() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search models, labs…"
-              className="h-9 w-56 rounded-[6px] border border-[var(--s-border)] bg-[var(--s-surface)] pl-8 pr-3 font-data text-[14px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)] focus:border-[var(--s-border-hover)]"
+              placeholder="Search models, providers…"
+              className="h-10 w-64 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-glass)] pl-8 pr-3 font-data text-[14px] text-[var(--s-text)] outline-none backdrop-blur-[8px] placeholder:text-[var(--s-text-subtle)] focus:border-[var(--s-accent)]/40"
             />
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {CAPABILITY_ORDER.map((c) => {
-              const meta = CAPABILITY_META[c]
-              const active = caps.has(c)
-              return (
-                <button
-                  key={c}
-                  onClick={() => toggleCap(c)}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 rounded-[6px] border px-2.5 py-1.5 font-data text-[13px] font-medium transition-colors',
-                    active
-                      ? 'border-transparent text-[var(--s-accent-text)]'
-                      : 'border-[var(--s-border)] text-[var(--s-text-muted)] hover:border-[var(--s-border-hover)] hover:text-[var(--s-text-secondary)]',
-                  )}
-                  style={active ? { background: 'var(--s-accent)' } : undefined}
-                >
-                  <span className={cn(meta.icon, 'text-[14px]')} style={active ? undefined : { color: meta.hue }} />
-                  {meta.label}
-                </button>
-              )
-            })}
-            {caps.size > 0 && (
-              <button
-                onClick={() => setCaps(new Set())}
-                className="font-data text-[13px] text-[var(--s-text-muted)] underline-offset-2 hover:text-[var(--s-crimson)] hover:underline"
-              >
-                clear
-              </button>
-            )}
-          </div>
           <div className="ml-auto flex items-center gap-2">
-            <span className="mono-label">Sort</span>
             <Segmented
               size="sm"
               value={sort}
@@ -162,48 +154,54 @@ export default function MarketsPage() {
               options={[
                 { value: 'discount', label: 'Discount' },
                 { value: 'liquidity', label: 'Liquidity' },
-                { value: 'volume', label: 'Volume' },
                 { value: 'price', label: 'Price' },
               ]}
             />
           </div>
         </div>
 
-        {/* Table */}
+        {/* The board */}
         <div className="panel mt-4 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] border-collapse">
+            <table className="w-full min-w-[900px] border-collapse">
               <thead>
                 <tr className="border-b border-[var(--s-border)] text-left">
-                  <Th className="w-[26%]">Model</Th>
-                  <Th>Capabilities</Th>
-                  <Th align="right">Best discount</Th>
-                  <Th align="right">Best price /1M</Th>
+                  <Th className="w-[30%]">Model</Th>
+                  <Th align="right">Discount</Th>
+                  <Th align="right">Best ask /1M</Th>
                   <Th align="right">List /1M</Th>
-                  <Th align="right">Liquidity</Th>
-                  <Th align="right">24h vol</Th>
-                  <Th align="right">Venues</Th>
-                  <Th align="right">Trend</Th>
-                  <Th className="w-8" />
+                  <Th align="right">Book liquidity</Th>
+                  <Th>Depth</Th>
+                  <Th className="w-20" />
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((mm) => (
-                  <ModelRow
-                    key={mm.model.id}
-                    mm={mm}
-                    kind={kind}
-                    expanded={expanded === mm.model.id}
-                    onToggle={() => setExpanded((e) => (e === mm.model.id ? null : mm.model.id))}
-                  />
-                ))}
-                {filtered.length === 0 && (
+                {loading &&
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i} className="border-b border-[var(--s-divider)] last:border-0">
+                      <td colSpan={7} className="px-4 py-4">
+                        <div className="h-5 animate-pulse rounded bg-[var(--s-panel-strong)]" style={{ width: `${88 - i * 6}%` }} />
+                      </td>
+                    </tr>
+                  ))}
+                {!loading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="px-4 py-16 text-center font-data text-[14px] text-[var(--s-text-muted)]">
-                      No markets match those filters.
+                    <td colSpan={7} className="px-4 py-12 text-center font-data text-[14px] text-[var(--s-text-muted)]">
+                      {venueDown ? 'Venue offline — no live markets to show.' : 'No markets match.'}
                     </td>
                   </tr>
                 )}
+                {rows.map((r) => (
+                  <Row
+                    key={r.instrument.id}
+                    row={r}
+                    expanded={expanded === r.instrument.id}
+                    onToggle={() =>
+                      setExpanded(expanded === r.instrument.id ? null : r.instrument.id)
+                    }
+                    onOpen={() => navigate(`/m/${r.instrument.id}`)}
+                  />
+                ))}
               </tbody>
             </table>
           </div>
@@ -213,41 +211,151 @@ export default function MarketsPage() {
   )
 }
 
+function Row({
+  row,
+  expanded,
+  onToggle,
+  onOpen,
+}: {
+  row: MarketRow
+  expanded: boolean
+  onToggle: () => void
+  onOpen: () => void
+}) {
+  const { model, book, instrument } = row
+  return (
+    <>
+      <tr
+        onClick={onToggle}
+        className="cursor-pointer border-b border-[var(--s-divider)] transition-colors last:border-0 hover:bg-[var(--s-panel)]"
+      >
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-3">
+            <ProviderLogo provider={model.provider} size={34} />
+            <div className="min-w-0">
+              <div className="truncate font-body text-[15px] font-semibold text-[var(--s-text)]">
+                {model.name}
+              </div>
+              <div className="truncate font-data text-[12px] text-[var(--s-text-muted)]">
+                {model.provider}
+                {model.contextLength > 0 &&
+                  ` · ${model.contextLength >= 1_000_000 ? `${Math.round(model.contextLength / 1e6)}M` : `${Math.round(model.contextLength / 1000)}K`} ctx`}
+              </div>
+            </div>
+          </div>
+        </td>
+        <td className="px-4 py-3 text-right">
+          {row.discount != null ? (
+            <Badge tone="emerald">{pct(row.discount, 1)}</Badge>
+          ) : (
+            <span className="font-data text-[13px] text-[var(--s-text-subtle)]">—</span>
+          )}
+        </td>
+        <td className="px-4 py-3 text-right font-data text-[15px] font-semibold tabular-nums text-[var(--s-text)]">
+          {row.bestAsk != null ? pricePerM(row.bestAsk) : '—'}
+        </td>
+        <td className="px-4 py-3 text-right font-data text-[14px] tabular-nums text-[var(--s-text-muted)] line-through decoration-[var(--s-text-subtle)]/60">
+          {row.listMicroPerM > 0 ? pricePerM(row.listMicroPerM) : '—'}
+        </td>
+        <td className="px-4 py-3 text-right font-data text-[14px] tabular-nums text-[var(--s-text-secondary)]">
+          {book ? compactUsd(row.liquidityNotionalMicro) : '—'}
+        </td>
+        <td className="px-4 py-3">
+          {book ? (
+            <DepthChart bids={book.book.bids} asks={book.book.asks} height={40} mini />
+          ) : (
+            <span className="font-data text-[12px] text-[var(--s-text-subtle)]">no book</span>
+          )}
+        </td>
+        <td className="px-4 py-3 text-right">
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpen()
+            }}
+            className="btn-primary h-9"
+          >
+            Trade
+          </button>
+        </td>
+      </tr>
+      {expanded && book && (
+        <tr className="border-b border-[var(--s-divider)] bg-[var(--s-surface)]/60 last:border-0">
+          <td colSpan={7} className="px-4 py-4">
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div>
+                <div className="mono-label mb-2">Live book · {instrument.id}</div>
+                <DepthChart bids={book.book.bids} asks={book.book.asks} height={150} formatX={pricePerM} />
+              </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2 self-center font-data text-[13px]">
+                <KV k="Best bid" v={book.book.bids[0] ? pricePerM(book.book.bids[0].price) : '—'} tone="emerald" />
+                <KV k="Best ask" v={book.book.asks[0] ? pricePerM(book.book.asks[0].price) : '—'} tone="crimson" />
+                <KV k="Reference" v={pricePerM(book.refMid)} />
+                <KV k="Last trade" v={book.book.last_trade_price ? pricePerM(book.book.last_trade_price) : 'none yet'} />
+                <KV k="Bid depth" v={`${tokens(book.book.bids.reduce((s, l) => s + l.qty, 0))} tok`} />
+                <KV k="Ask depth" v={`${tokens(book.book.asks.reduce((s, l) => s + l.qty, 0))} tok`} />
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+function KV({ k, v, tone }: { k: string; v: string; tone?: 'emerald' | 'crimson' }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 border-b border-[var(--s-divider)] pb-1.5">
+      <span className="text-[var(--s-text-muted)]">{k}</span>
+      <span
+        className="font-semibold tabular-nums"
+        style={{ color: tone ? `var(--s-${tone})` : 'var(--s-text)' }}
+      >
+        {v}
+      </span>
+    </div>
+  )
+}
+
 function FeatureTile({
   icon,
   tone,
   label,
   value,
-  valueSuffix,
-  model,
+  row,
+  onOpen,
 }: {
   icon: string
-  tone: 'amber' | 'accent' | 'brand'
+  tone: 'amber' | 'accent'
   label: string
   value: string
-  valueSuffix?: string
-  model: ModelMarket
+  row: MarketRow | null
+  onOpen: (r: MarketRow) => void
 }) {
-  const color = `var(--s-${tone === 'accent' ? 'accent' : tone})`
   return (
-    <Link to={`/m/${model.model.id}`} className="panel panel-hover group flex flex-col justify-between px-3.5 py-2.5">
-      <div className="flex items-center justify-between">
-        <span className="mono-label">{label}</span>
-        <span className={cn(icon, 'text-[15px]')} style={{ color }} />
-      </div>
-      <div className="mt-1.5 flex items-baseline gap-1">
-        <span className="font-data text-[20px] font-bold tabular-nums" style={{ color }}>
+    <button
+      onClick={() => row && onOpen(row)}
+      disabled={!row}
+      className="panel panel-hover flex items-center gap-3 px-4 py-3 text-left disabled:cursor-default"
+    >
+      <span
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px]"
+        style={{ background: `var(--s-${tone}-soft)` }}
+      >
+        <span className={cn(icon, 'text-[19px]')} style={{ color: `var(--s-${tone})` }} />
+      </span>
+      <div className="min-w-0">
+        <div className="mono-label">{label}</div>
+        <div className="truncate font-data text-[19px] font-bold tabular-nums text-[var(--s-text)]">
           {value}
-        </span>
-        {valueSuffix && <span className="font-data text-[12px] text-[var(--s-text-muted)]">{valueSuffix}</span>}
+        </div>
+        {row && (
+          <div className="truncate font-data text-[12px] text-[var(--s-text-muted)]">
+            {row.model.name}
+          </div>
+        )}
       </div>
-      <div className="mt-1 flex items-center gap-1.5 truncate">
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: model.lab.hue }} />
-        <span className="truncate font-data text-[12px] text-[var(--s-text-secondary)] group-hover:text-[var(--s-text)]">
-          {model.model.name}
-        </span>
-      </div>
-    </Link>
+    </button>
   )
 }
 
@@ -261,199 +369,8 @@ function Th({
   className?: string
 }) {
   return (
-    <th
-      className={cn(
-        'mono-label h-9 px-3 font-semibold',
-        align === 'right' ? 'text-right' : 'text-left',
-        className,
-      )}
-    >
+    <th className={cn('mono-label h-11 px-4 font-semibold', align === 'right' ? 'text-right' : 'text-left', className)}>
       {children}
     </th>
-  )
-}
-
-function ModelRow({
-  mm,
-  kind,
-  expanded,
-  onToggle,
-}: {
-  mm: ModelMarket
-  kind: TokenKind
-  expanded: boolean
-  onToggle: () => void
-}) {
-  const navigate = useNavigate()
-  const { model, lab, stats } = mm
-  return (
-    <>
-      <tr
-        onClick={onToggle}
-        className={cn(
-          'cursor-pointer border-b border-[var(--s-divider)] transition-colors hover:bg-[var(--s-panel)]',
-          expanded && 'bg-[var(--s-panel)]',
-        )}
-      >
-        <td className="px-3 py-2.5">
-          <div className="flex items-center gap-2.5">
-            <Mark hue={lab.hue} glyph={lab.glyph} label={lab.name} />
-            <div className="min-w-0">
-              <div className="truncate font-data text-[14px] font-semibold text-[var(--s-text)]">{model.name}</div>
-              <div className="truncate font-data text-[12px] text-[var(--s-text-muted)]">
-                {lab.name} · {model.contextK >= 1000 ? `${model.contextK / 1000}M` : `${model.contextK}K`} ctx
-              </div>
-            </div>
-          </div>
-        </td>
-        <td className="px-3 py-2.5">
-          <div className="flex items-center gap-1">
-            {model.capabilities.map((c) => {
-              const meta = CAPABILITY_META[c]
-              return (
-                <span
-                  key={c}
-                  className="flex h-6 w-6 items-center justify-center rounded-[5px]"
-                  style={{ background: `color-mix(in srgb, ${meta.hue} 14%, transparent)` }}
-                  title={meta.label}
-                >
-                  <span className={cn(meta.icon, 'text-[14px]')} style={{ color: meta.hue }} />
-                </span>
-              )
-            })}
-          </div>
-        </td>
-        <td className="px-3 py-2.5 text-right">
-          <Badge tone="emerald">{pct(stats.bestDiscount, 0)} off</Badge>
-        </td>
-        <td className="px-3 py-2.5 text-right font-data text-[14px] font-semibold tabular-nums text-[var(--s-accent)]">
-          {pricePerM(stats.bestOut)}
-        </td>
-        <td className="px-3 py-2.5 text-right font-data text-[13px] tabular-nums text-[var(--s-text-muted)] line-through">
-          {pricePerM(stats.listOut)}
-        </td>
-        <td className="px-3 py-2.5 text-right">
-          <div className="font-data text-[14px] tabular-nums text-[var(--s-text)]">{tokens(stats.liquidityTokens)}</div>
-          <div className="font-data text-[11px] tabular-nums text-[var(--s-text-muted)]">{compactUsd(stats.liquidityNotionalMicro)}</div>
-        </td>
-        <td className="px-3 py-2.5 text-right font-data text-[14px] tabular-nums text-[var(--s-text-secondary)]">
-          {compactUsd(stats.volume24hMicro)}
-        </td>
-        <td className="px-3 py-2.5 text-right font-data text-[14px] tabular-nums text-[var(--s-text-secondary)]">
-          {stats.venues}
-        </td>
-        <td className="px-3 py-2.5">
-          <div className="flex justify-end">
-            <Sparkline points={stats.spark} />
-          </div>
-        </td>
-        <td className="px-2 py-2.5 text-right">
-          <span
-            className={cn(
-              'i-ph:caret-down inline-block text-[14px] text-[var(--s-text-muted)] transition-transform',
-              expanded && 'rotate-180',
-            )}
-          />
-        </td>
-      </tr>
-      {expanded && (
-        <tr className="border-b border-[var(--s-border)] bg-[var(--s-surface)]">
-          <td colSpan={10} className="p-0">
-            <ExpandedVenues modelId={model.id} kind={kind} onOpen={() => navigate(`/m/${model.id}`)} onBuy={() => navigate(`/buy/${model.id}`)} />
-          </td>
-        </tr>
-      )}
-    </>
-  )
-}
-
-function ExpandedVenues({
-  modelId,
-  kind,
-  onOpen,
-  onBuy,
-}: {
-  modelId: string
-  kind: TokenKind
-  onOpen: () => void
-  onBuy: () => void
-}) {
-  const offers = useMemo(() => getOffers(modelId), [modelId])
-  return (
-    <div className="s-fade-up px-3 py-3">
-      <div className="mb-2 flex items-center justify-between px-1">
-        <span className="mono-label">{offers.length} offers across {new Set(offers.map((o) => o.venueId)).size} venues</span>
-        <div className="flex items-center gap-2">
-          <button onClick={onOpen} className="btn-secondary h-7 !text-[12px]">
-            Open market <span className="i-ph:arrow-up-right text-[13px]" />
-          </button>
-          <button onClick={onBuy} className="btn-primary h-7 !text-[12px]">
-            Buy
-          </button>
-        </div>
-      </div>
-      <div className="overflow-hidden rounded-[6px] border border-[var(--s-divider)]">
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="border-b border-[var(--s-divider)] bg-[var(--s-panel)] text-left">
-              <Th>Venue</Th>
-              <Th>Seller</Th>
-              <Th align="right">Discount</Th>
-              <Th align="right">Price /1M</Th>
-              <Th align="right">Offered</Th>
-              <Th align="right">Sold</Th>
-              <Th align="right">Remaining</Th>
-              <Th className="w-16" />
-            </tr>
-          </thead>
-          <tbody>
-            {offers.slice(0, 8).map((o) => {
-              const venue = VENUES[o.venueId]!
-              return (
-                <tr key={o.id} className="border-b border-[var(--s-divider)] last:border-0 hover:bg-[var(--s-panel)]">
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full" style={{ background: venue.hue }} />
-                      <span className="font-data text-[13px] text-[var(--s-text-secondary)]">{venue.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="shrink-0 overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
-                        <Identicon address={o.sellerAddress} size={18} />
-                      </span>
-                      <span className="font-data text-[13px] text-[var(--s-text)]">{o.sellerLabel}</span>
-                      {o.verified && (
-                        <span className="i-ph:seal-check text-[14px] text-[var(--s-accent)]" title="Verified supply" />
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-right font-data text-[13px] tabular-nums text-[var(--s-emerald)]">
-                    {pct(o.discount, 0)}
-                  </td>
-                  <td className="px-3 py-2 text-right font-data text-[13px] font-semibold tabular-nums text-[var(--s-text)]">
-                    {pricePerM(o.price[kind])}
-                  </td>
-                  <td className="px-3 py-2 text-right font-data text-[13px] tabular-nums text-[var(--s-text-muted)]">
-                    {tokens(o.offeredTokens)}
-                  </td>
-                  <td className="px-3 py-2 text-right font-data text-[13px] tabular-nums text-[var(--s-text-muted)]">
-                    {tokens(o.soldTokens)}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <span className="font-data text-[13px] tabular-nums text-[var(--s-text-secondary)]">{tokens(o.remainingTokens)}</span>
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <button onClick={onBuy} className="btn-primary h-6 !px-2.5 !text-[11px]">
-                      Buy
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
   )
 }

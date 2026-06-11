@@ -1,10 +1,10 @@
 import { useMemo } from 'react'
 import { pricePerM, tokens } from '~/lib/format'
-import type { OrderLevel } from '~/lib/types'
+import type { BookLevel } from '~/lib/api'
 
-export function Orderbook({ bids, asks }: { bids: OrderLevel[]; asks: OrderLevel[] }) {
+export function Orderbook({ bids, asks }: { bids: BookLevel[]; asks: BookLevel[] }) {
   const maxTokens = useMemo(
-    () => Math.max(1, ...bids.map((b) => b.tokens), ...asks.map((a) => a.tokens)),
+    () => Math.max(1, ...bids.map((b) => b.qty), ...asks.map((a) => a.qty)),
     [bids, asks],
   )
   const bestBid = bids[0]?.price ?? 0
@@ -41,17 +41,17 @@ export function Orderbook({ bids, asks }: { bids: OrderLevel[]; asks: OrderLevel
   )
 }
 
-function Row({ level, max, side }: { level: OrderLevel; max: number; side: 'bid' | 'ask' }) {
+function Row({ level, max, side }: { level: BookLevel; max: number; side: 'bid' | 'ask' }) {
   const color = side === 'bid' ? 'var(--s-emerald)' : 'var(--s-crimson)'
   const fill = side === 'bid' ? 'var(--s-emerald-soft)' : 'var(--s-crimson-soft)'
-  const w = (level.tokens / max) * 100
+  const w = (level.qty / max) * 100
   return (
     <div className="relative grid grid-cols-3 px-3 py-1 hover:bg-[var(--s-panel)]">
       <div className="absolute inset-y-0 right-0" style={{ width: `${w}%`, background: fill, opacity: 0.6 }} />
       <span className="relative tabular-nums" style={{ color }}>
         {pricePerM(level.price)}
       </span>
-      <span className="relative text-right tabular-nums text-[var(--s-text-secondary)]">{tokens(level.tokens)}</span>
+      <span className="relative text-right tabular-nums text-[var(--s-text-secondary)]">{tokens(level.qty)}</span>
       <span className="relative text-right tabular-nums text-[var(--s-text-muted)]">{level.orders}</span>
     </div>
   )

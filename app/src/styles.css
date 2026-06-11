@@ -236,3 +236,8 @@ input[type='range'].s-range::-moz-range-thumb {
 .s-pulse {
   animation: s-pulse 2s ease-in-out infinite;
 }
+
+/* Monochrome brand SVGs (OpenAI, xAI, Groq…) ship black — flip in dark. */
+[data-theme='dark'] .logo-invert-dark {
+  filter: invert(1);
+}

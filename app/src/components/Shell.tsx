@@ -3,6 +3,31 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { cn } from '~/lib/cn'
 import { toggleTheme, useTheme } from '~/lib/theme'
 import { WalletButton } from '~/components/WalletButton'
+import { CHAIN, useVenueHealth } from '~/lib/api'
+
+/** Measured, not asserted: live venue health + latency. */
+function VenueStatus() {
+  const health = useVenueHealth()
+  return (
+    <a
+      href={`${CHAIN.explorer}/address/${CHAIN.tangle}`}
+      target="_blank"
+      rel="noreferrer"
+      className="hidden items-center gap-2 rounded-[8px] border border-[var(--s-border)] px-2.5 py-1.5 transition-colors hover:border-[var(--s-border-hover)] lg:flex"
+      title="Surplus service 4 on Base Sepolia"
+    >
+      <span
+        className={cn(
+          'h-2 w-2 rounded-full',
+          health.data?.ok ? 'bg-[var(--s-emerald)]' : health.isError ? 'bg-[var(--s-crimson)]' : 'bg-[var(--s-amber)] animate-pulse',
+        )}
+      />
+      <span className="font-data text-[12px] tabular-nums text-[var(--s-text-muted)]">
+        {health.data?.ok ? `venue ${health.data.latencyMs}ms` : health.isError ? 'venue down' : 'venue…'}
+      </span>
+    </a>
+  )
+}
 
 const NAV = [
   { to: '/', label: 'Markets', icon: 'i-ph:chart-line-up', end: true },
@@ -97,20 +122,22 @@ export function Shell({ children }: { children: ReactNode }) {
           <NavItems />
         </div>
         <div className="mt-auto px-1">
-          <div className="panel px-3 py-3">
+          <a
+            href={`${CHAIN.explorer}/address/${CHAIN.tangle}`}
+            target="_blank"
+            rel="noreferrer"
+            className="panel panel-hover block px-3 py-3"
+          >
             <div className="flex items-center gap-2">
               <span className="i-ph:shield-check-fill text-[16px] text-[var(--s-accent)]" />
-              <span className="font-data text-[11px] font-semibold uppercase tracking-wider text-[var(--s-text-secondary)]">
-                Settlement live
+              <span className="font-data text-[12px] font-semibold uppercase tracking-wider text-[var(--s-text-secondary)]">
+                Base Sepolia
               </span>
             </div>
-            <p className="mt-1.5 font-body text-[11px] leading-snug text-[var(--s-text-muted)]">
-              Every credit is collateral-backed. Unserved spend is refunded with penalty.
+            <p className="mt-1.5 font-data text-[12px] leading-snug text-[var(--s-text-muted)]">
+              Blueprint {CHAIN.blueprintId} · service {CHAIN.serviceId}
             </p>
-          </div>
-          <div className="mt-3 px-2 font-data text-[10px] text-[var(--s-text-subtle)]">
-            Base Sepolia · v0.1
-          </div>
+          </a>
         </div>
       </aside>
 
@@ -127,12 +154,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </button>
             <BrandMark />
           </div>
-          <div className="hidden items-center gap-2 lg:flex">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--s-accent)]" />
-            <span className="font-data text-[12px] text-[var(--s-text-muted)]">
-              16 markets · 7 venues · live
-            </span>
-          </div>
+          <VenueStatus />
           <div className="flex items-center gap-2">
             <ThemeButton />
             <WalletButton />

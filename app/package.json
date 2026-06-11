@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@lobehub/icons-static-svg": "^1.91.0",
     "@nanostores/react": "^0.7.3",
     "@tangle-network/blueprint-ui": "^0.5.3",
     "@tangle-network/sandbox-ui": "^0.17.0",

@@ -257,11 +257,35 @@ impl Venue {
             }));
         }
 
+        // Quote a ladder: SURPLUS_MM_LEVELS price levels per side stepping away
+        // from the A–S touch, sizes growing with distance — the operator's
+        // committed depth, not decoration. Level spacing is ~30bps of the
+        // reference (at least one tick).
+        let ladder_levels: i64 = std::env::var("SURPLUS_MM_LEVELS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|v| (1..=10).contains(v))
+            .unwrap_or(1);
+        let inst_tick = v.instrument.tick_size.max(1);
+        let level_step =
+            (((ref_mid * 0.003) / inst_tick as f64).round() as i64).max(1) * inst_tick;
+
         let mut placed = Vec::new();
         let mut all_fills: Vec<Fill> = Vec::new();
         let mut signed_fill_count = 0usize;
-        for (side, q) in [(Side::Buy, &quote.bid), (Side::Sell, &quote.ask)] {
-            let Some(q) = q else { continue };
+        for (side, touch) in [(Side::Buy, &quote.bid), (Side::Sell, &quote.ask)] {
+            let Some(touch) = touch else { continue };
+            for lvl in 0..ladder_levels {
+            let q = &crate::sidecar::Quote {
+                price: match side {
+                    Side::Buy => touch.price - (lvl * level_step) as f64,
+                    Side::Sell => touch.price + (lvl * level_step) as f64,
+                },
+                qty: touch.qty * (1.0 + lvl as f64 * 0.75),
+            };
+            if q.price <= 0.0 {
+                continue;
+            }
             // When a settlement signer is configured, the MM quote is a signed
             // firm order: its book id is the EIP-712 digest, and any cross
             // against another signed order yields a settleable fill.
@@ -291,6 +315,7 @@ impl Venue {
             placed.push(json!({
                 "side": side, "price": price, "qty": qty, "resting": out.resting.is_some(),
             }));
+            }
         }
         apply_inventory(v, &all_fills, &self.mm_owner);
         if let Some(ctx) = &self.settle {

@@ -76,6 +76,13 @@ impl OperatorConfig {
     pub fn from_env() -> Self {
         let sidecar_url = std::env::var("SURPLUS_SIDECAR_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:9110".to_string());
+        // The operator's quoted size per touch level, tokens. Risk bounds scale
+        // with it so a larger commitment stays inside the gate.
+        let mm_size = std::env::var("SURPLUS_MM_SIZE")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| *v >= 1_000.0)
+            .unwrap_or(50_000.0);
         let router_url = std::env::var("SURPLUS_ROUTER_URL")
             .unwrap_or_else(|_| "https://router.tangle.tools".to_string());
         let settlement = match (
@@ -110,13 +117,13 @@ impl OperatorConfig {
                 sigma: 22_500.0,
                 horizon_ticks: 120.0,
                 k: 1.5,
-                size: 50_000.0,
-                max_inventory: 300_000.0,
+                size: mm_size,
+                max_inventory: (mm_size * 30.0).max(300_000.0),
                 tick_size: 1000.0,
             },
             limits: RiskLimits {
-                max_inventory: 400_000.0,
-                max_quote_notional: 2_000_000_000.0,
+                max_inventory: (mm_size * 40.0).max(400_000.0),
+                max_quote_notional: 2_000_000_000.0_f64.max(mm_size * 50.0),
                 max_deviation_bps: 300.0,
                 min_spread_bps: 2.0,
                 kill_switch_drawdown: 5_000_000.0,

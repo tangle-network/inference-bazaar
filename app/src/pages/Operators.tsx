@@ -1,118 +1,155 @@
 import { Link } from 'react-router-dom'
+import { useReadContract, useReadContracts } from 'wagmi'
 import { Identicon } from '@tangle-network/blueprint-ui/components'
+import type { Address } from 'viem'
+import { formatUnits } from 'viem'
 import { PageHeader } from '~/components/PageHeader'
 import { Badge, Panel, Stat } from '~/components/ui'
 import { cn } from '~/lib/cn'
-import { compactUsd, pct, tokens, usd } from '~/lib/format'
-import { addrOf } from '~/lib/mock'
+import { truncAddr } from '~/lib/format'
+import { CHAIN, useInstruments, useVenueHealth, VENUE_URL } from '~/lib/api'
 
-interface Op {
-  handle: string
-  addr: string
-  models: number
-  venues: string[]
-  bondUsd: number
-  served7dMicro: number
-  fillRate: number
-  redemptions: number
-  uptime: number
-  slashes: number
-  hue: string
-}
+const TANGLE_ABI = [
+  {
+    type: 'function',
+    name: 'getServiceOperators',
+    inputs: [{ name: 'serviceId', type: 'uint64' }],
+    outputs: [{ name: '', type: 'address[]' }],
+    stateMutability: 'view',
+  },
+] as const
 
-const OPERATORS: Op[] = [
-  { handle: 'tangle-mm-01', addr: '0x7a3f…0a12', models: 14, venues: ['OpenRouter', 'Anthropic', 'Together'], bondUsd: 48_200, served7dMicro: 1_240_000_000_000, fillRate: 0.998, redemptions: 18420, uptime: 0.9997, slashes: 0, hue: '#50d2c1' },
-  { handle: 'h100farm', addr: '0x19bc…77f3', models: 9, venues: ['Fireworks', 'Together'], bondUsd: 31_500, served7dMicro: 820_000_000_000, fillRate: 0.994, redemptions: 11210, uptime: 0.9989, slashes: 0, hue: '#9b7cff' },
-  { handle: 'venice-desk', addr: '0x4d21…91ab', models: 6, venues: ['Venice AI', 'OpenRouter'], bondUsd: 22_750, served7dMicro: 540_000_000_000, fillRate: 0.991, redemptions: 7640, uptime: 0.9972, slashes: 1, hue: '#e23b4e' },
-  { handle: 'idlecluster', addr: '0x88fa…2c40', models: 11, venues: ['OpenRouter', 'Google'], bondUsd: 39_900, served7dMicro: 690_000_000_000, fillRate: 0.996, redemptions: 9930, uptime: 0.9991, slashes: 0, hue: '#4285f4' },
-  { handle: 'nightshift', addr: '0xc0de…5e88', models: 5, venues: ['Together'], bondUsd: 14_300, served7dMicro: 210_000_000_000, fillRate: 0.987, redemptions: 3120, uptime: 0.9954, slashes: 0, hue: '#f5a623' },
-]
+const STAKING_ABI = [
+  {
+    type: 'function',
+    name: 'getOperatorStake',
+    inputs: [{ name: 'operator', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'isOperator',
+    inputs: [{ name: 'operator', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view',
+  },
+] as const
 
 export default function OperatorsPage() {
-  const totalBond = OPERATORS.reduce((s, o) => s + o.bondUsd, 0)
-  const totalServed = OPERATORS.reduce((s, o) => s + o.served7dMicro, 0)
-  const totalRedemptions = OPERATORS.reduce((s, o) => s + o.redemptions, 0)
+  const operators = useReadContract({
+    address: CHAIN.tangle,
+    abi: TANGLE_ABI,
+    functionName: 'getServiceOperators',
+    args: [BigInt(CHAIN.serviceId)],
+    chainId: CHAIN.id,
+  })
+  const addrs = (operators.data ?? []) as Address[]
+  const bonds = useReadContracts({
+    contracts: addrs.map((a) => ({
+      address: CHAIN.staking,
+      abi: STAKING_ABI,
+      functionName: 'getOperatorStake' as const,
+      args: [a] as const,
+      chainId: CHAIN.id,
+    })),
+    query: { enabled: addrs.length > 0 },
+  })
+  const health = useVenueHealth()
+  const instruments = useInstruments()
+
   return (
     <div>
       <PageHeader
         title="Operators"
-        subtitle="Market makers who quote both sides and fulfill redemptions. Each posts collateral and stakes restake — slashed if they fail to serve a valid credit."
+        subtitle="The on-chain operator set of Surplus service 4 — bonded restake, slashed for refusing valid redemptions."
         right={
-          <Link to="/operators/register" className="btn-primary h-9">
-            <span className="i-ph:plus text-[15px]" /> Register
+          <Link to="/operators/register" className="btn-primary h-10">
+            <span className="i-ph:plus text-[15px]" /> Become an operator
           </Link>
         }
       />
 
       <div className="px-4 py-4 sm:px-6">
         <div className="panel grid grid-cols-2 divide-x divide-[var(--s-divider)] sm:grid-cols-4">
-          <Stat label="Active operators" value={OPERATORS.length} tone="accent" />
-          <Stat label="Total bonded" value={usd(totalBond, 0)} />
-          <Stat label="7d served" value={compactUsd(totalServed)} />
-          <Stat label="Redemptions" value={tokens(totalRedemptions)} sub="7d" />
+          <Stat
+            label="Service operators"
+            value={operators.isLoading ? '…' : addrs.length}
+            tone="accent"
+            sub={`service ${CHAIN.serviceId} · blueprint ${CHAIN.blueprintId}`}
+          />
+          <Stat
+            label="Venue"
+            value={health.data?.ok ? 'live' : health.isError ? 'down' : '…'}
+            tone={health.data?.ok ? 'emerald' : 'crimson'}
+            sub={health.data ? `${health.data.latencyMs}ms` : undefined}
+          />
+          <Stat label="Markets quoted" value={instruments.data?.length ?? '…'} />
+          <Stat label="Chain" value="Base Sepolia" sub={`#${CHAIN.id}`} />
         </div>
 
-        <Panel className="mt-4" title="Registered operators">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] border-collapse">
-              <thead>
-                <tr className="border-b border-[var(--s-divider)] text-left">
-                  <Th>Operator</Th>
-                  <Th>Venues</Th>
-                  <Th align="right">Models</Th>
-                  <Th align="right">Bond</Th>
-                  <Th align="right">7d served</Th>
-                  <Th align="right">Fill rate</Th>
-                  <Th align="right">Uptime</Th>
-                  <Th align="right">Slashes</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {OPERATORS.map((o) => (
-                  <tr key={o.handle} className="border-b border-[var(--s-divider)] last:border-0 hover:bg-[var(--s-panel)]">
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-3">
-                        <span className="shrink-0 overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
-                          <Identicon address={addrOf(o.handle)} size={30} />
-                        </span>
-                        <div>
-                          <div className="font-data text-[14px] font-semibold text-[var(--s-text)]">{o.handle}</div>
-                          <div className="font-data text-[13px] text-[var(--s-text-muted)]">{o.addr}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex flex-wrap gap-1">
-                        {o.venues.map((v) => (
-                          <span key={v} className="rounded-[4px] bg-[var(--s-panel-strong)] px-1.5 py-0.5 font-data text-[11px] text-[var(--s-text-muted)]">
-                            {v}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-data text-[14px] tabular-nums text-[var(--s-text-secondary)]">{o.models}</td>
-                    <td className="px-3 py-2.5 text-right font-data text-[14px] tabular-nums text-[var(--s-text)]">{usd(o.bondUsd, 0)}</td>
-                    <td className="px-3 py-2.5 text-right font-data text-[14px] tabular-nums text-[var(--s-text-secondary)]">{compactUsd(o.served7dMicro)}</td>
-                    <td className="px-3 py-2.5 text-right font-data text-[14px] tabular-nums text-[var(--s-emerald)]">{pct(o.fillRate, 1)}</td>
-                    <td className="px-3 py-2.5 text-right font-data text-[14px] tabular-nums text-[var(--s-text-secondary)]">{pct(o.uptime, 2)}</td>
-                    <td className="px-3 py-2.5 text-right">
-                      {o.slashes === 0 ? (
-                        <Badge tone="emerald" icon="i-ph:shield-check-fill">clean</Badge>
-                      ) : (
-                        <Badge tone="crimson">{o.slashes}</Badge>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <Panel className="mt-4" title="On-chain operator set">
+          {operators.isError && (
+            <div className="px-4 py-8 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+              Chain read failed — check RPC connectivity.
+            </div>
+          )}
+          {operators.isLoading && (
+            <div className="px-4 py-8 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+              Reading service operator set…
+            </div>
+          )}
+          {addrs.map((addr, i) => {
+            const bond = bonds.data?.[i]?.result as bigint | undefined
+            return (
+              <div
+                key={addr}
+                className="flex flex-wrap items-center gap-4 border-b border-[var(--s-divider)] px-4 py-4 last:border-0"
+              >
+                <span className="overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
+                  <Identicon address={addr} size={36} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={`${CHAIN.explorer}/address/${addr}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-data text-[15px] font-semibold text-[var(--s-text)] hover:text-[var(--s-accent)]"
+                    >
+                      {truncAddr(addr)}
+                    </a>
+                    <Badge tone="emerald" icon="i-ph:shield-check-fill">bonded</Badge>
+                    {i === 0 && <Badge tone="accent">quoting</Badge>}
+                  </div>
+                  <div className="mt-0.5 font-data text-[12px] text-[var(--s-text-muted)]">
+                    {i === 0 ? `serves the venue API · ${VENUE_URL.replace('https://', '')}` : 'joined the operator set on-chain'}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="mono-label">Bond</div>
+                  <div className="font-data text-[15px] font-bold tabular-nums text-[var(--s-text)]">
+                    {bond !== undefined ? `${Number(formatUnits(bond, 18)).toLocaleString()} TNT` : '…'}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
         </Panel>
+
+        <div className={cn('panel mt-4 px-4 py-3 font-data text-[13px] text-[var(--s-text-muted)]')}>
+          Operator refusal of a valid credit is slashable through the blueprint service manager;
+          buyer principal is protected by issuer collateral regardless.{' '}
+          <a
+            href={`${CHAIN.explorer}/address/${CHAIN.staking}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[var(--s-accent)] hover:underline"
+          >
+            Restaking contract ↗
+          </a>
+        </div>
       </div>
     </div>
   )
-}
-
-function Th({ children, align = 'left' }: { children?: React.ReactNode; align?: 'left' | 'right' }) {
-  return <th className={cn('mono-label h-9 px-3 font-semibold', align === 'right' ? 'text-right' : 'text-left')}>{children}</th>
 }

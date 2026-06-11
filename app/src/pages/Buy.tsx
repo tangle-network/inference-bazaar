@@ -1,353 +1,289 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useMemo, useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { useAccount } from 'wagmi'
+import { ConnectKitButton } from 'connectkit'
 import { PageHeader } from '~/components/PageHeader'
-import { Badge, Field, Mark, Panel, Segmented, Slider } from '~/components/ui'
+import { Panel, Slider } from '~/components/ui'
+import { ProviderLogo } from '~/lib/logos'
 import { cn } from '~/lib/cn'
-import { pct, pricePerM, tokens as fmtTokens, usd } from '~/lib/format'
-import { ALL_MODELS, getMarket, getOffers, LABS, VENUES } from '~/lib/mock'
-import type { TokenKind } from '~/lib/types'
+import { compactUsd, pct, pricePerM, tokens } from '~/lib/format'
+import {
+  placeOrder,
+  useBook,
+  useCatalog,
+  useInstruments,
+  type BookLevel,
+} from '~/lib/api'
 
-const QUOTE_TTL = 120
-
+/**
+ * Inference burns input AND output tokens on every call — so you buy usage,
+ * not one leg. The ticket prices both legs against their live books and
+ * executes both orders.
+ */
 export default function BuyPage() {
   const params = useParams()
-  const modelId = params['*'] || ''
-  const navigate = useNavigate()
-  const tradeable = useMemo(() => ALL_MODELS.filter((m) => m.list.output > 0), [])
-  const [selModel, setSelModel] = useState(modelId || tradeable[0]!.id)
-  const [kind, setKind] = useState<TokenKind>('output')
-  const [logTokens, setLogTokens] = useState(Math.log10(25_000_000))
-  const [route, setRoute] = useState<string>('auto') // 'auto' | offerId
-  const [picker, setPicker] = useState(false)
-  const [placed, setPlaced] = useState(false)
+  const routeModel = (params['*'] ??'').replace(/:(input|output)$/, '')
 
-  const amount = Math.round(10 ** logTokens)
-  const market = useMemo(() => getMarket(selModel, kind), [selModel, kind])
-  const offers = useMemo(() => getOffers(selModel), [selModel])
-  const model = market?.model
+  const catalog = useCatalog()
+  const instruments = useInstruments()
 
-  const chosen = useMemo(() => {
-    const eligible = offers.filter((o) => o.remainingTokens >= amount)
-    const pool = eligible.length ? eligible : offers
-    if (route !== 'auto') {
-      const m = pool.find((o) => o.id === route)
-      if (m) return m
+  // Models tradeable here = models with at least one live instrument.
+  const tradeable = useMemo(() => {
+    if (!instruments.data || !catalog.data) return []
+    const byModel = new Map<string, { output: boolean; input: boolean }>()
+    for (const i of instruments.data) {
+      const cur = byModel.get(i.model_id) ?? { output: false, input: false }
+      cur[i.token_kind] = true
+      byModel.set(i.model_id, cur)
     }
-    return [...pool].sort((a, b) => a.price[kind] - b.price[kind])[0]
-  }, [offers, route, amount, kind])
+    return [...byModel.entries()]
+      .map(([id, kinds]) => ({ model: catalog.data!.get(id)!, kinds }))
+      .filter((x) => !!x.model)
+      .sort((a, b) => a.model.name.localeCompare(b.model.name))
+  }, [instruments.data, catalog.data])
 
-  // Firm-quote countdown — resets whenever the quote inputs change.
-  const [secs, setSecs] = useState(QUOTE_TTL)
-  const quoteKey = `${selModel}:${kind}:${amount}:${chosen?.id}`
-  const lastKey = useRef(quoteKey)
-  useEffect(() => {
-    setSecs(QUOTE_TTL)
-    lastKey.current = quoteKey
-    setPlaced(false)
-  }, [quoteKey])
-  useEffect(() => {
-    const t = setInterval(() => setSecs((s) => (s > 0 ? s - 1 : 0)), 1000)
-    return () => clearInterval(t)
-  }, [])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const modelId = selectedId ?? (routeModel || tradeable[0]?.model.id) ?? null
+  const entry = tradeable.find((t) => t.model.id === modelId) ?? null
 
-  if (!market || !model || !chosen) return null
-  const lab = LABS[model.labId]!
-  const venue = VENUES[chosen.venueId]!
-  const price = chosen.price[kind]
-  const listPrice = model.list[kind]
-  const cost = (price * amount) / 1_000_000 / 1_000_000
-  const listCost = (listPrice * amount) / 1_000_000 / 1_000_000
-  const saving = listCost - cost
+  // Monthly usage, in millions of tokens.
+  const [inputM, setInputM] = useState(50)
+  const [outputM, setOutputM] = useState(10)
+
+  const outBook = useBook(entry?.kinds.output ? `${modelId}:output` : null)
+  const inBook = useBook(entry?.kinds.input ? `${modelId}:input` : null)
+
+  const quote = useMemo(() => {
+    if (!entry) return null
+    const legs: {
+      kind: 'input' | 'output'
+      qty: number
+      listMicroPerM: number
+      asks: BookLevel[]
+    }[] = []
+    if (entry.kinds.input)
+      legs.push({
+        kind: 'input',
+        qty: inputM * 1_000_000,
+        listMicroPerM: entry.model.inputMicroPerM,
+        asks: inBook.data?.book.asks ?? [],
+      })
+    if (entry.kinds.output)
+      legs.push({
+        kind: 'output',
+        qty: outputM * 1_000_000,
+        listMicroPerM: entry.model.outputMicroPerM,
+        asks: outBook.data?.book.asks ?? [],
+      })
+    const priced = legs.map((leg) => {
+      let remaining = leg.qty
+      let cost = 0
+      let worst = 0
+      for (const l of leg.asks) {
+        if (remaining <= 0) break
+        const take = Math.min(remaining, l.qty)
+        cost += Math.round((l.price * take) / 1e6)
+        worst = l.price
+        remaining -= take
+      }
+      return {
+        ...leg,
+        covered: leg.qty - remaining,
+        costMicro: cost,
+        worstPrice: worst,
+        listCostMicro: Math.round((leg.listMicroPerM * leg.qty) / 1e6),
+      }
+    })
+    const cost = priced.reduce((s, l) => s + l.costMicro, 0)
+    const listCost = priced.reduce((s, l) => s + l.listCostMicro, 0)
+    return { legs: priced, costMicro: cost, listCostMicro: listCost, savingsMicro: listCost - cost }
+  }, [entry, inputM, outputM, inBook.data, outBook.data])
+
+  const { address, isConnected } = useAccount()
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function execute() {
+    if (!address || !quote || !modelId) return
+    setBusy(true)
+    setError(null)
+    setDone(null)
+    try {
+      let fills = 0
+      for (const leg of quote.legs) {
+        if (leg.covered <= 0 || leg.worstPrice <= 0) continue
+        await placeOrder({
+          instrumentId: `${modelId}:${leg.kind}`,
+          side: 'buy',
+          price: leg.worstPrice,
+          qtyTokens: leg.covered,
+          owner: address,
+        })
+        fills++
+      }
+      setDone(`${fills} leg${fills === 1 ? '' : 's'} filled on the live book.`)
+      void outBook.refetch()
+      void inBook.refetch()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div>
       <PageHeader
         title="Buy inference"
-        subtitle="Request a firm quote, hit it, and hold a redeemable credit lot. Price is locked the moment you buy — no slippage."
+        subtitle="Price your real monthly usage — both token legs — against the live books, then fill at the discount."
       />
 
-      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-          {/* Config */}
-          <div className="lg:col-span-3">
-            <Panel>
-              <div className="space-y-5 px-4 py-4 sm:px-5">
-                {/* Model picker */}
-                <Field label="Model">
-                  <div className="relative">
-                    <button
-                      onClick={() => setPicker((v) => !v)}
-                      className="flex h-12 w-full items-center justify-between rounded-[6px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 transition-colors hover:border-[var(--s-border-hover)]"
-                    >
-                      <span className="flex items-center gap-2.5">
-                        <Mark hue={lab.hue} glyph={lab.glyph} label={lab.name} />
-                        <span className="text-left">
-                          <span className="block font-data text-[14px] font-semibold text-[var(--s-text)]">{model.name}</span>
-                          <span className="block font-data text-[12px] text-[var(--s-text-muted)]">{lab.name}</span>
-                        </span>
-                      </span>
-                      <span className={cn('i-ph:caret-down text-[16px] text-[var(--s-text-muted)] transition-transform', picker && 'rotate-180')} />
-                    </button>
-                    {picker && (
-                      <div className="absolute z-20 mt-1.5 max-h-[320px] w-full overflow-y-auto rounded-[6px] border border-[var(--s-border)] bg-[var(--s-surface)] py-1 shadow-[var(--s-shadow-pop)]">
-                        {tradeable.map((m) => {
-                          const l = LABS[m.labId]!
-                          return (
-                            <button
-                              key={m.id}
-                              onClick={() => {
-                                setSelModel(m.id)
-                                setRoute('auto')
-                                setPicker(false)
-                              }}
-                              className={cn(
-                                'flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--s-panel)]',
-                                m.id === selModel && 'bg-[var(--s-panel)]',
-                              )}
-                            >
-                              <Mark hue={l.hue} glyph={l.glyph} label={l.name} size={24} />
-                              <span className="flex-1 font-data text-[14px] text-[var(--s-text)]">{m.name}</span>
-                              <span className="font-data text-[12px] text-[var(--s-text-muted)]">{pricePerM(m.list.output)}</span>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </Field>
-
-                {/* Token kind */}
-                <Field label="Token kind">
-                  <Segmented
-                    value={kind}
-                    onChange={setKind}
-                    options={[
-                      { value: 'output', label: 'Output' },
-                      { value: 'input', label: 'Input' },
-                      { value: 'cache', label: 'Cache' },
-                    ]}
-                  />
-                </Field>
-
-                {/* Amount */}
-                <Field label="Amount" hint={<>≈ {fmtTokens(amount)} tokens</>}>
-                  <div className="mb-3 flex items-center gap-2">
-                    <div className="flex h-11 flex-1 items-center rounded-[6px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3">
-                      <input
-                        value={amount}
-                        onChange={(e) => {
-                          const v = Number(e.target.value.replace(/[^0-9]/g, ''))
-                          if (v > 0) setLogTokens(Math.log10(Math.min(5_000_000_000, Math.max(1_000_000, v))))
-                        }}
-                        className="w-full bg-transparent font-data text-[15px] tabular-nums text-[var(--s-text)] outline-none"
-                      />
-                      <span className="font-data text-[13px] text-[var(--s-text-muted)]">tokens</span>
-                    </div>
-                  </div>
-                  <Slider value={logTokens} min={Math.log10(1_000_000)} max={Math.log10(5_000_000_000)} step={0.01} onChange={setLogTokens} />
-                  <div className="mt-1.5 flex justify-between font-data text-[11px] text-[var(--s-text-subtle)]">
-                    <span>1M</span>
-                    <span>100M</span>
-                    <span>1B</span>
-                    <span>5B</span>
-                  </div>
-                </Field>
-
-                {/* Route */}
-                <Field label="Fulfillment" hint="best price auto-routes across venues">
-                  <div className="space-y-1.5">
-                    <RouteOption
-                      active={route === 'auto'}
-                      onClick={() => setRoute('auto')}
-                      left={
-                        <span className="flex items-center gap-2">
-                          <span className="i-ph:lightning-fill text-[15px] text-[var(--s-accent)]" />
-                          <span className="font-data text-[14px] font-semibold text-[var(--s-text)]">Best price (auto-route)</span>
-                        </span>
-                      }
-                      right={<span className="font-data text-[13px] tabular-nums text-[var(--s-accent)]">{pricePerM(chosen.price[kind])}</span>}
-                    />
-                    {offers
-                      .filter((o) => o.remainingTokens >= amount)
-                      .slice(0, 3)
-                      .map((o) => {
-                        const v = VENUES[o.venueId]!
-                        return (
-                          <RouteOption
-                            key={o.id}
-                            active={route === o.id}
-                            onClick={() => setRoute(o.id)}
-                            left={
-                              <span className="flex items-center gap-2">
-                                <span className="h-2 w-2 rounded-full" style={{ background: v.hue }} />
-                                <span className="font-data text-[13px] text-[var(--s-text-secondary)]">
-                                  {v.name} · {o.sellerLabel}
-                                </span>
-                                {o.verified && <span className="i-ph:seal-check text-[13px] text-[var(--s-accent)]" />}
-                              </span>
-                            }
-                            right={<span className="font-data text-[13px] tabular-nums text-[var(--s-text-secondary)]">{pricePerM(o.price[kind])}</span>}
-                          />
-                        )
-                      })}
-                  </div>
-                </Field>
+      <div className="grid grid-cols-1 gap-4 px-4 py-4 sm:px-6 lg:grid-cols-12">
+        {/* Model picker */}
+        <Panel title="Model" className="lg:col-span-4" bodyClassName="max-h-[560px] overflow-y-auto">
+          {tradeable.length === 0 && (
+            <div className="px-4 py-10 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+              {instruments.isError ? 'Venue offline.' : 'Loading live markets…'}
+            </div>
+          )}
+          {tradeable.map(({ model }) => (
+            <button
+              key={model.id}
+              onClick={() => setSelectedId(model.id)}
+              className={cn(
+                'flex w-full items-center gap-3 border-b border-[var(--s-divider)] px-4 py-3 text-left transition-colors last:border-0',
+                model.id === modelId ? 'bg-[var(--s-accent-soft)]' : 'hover:bg-[var(--s-panel)]',
+              )}
+            >
+              <ProviderLogo provider={model.provider} size={30} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-body text-[14px] font-semibold text-[var(--s-text)]">
+                  {model.name}
+                </div>
+                <div className="truncate font-data text-[12px] text-[var(--s-text-muted)]">
+                  in {pricePerM(model.inputMicroPerM)} · out {pricePerM(model.outputMicroPerM)} list
+                </div>
               </div>
-            </Panel>
-          </div>
+              {model.id === modelId && <span className="i-ph:check text-[16px] text-[var(--s-accent)]" />}
+            </button>
+          ))}
+        </Panel>
 
-          {/* Firm quote ticket */}
-          <div className="lg:col-span-2">
-            <div className="panel sticky top-4 overflow-hidden">
-              <div className="flex items-center justify-between border-b border-[var(--s-divider)] px-4 py-2.5">
-                <span className="mono-label !text-[var(--s-text-secondary)]">Firm quote</span>
-                {!placed && (
-                  <span className={cn('font-data text-[12px] tabular-nums', secs <= 15 ? 'text-[var(--s-crimson)]' : 'text-[var(--s-text-muted)]')}>
-                    <span className="i-ph:clock mr-1 inline-block translate-y-px text-[13px]" />
-                    valid {secs}s
+        {/* Usage + quote */}
+        <div className="flex flex-col gap-4 lg:col-span-8">
+          <Panel title="Monthly usage">
+            <div className="grid gap-6 px-4 py-5 sm:grid-cols-2">
+              <div>
+                <div className="flex items-baseline justify-between">
+                  <span className="mono-label">Input tokens</span>
+                  <span className="font-data text-[16px] font-bold tabular-nums text-[var(--s-text)]">
+                    {tokens(inputM * 1_000_000)}
                   </span>
-                )}
+                </div>
+                <Slider value={inputM} min={1} max={500} onChange={setInputM} className="mt-3" />
+                <p className="mt-2 font-data text-[12px] text-[var(--s-text-subtle)]">
+                  prompts, context, documents
+                </p>
               </div>
+              <div>
+                <div className="flex items-baseline justify-between">
+                  <span className="mono-label">Output tokens</span>
+                  <span className="font-data text-[16px] font-bold tabular-nums text-[var(--s-text)]">
+                    {tokens(outputM * 1_000_000)}
+                  </span>
+                </div>
+                <Slider value={outputM} min={1} max={200} onChange={setOutputM} className="mt-3" />
+                <p className="mt-2 font-data text-[12px] text-[var(--s-text-subtle)]">
+                  completions, reasoning, code
+                </p>
+              </div>
+            </div>
+          </Panel>
 
-              {placed ? (
-                <QuoteFilled
-                  amount={amount}
-                  modelName={model.name}
-                  cost={cost}
-                  onView={() => navigate('/portfolio')}
-                  onAgain={() => setPlaced(false)}
-                />
-              ) : (
-                <div className="px-4 py-4">
-                  <div className="flex items-center gap-2.5">
-                    <Mark hue={lab.hue} glyph={lab.glyph} label={lab.name} />
-                    <div className="min-w-0">
-                      <div className="truncate font-data text-[14px] font-semibold text-[var(--s-text)]">{model.name}</div>
-                      <div className="font-data text-[12px] text-[var(--s-text-muted)]">
-                        {fmtTokens(amount)} {kind} tokens
-                      </div>
-                    </div>
+          {entry && quote && (
+            <Panel title="Quote — both legs, live books">
+              <div className="px-4 py-4">
+                <table className="w-full border-collapse font-data text-[14px]">
+                  <thead>
+                    <tr className="border-b border-[var(--s-divider)] text-left">
+                      <th className="mono-label h-9 text-left">Leg</th>
+                      <th className="mono-label h-9 text-right">Covered</th>
+                      <th className="mono-label h-9 text-right">List</th>
+                      <th className="mono-label h-9 text-right">Market</th>
+                      <th className="mono-label h-9 text-right">Saving</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {quote.legs.map((leg) => (
+                      <tr key={leg.kind} className="border-b border-[var(--s-divider)] last:border-0">
+                        <td className="py-2.5 capitalize text-[var(--s-text-secondary)]">{leg.kind}</td>
+                        <td className="py-2.5 text-right tabular-nums text-[var(--s-text-secondary)]">
+                          {tokens(leg.covered)} / {tokens(leg.qty)}
+                        </td>
+                        <td className="py-2.5 text-right tabular-nums text-[var(--s-text-muted)] line-through decoration-[var(--s-text-subtle)]/60">
+                          {compactUsd(leg.listCostMicro)}
+                        </td>
+                        <td className="py-2.5 text-right font-semibold tabular-nums text-[var(--s-text)]">
+                          {compactUsd(leg.costMicro)}
+                        </td>
+                        <td className="py-2.5 text-right tabular-nums text-[var(--s-emerald)]">
+                          {leg.listCostMicro > leg.costMicro
+                            ? pct((leg.listCostMicro - leg.costMicro) / leg.listCostMicro, 1)
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[10px] bg-[var(--s-emerald-soft)] px-4 py-3">
+                  <div className="font-data text-[14px] text-[var(--s-emerald)]">
+                    Monthly total {compactUsd(quote.costMicro)}{' '}
+                    <span className="text-[var(--s-text-muted)] line-through">
+                      {compactUsd(quote.listCostMicro)}
+                    </span>
                   </div>
-
-                  <dl className="mt-4 space-y-2 font-data text-[14px]">
-                    <Line label="Price / 1M" value={pricePerM(price)} />
-                    <Line label="List price / 1M" value={<span className="text-[var(--s-text-muted)] line-through">{pricePerM(listPrice)}</span>} />
-                    <Line label="Discount" value={<span className="text-[var(--s-emerald)]">{pct(chosen.discount, 1)}</span>} />
-                    <Line label="Fulfilled by" value={<span className="text-[var(--s-text-secondary)]">{venue.name}</span>} />
-                  </dl>
-
-                  <div className="my-4 border-t border-dashed border-[var(--s-border)]" />
-
-                  <div className="flex items-end justify-between">
-                    <div>
-                      <div className="mono-label">Total</div>
-                      <div className="font-data text-[26px] font-bold tabular-nums text-[var(--s-text)]">{usd(cost, cost >= 100 ? 2 : 4)}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="mono-label">vs list</div>
-                      <Badge tone="emerald" className="mt-1">
-                        save {usd(saving, saving >= 100 ? 0 : 2)}
-                      </Badge>
-                    </div>
-                  </div>
-
-                  <button onClick={() => setPlaced(true)} disabled={secs === 0} className="btn-primary mt-4 h-12 w-full !text-[14px]">
-                    {secs === 0 ? 'Quote expired — refresh' : 'Confirm purchase'}
-                  </button>
-                  {secs === 0 && (
-                    <button onClick={() => setSecs(QUOTE_TTL)} className="btn-secondary mt-2 h-9 w-full !text-[13px]">
-                      Re-quote
-                    </button>
-                  )}
-
-                  <div className="mt-3 flex items-start gap-2 rounded-[6px] bg-[var(--s-accent-soft)] px-3 py-2.5">
-                    <span className="i-ph:shield-check-fill mt-px shrink-0 text-[15px] text-[var(--s-accent)]" />
-                    <p className="font-body text-[12px] leading-snug text-[var(--s-text-secondary)]">
-                      Backed by operator collateral. Unserved spend is refunded in full <span className="text-[var(--s-accent)]">+ penalty</span>.
-                    </p>
+                  <div className="font-data text-[18px] font-bold tabular-nums text-[var(--s-emerald)]">
+                    save {compactUsd(quote.savingsMicro)}
+                    {quote.listCostMicro > 0 && ` · ${pct(quote.savingsMicro / quote.listCostMicro, 1)}`}
                   </div>
                 </div>
-              )}
-            </div>
-          </div>
+
+                <div className="mt-4">
+                  {!isConnected ? (
+                    <ConnectKitButton.Custom>
+                      {({ show }) => (
+                        <button onClick={show} className="btn-primary h-12 w-full !text-[15px]">
+                          <span className="i-ph:wallet text-[17px]" /> Connect to fill both legs
+                        </button>
+                      )}
+                    </ConnectKitButton.Custom>
+                  ) : (
+                    <button
+                      onClick={execute}
+                      disabled={busy || quote.legs.every((l) => l.covered === 0)}
+                      className="btn-primary h-12 w-full !text-[15px]"
+                    >
+                      {busy ? 'Filling…' : `Fill both legs · ${compactUsd(quote.costMicro)}`}
+                    </button>
+                  )}
+                </div>
+                {done && (
+                  <div className="mt-3 rounded-[8px] border border-[var(--s-emerald)]/30 bg-[var(--s-emerald-soft)] px-3 py-2.5 font-data text-[13px] text-[var(--s-emerald)]">
+                    {done} Settlement intents queued in the operator outbox.
+                  </div>
+                )}
+                {error && (
+                  <div className="mt-3 rounded-[8px] border border-[var(--s-crimson)]/30 bg-[var(--s-crimson-soft)] px-3 py-2.5 font-data text-[13px] text-[var(--s-crimson)]">
+                    {error}
+                  </div>
+                )}
+              </div>
+            </Panel>
+          )}
         </div>
       </div>
-    </div>
-  )
-}
-
-function Line({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between">
-      <dt className="text-[var(--s-text-muted)]">{label}</dt>
-      <dd className="tabular-nums font-semibold text-[var(--s-text)]">{value}</dd>
-    </div>
-  )
-}
-
-function RouteOption({
-  active,
-  onClick,
-  left,
-  right,
-}: {
-  active: boolean
-  onClick: () => void
-  left: React.ReactNode
-  right: React.ReactNode
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'flex w-full items-center justify-between rounded-[6px] border px-3 py-2.5 transition-colors',
-        active ? 'border-[var(--s-accent)] bg-[var(--s-accent-soft)]' : 'border-[var(--s-border)] hover:border-[var(--s-border-hover)]',
-      )}
-    >
-      {left}
-      <span className="flex items-center gap-2">
-        {right}
-        <span
-          className={cn(
-            'flex h-4 w-4 items-center justify-center rounded-full border',
-            active ? 'border-[var(--s-accent)] bg-[var(--s-accent)]' : 'border-[var(--s-border)]',
-          )}
-        >
-          {active && <span className="i-ph:check text-[11px] text-[var(--s-accent-text)]" />}
-        </span>
-      </span>
-    </button>
-  )
-}
-
-function QuoteFilled({
-  amount,
-  modelName,
-  cost,
-  onView,
-  onAgain,
-}: {
-  amount: number
-  modelName: string
-  cost: number
-  onView: () => void
-  onAgain: () => void
-}) {
-  return (
-    <div className="s-fade-up px-4 py-6 text-center">
-      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[var(--s-accent-soft)]">
-        <span className="i-ph:check-circle-fill text-[34px] text-[var(--s-accent)]" />
-      </div>
-      <h3 className="mt-3 font-display text-[17px] font-bold text-[var(--s-text)]">Credit lot minted</h3>
-      <p className="mt-1 font-body text-[13px] text-[var(--s-text-muted)]">
-        {fmtTokens(amount)} tokens of {modelName} for {usd(cost, cost >= 100 ? 2 : 4)}. Redeemable through the router.
-      </p>
-      <button onClick={onView} className="btn-primary mt-4 h-10 w-full !text-[14px]">
-        View in portfolio
-      </button>
-      <button onClick={onAgain} className="btn-secondary mt-2 h-9 w-full !text-[13px]">
-        Buy more
-      </button>
     </div>
   )
 }
