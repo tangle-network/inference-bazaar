@@ -162,9 +162,12 @@ to the phase that delivers it.
 - [ ] **Two-sided liquidity cold-start.** A seeding plan (operator-as-first-MM)
   so the market isn't empty at launch. **Done when:** a documented seed runs on
   testnet with both sides quoting.
-- [ ] **tcloud PR: market/limit price + credits in the agent harness.** Let a
+- [x] **tcloud PR: market/limit price + credits in the agent harness.** Let a
   user pick market vs limit price and spend credits directly from pi / agents.
-  **Done when:** the PR is open and a harness call spends a credit.
+  **Done:** tangle-network/tcloud#41 — `ChatOptions.pricing` (market/limit +
+  credits), `ChatCompletion.surplus` redemption blocks, harness/pi/CLI wiring;
+  harness test spends a credit into `AgentRunResult.surplus`. Router-side
+  debit (the live `/v1/chat/completions` wiring) is the remaining Phase 5 box.
 - [ ] **Legal/custody review.** Selling inference credits for money may be a
   stored-value instrument. **Done when:** counsel has reviewed pre-mainnet.
 
