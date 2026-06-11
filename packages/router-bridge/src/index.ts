@@ -48,3 +48,23 @@ export {
   type TorRequestInit,
   type TorResponse,
 } from './tor'
+export {
+  SURPLUS_SETTLEMENT_DOMAIN,
+  SIDE_BUY,
+  SIDE_SELL,
+  ORDER_TYPES,
+  RECEIPT_TYPES,
+  BATCH_TYPES,
+  CANONICAL_TYPE_STRINGS,
+  ZERO_LOT,
+  buildOrderMessage,
+  buildReceiptMessage,
+  fillCostMicro,
+  fillRfqQuote,
+  type FirmOrder,
+  type FirmOrderWire,
+  type RfqRequest,
+  type RfqQuoteResponse,
+  type RfqFillRequest,
+  type SignedOrderBody,
+} from './firm-quote'

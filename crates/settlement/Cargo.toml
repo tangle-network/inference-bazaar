@@ -1,0 +1,35 @@
+# Host-side settlement: signing firm orders, joining book fills to their signed
+# orders, batching, quorum attestation, and (behind `chain`) submitting to the
+# SurplusSettlement contract over alloy. The digest/recovery core lives in
+# surplus-settlement-core so the SP1 guest shares it.
+[package]
+name = "surplus-settlement"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+surplus-settlement-core = { path = "../settlement-core" }
+surplus-orderbook = { path = "../orderbook" }
+alloy-primitives = { version = "1", features = ["k256", "serde"] }
+alloy-sol-types = "1"
+k256 = { version = "0.13", features = ["ecdsa"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+
+# Chain submission — pulled only with `--features chain` so the lite operator
+# stays light. Same alloy major the inference blueprints pin.
+alloy = { version = "1", features = ["provider-http", "signer-local", "contract", "sol-types"], optional = true }
+anyhow = { version = "1", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[[example]]
+name = "e2e_anvil"
+required-features = ["chain"]
+
+[features]
+default = []
+chain = ["dep:alloy", "dep:anyhow"]

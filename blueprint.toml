@@ -53,10 +53,16 @@ id = 30
 name = "workflow_tick"
 description = "Periodic tick: pull reference price, fetch sidecar quotes, place/update quotes."
 
-# Settlement supports BOTH rails — chosen per order, never hard-wired.
+# Settlement: the legacy rails (chosen per order, never hard-wired) plus the
+# firm rail — EIP-712 signed orders cleared atomically on SurplusSettlement.
 [blueprint.settlement]
-rails = ["router-credits", "shielded"]
+rails = ["router-credits", "shielded", "firm"]
 # Router rail: the live Tangle Router / platform balance (Stripe + on-ramp).
 router_url = "https://router.tangle.tools"
 # Shielded rail: on-chain ShieldedCredits (set per network at deploy time).
 shielded_credits_address = ""
+# Firm rail: SurplusSettlement (contracts/src/SurplusSettlement.sol) — atomic
+# fill settlement, collateral-backed credit lots, redemption defaults, batched
+# verification by attester quorum or SP1 proof. Deploy via
+# contracts/script/Deploy.s.sol; set per network.
+surplus_settlement_address = ""

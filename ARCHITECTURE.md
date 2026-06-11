@@ -220,6 +220,65 @@ settlement rail. Mirrors `llm-inference-blueprint` + `tangle-router/lib/shielded
 `@surplus/router-bridge`'s SpendAuth is a deliberate copy of the router's typed
 data — **drift is a fund-loss bug**; change only in lockstep with the router.
 
+### Rail 3 — Firm (the settlement spine)
+
+The rail that makes "cross the spread and DEFINITELY get your token spend"
+true. Four layers, all built:
+
+**1. Discovery — CLOB + RFQ, one signed struct.** A CLOB order and an RFQ
+response are the *same* EIP-712 `Order` (`instrument, side, price, qty, lotId,
+trader, expiry, salt` under domain `SurplusSettlement/1`). RFQ
+(`POST /rfq`) returns a firm, signed, short-TTL quote for exactly the
+requested size, priced by the risk-gated sidecar and never better for the
+taker than the risk gate allowed; the requester countersigns and crosses
+(`POST /rfq/fill`) or posts to the book (`POST /order-signed`). Matching two
+signed orders yields a `SignedFill` — the atomic settlement unit.
+
+**2. Commitment — signatures, not promises.** The venue verifies every order
+signature at intake, but it is only a relayer: the contract re-verifies
+everything, so a malicious venue can censor, never forge or alter a fill.
+Firm quotes bound maker exposure by `expiry` (default TTL 120s); `cancelOrder`
+is the on-chain kill switch.
+
+**3. Settlement — atomic by construction** (`contracts/src/SurplusSettlement.sol`).
+There is deliberately **no escrow-then-release two-phase flow**: buyers deposit
+tsUSD into a balance they can withdraw at any time, and `settleFills` debits
+the buyer, pays the seller (minus the platform fee), and mints/transfers the
+credit lot in ONE transaction with no external calls — it either all happens
+or none of it does, which *eliminates* the "paid, no credit" window instead of
+timeout-patching it. Cumulative per-order fill caps (`filled[orderHash]`),
+limit-price bounds, expiry and cancellation are all contract-enforced. Batch
+compression shares one boundary with two verifiers:
+`settleBatchAttested` (m-of-n attester quorum over `(batchNonce, fillsHash)`)
+and `settleBatchProven` (SP1 proof committing
+`abi.encode(domainSeparator, fillsHash)`). In both, signature validity is the
+ONLY delegated check — limits, caps, and balance invariants are still enforced
+on-chain, so a rogue quorum can at most vouch for signatures that were never
+made, not invent balances. The SP1 program (`zk/program`) shares the exact
+digest/recovery code with the venue via `crates/settlement-core`; byte parity
+across Solidity ↔ Rust ↔ TS is pinned by fixture tests on all three sides.
+
+**4. Redemption guarantee — collateral first, slashing second.** A credit lot
+is a claim on its bonded *issuer*. Minting requires payment-token collateral
+≥ outstanding refund value × (1 + default penalty), checked at mint and on
+collateral withdrawal — every lot is fully cash-backed on-chain. Redemption
+opens a deadline (`redemptionWindow`); the issuer serves through the router
+and settles with the holder's signed `RedemptionReceipt` (or an attester
+quorum in dispute). Deadline missed → `claimDefault` repays the holder the
+lot's paid value **plus the penalty, straight from issuer collateral** —
+compensation never depends on slash routing, because Tangle slashes flow to
+the staking system, not the harmed buyer. The default is recorded on-chain and
+`SurplusBSM.challengeDefault` (permissionless — the record is objective)
+proposes a restake slash through tnt-core's `proposeSlash` as deterrence on
+top. Expired lots refund their unredeemed value the same way: paid, unserved
+spend always comes back as cash.
+
+Proven live end to end (`scripts/settlement-e2e.sh`, against anvil): atomic
+fill → receipt redemption → collateral default with penalty → 2-of-3 attested
+batch → SP1-public-values-bound proven batch. The SP1 program executes the
+same fills in ~11.4M cycles (`zk/prover`, execute mode); a tampered signature
+makes the batch uncommittable.
+
 ---
 
 ## Privacy: Tor (via Arti) on the sell side
@@ -294,7 +353,7 @@ tokens; reusing the inference blueprints for the operator/sell side.
 | trading agent sidecar (Claude in Docker)            | `@surplus/mm-loop` on agent-runtime loops                   | **built** |
 | `JOB_WORKFLOW_TICK` cron (`0 */5 * * * *`)          | back-to-back MM sessions on the same tick cron              | migrate |
 | `trading-blueprint-lib` jobs (provision/start/stop) | marketplace jobs (list instrument / start MM / stop / status)| migrate |
-| `TradingVault` + validator-signed envelope          | token-credit vault + validator-gated lot settlement         | migrate |
+| `TradingVault` + validator-signed envelope          | `SurplusSettlement` + attester-quorum / SP1-proven batches  | **built** |
 | `arena/` React Router 7 + blueprint-ui UI           | marketplace arena (leaderboard, books, MM dashboards)       | clone  |
 | operator TLV registration (`registration.rs`)       | operator registration (capacity, models, `.onion` address)  | migrate |
 

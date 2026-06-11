@@ -3,6 +3,7 @@
 //! the blueprint bin's `BackgroundService` so the market is reachable over HTTP
 //! either way.
 
+use crate::market::{RfqFillBody, RfqRequestBody, SignedOrderBody};
 use crate::venue::{Venue, VenueError};
 use axum::{
     extract::State,
@@ -26,6 +27,12 @@ pub fn router(venue: Shared) -> Router {
         .route("/order", post(place_order))
         .route("/cancel", post(cancel_order))
         .route("/mm-tick", post(mm_tick))
+        // Firm-quote market: signed orders, RFQ, settlement outbox.
+        .route("/order-signed", post(place_signed))
+        .route("/rfq", post(rfq_quote))
+        .route("/rfq/fill", post(rfq_fill))
+        .route("/settlement/outbox", get(settlement_outbox))
+        .route("/settlement/flush", post(settlement_flush))
         .with_state(venue)
 }
 
@@ -35,6 +42,8 @@ fn err_status(e: &VenueError) -> StatusCode {
         VenueError::Rejected(_) => StatusCode::UNPROCESSABLE_ENTITY,
         VenueError::NoReference => StatusCode::CONFLICT,
         VenueError::Sidecar(_) => StatusCode::BAD_GATEWAY,
+        VenueError::SettlementUnconfigured(_) => StatusCode::SERVICE_UNAVAILABLE,
+        VenueError::Chain(_) => StatusCode::BAD_GATEWAY,
     }
 }
 
@@ -112,6 +121,38 @@ async fn cancel_order(State(v): State<Shared>, Json(b): Json<CancelBody>) -> imp
 
 async fn mm_tick(State(v): State<Shared>, Json(b): Json<InstBody>) -> impl IntoResponse {
     match v.mm_tick(&b.instrument_id).await {
+        Ok(val) => Json(val).into_response(),
+        Err(e) => (err_status(&e), e.to_string()).into_response(),
+    }
+}
+
+async fn place_signed(State(v): State<Shared>, Json(b): Json<SignedOrderBody>) -> impl IntoResponse {
+    match v.place_signed(b) {
+        Ok(val) => Json(val).into_response(),
+        Err(e) => (err_status(&e), e.to_string()).into_response(),
+    }
+}
+
+async fn rfq_quote(State(v): State<Shared>, Json(b): Json<RfqRequestBody>) -> impl IntoResponse {
+    match v.rfq_quote(&b.instrument_id, b.side, b.qty_tokens).await {
+        Ok(val) => Json(val).into_response(),
+        Err(e) => (err_status(&e), e.to_string()).into_response(),
+    }
+}
+
+async fn rfq_fill(State(v): State<Shared>, Json(b): Json<RfqFillBody>) -> impl IntoResponse {
+    match v.rfq_fill(b) {
+        Ok(val) => Json(val).into_response(),
+        Err(e) => (err_status(&e), e.to_string()).into_response(),
+    }
+}
+
+async fn settlement_outbox(State(v): State<Shared>) -> impl IntoResponse {
+    Json(v.outbox_json())
+}
+
+async fn settlement_flush(State(v): State<Shared>) -> impl IntoResponse {
+    match v.flush_settlement().await {
         Ok(val) => Json(val).into_response(),
         Err(e) => (err_status(&e), e.to_string()).into_response(),
     }

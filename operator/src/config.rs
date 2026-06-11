@@ -41,6 +41,23 @@ pub struct RiskLimits {
     pub kill_switch_drawdown: f64,
 }
 
+/// On-chain settlement binding. Present when the venue trades signed firm
+/// orders (RFQ + signed CLOB) that clear on the SurplusSettlement contract.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SettlementConfig {
+    /// EIP-712 domain chain id (Tangle testnet 3799, mainnet 5845, anvil 31337).
+    pub chain_id: u64,
+    /// SurplusSettlement contract address, 0x-hex.
+    pub contract: String,
+    /// EVM key the operator signs RFQ quotes / MM quotes with, 0x-hex. Without
+    /// it the venue still accepts third-party signed orders but quotes nothing.
+    pub operator_key: Option<String>,
+    /// RPC endpoint for direct submission (feature `chain`).
+    pub rpc_url: Option<String>,
+    /// Firm-quote TTL: how long an RFQ response stays settleable on-chain.
+    pub rfq_ttl_secs: u64,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OperatorConfig {
     /// Where the mm-sidecar listens (the quoting brain).
@@ -50,6 +67,7 @@ pub struct OperatorConfig {
     pub instruments: Vec<Instrument>,
     pub params: QuoteParams,
     pub limits: RiskLimits,
+    pub settlement: Option<SettlementConfig>,
 }
 
 impl OperatorConfig {
@@ -60,9 +78,26 @@ impl OperatorConfig {
             .unwrap_or_else(|_| "http://127.0.0.1:9110".to_string());
         let router_url = std::env::var("SURPLUS_ROUTER_URL")
             .unwrap_or_else(|_| "https://router.tangle.tools".to_string());
+        let settlement = match (
+            std::env::var("SURPLUS_CHAIN_ID").ok().and_then(|v| v.parse::<u64>().ok()),
+            std::env::var("SURPLUS_SETTLEMENT_ADDR").ok(),
+        ) {
+            (Some(chain_id), Some(contract)) => Some(SettlementConfig {
+                chain_id,
+                contract,
+                operator_key: std::env::var("SURPLUS_OPERATOR_KEY").ok(),
+                rpc_url: std::env::var("SURPLUS_RPC_URL").ok(),
+                rfq_ttl_secs: std::env::var("SURPLUS_RFQ_TTL_SECS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(120),
+            }),
+            _ => None,
+        };
         OperatorConfig {
             sidecar_url,
             router_url,
+            settlement,
             instruments: vec![Instrument {
                 id: "anthropic/claude-opus-4-8:output".to_string(),
                 model_id: "anthropic/claude-opus-4-8".to_string(),

@@ -9,3 +9,13 @@ dist/
 .cargo-op-target/
 operator/target/
 target/
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/dependencies/
+
+# SP1
+zk/target/
+zk/program/target/

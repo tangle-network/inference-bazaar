@@ -9033,6 +9033,7 @@ dependencies = [
  "serde",
  "serde_json",
  "surplus-orderbook",
+ "surplus-settlement",
  "tokio",
  "tracing",
  "tracing-subscriber 0.3.23",
@@ -9042,6 +9043,33 @@ dependencies = [
 name = "surplus-orderbook"
 version = "0.1.0"
 dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "surplus-settlement"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "alloy-primitives",
+ "alloy-sol-types",
+ "anyhow",
+ "k256",
+ "serde",
+ "serde_json",
+ "surplus-orderbook",
+ "surplus-settlement-core",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "surplus-settlement-core"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-sol-types",
+ "k256",
  "serde",
 ]
 

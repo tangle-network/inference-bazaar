@@ -1,0 +1,20 @@
+# Shared by the operator (host) and the SP1 batch program (guest): the EIP-712
+# typed structs, digests, signature recovery, and stateless fill-validity rules
+# that mirror SurplusSettlement.sol. no_std-compatible so the zkVM guest can
+# depend on it by path; drift against the contract is a fund-loss bug, pinned by
+# the cross-stack parity fixture (contracts/test/fixtures/eip712-parity.json).
+[package]
+name = "surplus-settlement-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+alloy-primitives = { version = "1", default-features = false, features = ["k256", "serde"] }
+alloy-sol-types = { version = "1", default-features = false }
+k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+
+[features]
+default = ["std"]
+std = ["alloy-primitives/std", "alloy-sol-types/std", "k256/std", "serde/std"]

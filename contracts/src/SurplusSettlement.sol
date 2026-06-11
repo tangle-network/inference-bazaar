@@ -1,0 +1,631 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.26;
+
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { ECDSA } from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import { EIP712 } from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import { ISP1Verifier } from "./interfaces/ISP1Verifier.sol";
+
+/// @title SurplusSettlement — atomic settlement + redemption guarantee for inference-token credits.
+///
+/// The market trades EIP-712 *firm orders*: a CLOB order and an RFQ quote are the
+/// same signed struct, so one settlement path serves both. Settlement is atomic by
+/// construction — there is no escrow limbo: a fill debits the buyer, pays the
+/// seller, and mints/transfers the credit lot in ONE transaction, or reverts with
+/// no state change. The buyer's "definitely get the spend" guarantee is the lot:
+///
+///  1. A lot is a claim on a bonded ISSUER (the operator who minted it). Minting
+///     requires payment-token collateral covering the lot's refund value plus the
+///     default penalty, so every outstanding lot is fully cash-backed on-chain.
+///  2. The holder redeems by opening a redemption (deadline = redemptionWindow).
+///     The issuer serves inference off-chain (through the router) and settles
+///     with the holder's signed receipt — or, in dispute, an attester quorum.
+///  3. If the issuer misses the deadline, anyone triggers the default: the holder
+///     is refunded the lot's paid value plus a penalty, straight from the
+///     issuer's collateral. The default is recorded for the BSM to slash restake
+///     on top (deterrence; compensation never depends on slash routing).
+///  4. An expired lot's unredeemed value is likewise refundable — paid, unserved
+///     spend always comes back as cash.
+///
+/// Two settlement paths share one fill-application core:
+///  - `settleFills`: full orders + signatures, contract verifies everything.
+///    Trustless; the default path.
+///  - `settleBatch*`: signature-free fills, signature validity vouched by an
+///    attester quorum (`Attested`) or an SP1 proof of the same statement
+///    (`Proven`). Everything except signature validity (limits, crossing,
+///    cumulative fill caps, balance/collateral invariants) is still enforced
+///    here, so a malicious quorum cannot move funds without a matching order
+///    constraint — it can only vouch for signatures that were never made.
+contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
+    using SafeERC20 for IERC20;
+    using EnumerableSet for EnumerableSet.AddressSet;
+
+    // ═══════════════════════════════════ Types ═══════════════════════════════════
+
+    /// A firm commitment to trade. side 0 = buy (pay cash, receive credit),
+    /// side 1 = sell (deliver credit). A sell with lotId == 0 mints a fresh lot
+    /// backed by the seller's collateral; lotId != 0 resells an existing lot.
+    struct Order {
+        bytes32 instrument; // keccak256(instrumentId string), e.g. "anthropic/claude-opus-4-8:output"
+        uint8 side;
+        uint64 priceMicroPerM; // limit price, micro-tsUSD per 1M tokens
+        uint64 qtyTokens;
+        bytes32 lotId;
+        address trader;
+        uint64 expiry; // unix seconds; the firm-quote TTL
+        bytes32 salt;
+    }
+
+    struct FillInput {
+        Order buy;
+        bytes buySig;
+        Order sell;
+        bytes sellSig;
+        uint64 qtyTokens;
+        uint64 execPriceMicroPerM;
+    }
+
+    /// A fill whose signatures were verified off-chain (quorum- or proof-vouched).
+    struct BatchFill {
+        Order buy;
+        Order sell;
+        uint64 qtyTokens;
+        uint64 execPriceMicroPerM;
+    }
+
+    struct Lot {
+        address holder;
+        address issuer;
+        bytes32 instrument;
+        uint64 qtyTokens; // remaining redeemable (includes locked)
+        uint64 lockedTokens; // reserved by the open redemption
+        uint64 expiry;
+        uint128 notionalMicro; // remaining refund value (what the holder paid)
+    }
+
+    enum RedemptionState {
+        None,
+        Open,
+        Settled,
+        Defaulted
+    }
+
+    struct Redemption {
+        bytes32 lotId;
+        address holder;
+        uint64 qtyTokens;
+        uint64 deadline;
+        RedemptionState state;
+    }
+
+    struct DefaultRecord {
+        address issuer;
+        uint128 amountMicro;
+        bytes32 redemptionId;
+    }
+
+    bytes32 public constant ORDER_TYPEHASH = keccak256(
+        "Order(bytes32 instrument,uint8 side,uint64 priceMicroPerM,uint64 qtyTokens,bytes32 lotId,address trader,uint64 expiry,bytes32 salt)"
+    );
+    bytes32 public constant RECEIPT_TYPEHASH =
+        keccak256("RedemptionReceipt(bytes32 redemptionId,uint64 servedTokens)");
+    bytes32 public constant BATCH_TYPEHASH =
+        keccak256("SettlementBatch(uint64 batchNonce,bytes32 fillsHash)");
+
+    // ═══════════════════════════════════ Config ══════════════════════════════════
+
+    IERC20 public immutable paymentToken; // tsUSD, 6 decimals (micro = base unit)
+    uint64 public immutable creditTtl; // seconds a minted lot stays redeemable
+    uint64 public immutable redemptionWindow; // seconds an issuer has to serve
+    uint16 public immutable defaultPenaltyBps; // holder bonus on issuer default
+    uint16 public immutable feeBps; // platform take on fill notional
+    address public immutable feeRecipient;
+
+    ISP1Verifier public sp1Verifier; // zero => proven path disabled
+    bytes32 public batchProgramVKey;
+
+    EnumerableSet.AddressSet private _attesters;
+    uint16 public attesterThreshold;
+
+    // ═══════════════════════════════════ State ═══════════════════════════════════
+
+    mapping(address => uint256) public balances; // free cash, micro-tsUSD
+    mapping(address => uint256) public collateral; // issuer bond backing minted lots
+    mapping(address => uint256) public liability; // outstanding refund value of issued lots
+
+    mapping(bytes32 => uint64) public filled; // order digest => cumulative filled qty
+    mapping(bytes32 => bool) public cancelled;
+
+    mapping(bytes32 => Lot) public lots;
+    mapping(bytes32 => Redemption) public redemptions;
+    mapping(bytes32 => bytes32) public openRedemptionOf; // lotId => open redemption id
+
+    DefaultRecord[] private _defaults;
+    uint64 public batchNonce;
+    uint64 private _redemptionNonce;
+
+    // ═══════════════════════════════════ Events ══════════════════════════════════
+
+    event Deposited(address indexed account, uint256 amount);
+    event Withdrawn(address indexed account, uint256 amount);
+    event CollateralDeposited(address indexed issuer, uint256 amount);
+    event CollateralWithdrawn(address indexed issuer, uint256 amount);
+    event OrderCancelled(bytes32 indexed orderHash, address indexed trader);
+    event FillSettled(
+        bytes32 indexed buyOrderHash,
+        bytes32 indexed sellOrderHash,
+        bytes32 instrument,
+        uint64 qtyTokens,
+        uint64 execPriceMicroPerM,
+        uint256 costMicro,
+        bytes32 lotId
+    );
+    event BatchSettled(uint64 indexed batchNonce, bytes32 fillsHash, uint256 fillCount, bool proven);
+    event RedemptionRequested(
+        bytes32 indexed redemptionId,
+        bytes32 indexed lotId,
+        address indexed issuer,
+        address holder,
+        uint64 qtyTokens,
+        uint64 deadline
+    );
+    event RedemptionSettled(bytes32 indexed redemptionId, uint64 servedTokens, uint256 notionalDebitMicro);
+    event RedemptionDefaulted(
+        uint256 indexed defaultId,
+        bytes32 indexed redemptionId,
+        address indexed issuer,
+        address holder,
+        uint256 payoutMicro
+    );
+    event LotExpiredReclaimed(bytes32 indexed lotId, address indexed holder, uint256 refundMicro);
+    event LotTransferred(bytes32 indexed lotId, address indexed from, address indexed to);
+    event AttestersSet(address[] attesters, uint16 threshold);
+    event Sp1VerifierSet(address verifier, bytes32 vkey);
+
+    // ═══════════════════════════════════ Errors ══════════════════════════════════
+
+    error InsufficientBalance(uint256 available, uint256 required);
+    error InsufficientCollateral(uint256 available, uint256 required);
+    error InvalidOrderPair();
+    error OrderExpired(bytes32 orderHash);
+    error OrderIsCancelled(bytes32 orderHash);
+    error Overfill(bytes32 orderHash, uint64 remaining, uint64 requested);
+    error BadSignature(bytes32 orderHash);
+    error PriceOutsideLimits(uint64 execPrice, uint64 buyLimit, uint64 sellLimit);
+    error SelfFill();
+    error NotTrader();
+    error LotNotFound(bytes32 lotId);
+    error NotLotHolder(bytes32 lotId);
+    error LotIsExpired(bytes32 lotId);
+    error LotNotExpired(bytes32 lotId);
+    error LotQtyUnavailable(uint64 available, uint64 requested);
+    error RedemptionAlreadyOpen(bytes32 lotId);
+    error RedemptionNotOpen(bytes32 redemptionId);
+    error RedemptionDeadlineNotPassed(bytes32 redemptionId);
+    error RedemptionDeadlinePassed(bytes32 redemptionId);
+    error ServedExceedsRequested(uint64 served, uint64 requested);
+    error BadReceipt(bytes32 redemptionId);
+    error BadQuorum();
+    error ProvenPathDisabled();
+    error ZeroAmount();
+
+    constructor(
+        IERC20 _paymentToken,
+        uint64 _creditTtl,
+        uint64 _redemptionWindow,
+        uint16 _defaultPenaltyBps,
+        uint16 _feeBps,
+        address _feeRecipient
+    ) EIP712("SurplusSettlement", "1") Ownable(msg.sender) {
+        require(_feeBps <= 10_000 && _defaultPenaltyBps <= 10_000, "bps");
+        paymentToken = _paymentToken;
+        creditTtl = _creditTtl;
+        redemptionWindow = _redemptionWindow;
+        defaultPenaltyBps = _defaultPenaltyBps;
+        feeBps = _feeBps;
+        feeRecipient = _feeRecipient;
+    }
+
+    // ═══════════════════════════════ Cash + collateral ═══════════════════════════
+
+    function deposit(uint256 amount) external {
+        depositFor(msg.sender, amount);
+    }
+
+    /// Fund another account's balance (on-ramp adapters: an operator claiming a
+    /// ShieldedCredits SpendAuth deposits the proceeds for the buyer here).
+    function depositFor(address account, uint256 amount) public nonReentrant {
+        if (amount == 0) revert ZeroAmount();
+        paymentToken.safeTransferFrom(msg.sender, address(this), amount);
+        balances[account] += amount;
+        emit Deposited(account, amount);
+    }
+
+    function withdraw(uint256 amount) external nonReentrant {
+        uint256 bal = balances[msg.sender];
+        if (bal < amount) revert InsufficientBalance(bal, amount);
+        balances[msg.sender] = bal - amount;
+        paymentToken.safeTransfer(msg.sender, amount);
+        emit Withdrawn(msg.sender, amount);
+    }
+
+    function depositCollateral(uint256 amount) external nonReentrant {
+        if (amount == 0) revert ZeroAmount();
+        paymentToken.safeTransferFrom(msg.sender, address(this), amount);
+        collateral[msg.sender] += amount;
+        emit CollateralDeposited(msg.sender, amount);
+    }
+
+    /// Withdraw collateral not backing outstanding lots (incl. penalty headroom).
+    function withdrawCollateral(uint256 amount) external nonReentrant {
+        uint256 free = collateral[msg.sender] - requiredCollateral(msg.sender);
+        if (free < amount) revert InsufficientCollateral(free, amount);
+        collateral[msg.sender] -= amount;
+        paymentToken.safeTransfer(msg.sender, amount);
+        emit CollateralWithdrawn(msg.sender, amount);
+    }
+
+    /// Collateral an issuer must hold: outstanding refund value plus the default
+    /// penalty on all of it — so a full default on every lot is always payable.
+    function requiredCollateral(address issuer) public view returns (uint256) {
+        uint256 liab = liability[issuer];
+        return liab + (liab * defaultPenaltyBps) / 10_000;
+    }
+
+    // ═══════════════════════════════ Order lifecycle ═════════════════════════════
+
+    function hashOrder(Order calldata o) public pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                ORDER_TYPEHASH, o.instrument, o.side, o.priceMicroPerM, o.qtyTokens, o.lotId, o.trader, o.expiry, o.salt
+            )
+        );
+    }
+
+    function orderDigest(Order calldata o) public view returns (bytes32) {
+        return _hashTypedDataV4(hashOrder(o));
+    }
+
+    function domainSeparator() external view returns (bytes32) {
+        return _domainSeparatorV4();
+    }
+
+    function cancelOrder(Order calldata o) external {
+        if (msg.sender != o.trader) revert NotTrader();
+        bytes32 h = hashOrder(o);
+        cancelled[h] = true;
+        emit OrderCancelled(h, o.trader);
+    }
+
+    // ═══════════════════════════════ Fill settlement ═════════════════════════════
+
+    /// Trustless path: full orders + signatures; the contract verifies everything.
+    /// Anyone may submit (the venue is just a relayer; a fill cannot be forged).
+    function settleFills(FillInput[] calldata fills) external {
+        for (uint256 i = 0; i < fills.length; i++) {
+            FillInput calldata f = fills[i];
+            bytes32 buyHash = _verifySig(f.buy, f.buySig);
+            bytes32 sellHash = _verifySig(f.sell, f.sellSig);
+            _applyFill(f.buy, buyHash, f.sell, sellHash, f.qtyTokens, f.execPriceMicroPerM);
+        }
+    }
+
+    /// Compressed path, quorum-vouched signatures. The attestation covers
+    /// (batchNonce, fillsHash) under this contract's EIP-712 domain.
+    function settleBatchAttested(BatchFill[] calldata fills, bytes[] calldata sigs) external {
+        bytes32 fillsHash = keccak256(abi.encode(fills));
+        bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(BATCH_TYPEHASH, batchNonce, fillsHash)));
+        _verifyQuorum(digest, sigs);
+        _applyBatch(fills, fillsHash, false);
+    }
+
+    /// Compressed path, proof-vouched signatures. The SP1 program re-derives every
+    /// order digest under this domain separator, recovers each signer, and commits
+    /// (domainSeparator, fillsHash) as public values — so a proof binds to exactly
+    /// this contract on exactly this chain and exactly these fills.
+    function settleBatchProven(BatchFill[] calldata fills, bytes calldata proof) external {
+        if (address(sp1Verifier) == address(0)) revert ProvenPathDisabled();
+        bytes32 fillsHash = keccak256(abi.encode(fills));
+        sp1Verifier.verifyProof(batchProgramVKey, abi.encode(_domainSeparatorV4(), fillsHash), proof);
+        _applyBatch(fills, fillsHash, true);
+    }
+
+    function _applyBatch(BatchFill[] calldata fills, bytes32 fillsHash, bool proven) internal {
+        for (uint256 i = 0; i < fills.length; i++) {
+            BatchFill calldata f = fills[i];
+            _applyFill(f.buy, _hashOrderMem(f.buy), f.sell, _hashOrderMem(f.sell), f.qtyTokens, f.execPriceMicroPerM);
+        }
+        emit BatchSettled(batchNonce, fillsHash, fills.length, proven);
+        batchNonce++;
+    }
+
+    function _verifySig(Order calldata o, bytes calldata sig) internal view returns (bytes32 structHash) {
+        structHash = hashOrder(o);
+        if (ECDSA.recover(_hashTypedDataV4(structHash), sig) != o.trader) revert BadSignature(structHash);
+    }
+
+    function _hashOrderMem(Order calldata o) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                ORDER_TYPEHASH, o.instrument, o.side, o.priceMicroPerM, o.qtyTokens, o.lotId, o.trader, o.expiry, o.salt
+            )
+        );
+    }
+
+    /// The atomic core. Debits the buyer, pays the seller (minus fee), and
+    /// delivers the credit lot — all or nothing. No external calls.
+    function _applyFill(
+        Order calldata buy,
+        bytes32 buyHash,
+        Order calldata sell,
+        bytes32 sellHash,
+        uint64 qty,
+        uint64 execPrice
+    ) internal {
+        if (buy.side != 0 || sell.side != 1 || buy.instrument != sell.instrument || buy.lotId != bytes32(0)) {
+            revert InvalidOrderPair();
+        }
+        if (buy.trader == sell.trader) revert SelfFill();
+        if (qty == 0 || execPrice == 0) revert ZeroAmount();
+        if (block.timestamp > buy.expiry) revert OrderExpired(buyHash);
+        if (block.timestamp > sell.expiry) revert OrderExpired(sellHash);
+        if (cancelled[buyHash]) revert OrderIsCancelled(buyHash);
+        if (cancelled[sellHash]) revert OrderIsCancelled(sellHash);
+        if (execPrice > buy.priceMicroPerM || execPrice < sell.priceMicroPerM) {
+            revert PriceOutsideLimits(execPrice, buy.priceMicroPerM, sell.priceMicroPerM);
+        }
+        uint64 buyFilled = filled[buyHash];
+        uint64 sellFilled = filled[sellHash];
+        if (buy.qtyTokens - buyFilled < qty) revert Overfill(buyHash, buy.qtyTokens - buyFilled, qty);
+        if (sell.qtyTokens - sellFilled < qty) revert Overfill(sellHash, sell.qtyTokens - sellFilled, qty);
+        filled[buyHash] = buyFilled + qty;
+        filled[sellHash] = sellFilled + qty;
+
+        // Notional, micro-tsUSD, rounded half-up — mirrors Fill::notional_micro in Rust.
+        uint256 cost = (uint256(execPrice) * qty + 500_000) / 1_000_000;
+        uint256 buyerBal = balances[buy.trader];
+        if (buyerBal < cost) revert InsufficientBalance(buyerBal, cost);
+        balances[buy.trader] = buyerBal - cost;
+        uint256 fee = (cost * feeBps) / 10_000;
+        balances[sell.trader] += cost - fee;
+        balances[feeRecipient] += fee;
+
+        bytes32 newLotId = keccak256(abi.encode(buyHash, sellHash, sellFilled));
+        if (sell.lotId == bytes32(0)) {
+            // Primary mint: seller is the issuer; the lot must be cash-backed.
+            uint256 newLiab = liability[sell.trader] + cost;
+            uint256 needed = newLiab + (newLiab * defaultPenaltyBps) / 10_000;
+            if (collateral[sell.trader] < needed) revert InsufficientCollateral(collateral[sell.trader], needed);
+            liability[sell.trader] = newLiab;
+            lots[newLotId] = Lot({
+                holder: buy.trader,
+                issuer: sell.trader,
+                instrument: sell.instrument,
+                qtyTokens: qty,
+                lockedTokens: 0,
+                expiry: uint64(block.timestamp) + creditTtl,
+                notionalMicro: uint128(cost)
+            });
+        } else {
+            // Resale: carve qty out of the seller's lot. The buyer's refund value
+            // is what they paid, capped at the carved pro-rata value, so issuer
+            // liability can only shrink after mint.
+            Lot storage src = lots[sell.lotId];
+            if (src.holder == address(0)) revert LotNotFound(sell.lotId);
+            if (src.holder != sell.trader) revert NotLotHolder(sell.lotId);
+            // The delivered lot's instrument MUST equal the one the buyer signed.
+            // Line above already pins buy.instrument == sell.instrument, so this
+            // closes the path where a seller delivers a cheap/under-backed lot at
+            // an expensive instrument's price (the buyer cannot pin lotId — it is
+            // forced to 0 — so the contract must guarantee the match).
+            if (src.instrument != sell.instrument) revert InvalidOrderPair();
+            if (block.timestamp > src.expiry) revert LotIsExpired(sell.lotId);
+            uint64 avail = src.qtyTokens - src.lockedTokens;
+            if (avail < qty) revert LotQtyUnavailable(avail, qty);
+            uint256 prorata = (uint256(src.notionalMicro) * qty) / src.qtyTokens;
+            uint256 newNotional = cost < prorata ? cost : prorata;
+            src.qtyTokens -= qty;
+            src.notionalMicro -= uint128(prorata);
+            liability[src.issuer] -= (prorata - newNotional);
+            lots[newLotId] = Lot({
+                holder: buy.trader,
+                issuer: src.issuer,
+                instrument: src.instrument,
+                qtyTokens: qty,
+                lockedTokens: 0,
+                expiry: src.expiry,
+                notionalMicro: uint128(newNotional)
+            });
+            if (src.qtyTokens == 0) delete lots[sell.lotId];
+        }
+        emit FillSettled(buyHash, sellHash, buy.instrument, qty, execPrice, cost, newLotId);
+    }
+
+    // ═══════════════════════════════ Lot lifecycle ═══════════════════════════════
+
+    /// Plain transfer (gifting / custody moves). Selling through the market uses
+    /// a signed sell order instead, so price and refund value stay enforced.
+    function transferLot(bytes32 lotId, address to) external {
+        if (to == address(0)) revert ZeroAmount();
+        Lot storage lot = lots[lotId];
+        if (lot.holder == address(0)) revert LotNotFound(lotId);
+        if (lot.holder != msg.sender) revert NotLotHolder(lotId);
+        if (openRedemptionOf[lotId] != bytes32(0)) revert RedemptionAlreadyOpen(lotId);
+        lot.holder = to;
+        emit LotTransferred(lotId, msg.sender, to);
+    }
+
+    function requestRedemption(bytes32 lotId, uint64 qty) external returns (bytes32 redemptionId) {
+        Lot storage lot = lots[lotId];
+        if (lot.holder == address(0)) revert LotNotFound(lotId);
+        if (lot.holder != msg.sender) revert NotLotHolder(lotId);
+        if (block.timestamp > lot.expiry) revert LotIsExpired(lotId);
+        if (openRedemptionOf[lotId] != bytes32(0)) revert RedemptionAlreadyOpen(lotId);
+        uint64 avail = lot.qtyTokens - lot.lockedTokens;
+        if (qty == 0) revert ZeroAmount();
+        if (avail < qty) revert LotQtyUnavailable(avail, qty);
+        lot.lockedTokens += qty;
+        redemptionId = keccak256(abi.encode(lotId, _redemptionNonce++));
+        redemptions[redemptionId] = Redemption({
+            lotId: lotId,
+            holder: msg.sender,
+            qtyTokens: qty,
+            deadline: uint64(block.timestamp) + redemptionWindow,
+            state: RedemptionState.Open
+        });
+        openRedemptionOf[lotId] = redemptionId;
+        emit RedemptionRequested(redemptionId, lotId, lot.issuer, msg.sender, qty, uint64(block.timestamp) + redemptionWindow);
+    }
+
+    function receiptDigest(bytes32 redemptionId, uint64 servedTokens) public view returns (bytes32) {
+        return _hashTypedDataV4(keccak256(abi.encode(RECEIPT_TYPEHASH, redemptionId, servedTokens)));
+    }
+
+    /// Happy path: the holder's signed receipt acknowledges service. Unserved
+    /// quantity returns to the lot, still redeemable.
+    function settleRedemption(bytes32 redemptionId, uint64 servedTokens, bytes calldata holderSig) external {
+        Redemption storage r = _openRedemption(redemptionId);
+        if (ECDSA.recover(receiptDigest(redemptionId, servedTokens), holderSig) != r.holder) {
+            revert BadReceipt(redemptionId);
+        }
+        _settleRedemption(r, redemptionId, servedTokens);
+    }
+
+    /// Dispute path: an attester quorum vouches the service happened (validators
+    /// check the router's usage records). Same digest, m-of-n instead of holder.
+    function settleRedemptionAttested(
+        bytes32 redemptionId,
+        uint64 servedTokens,
+        bytes[] calldata sigs
+    ) external {
+        Redemption storage r = _openRedemption(redemptionId);
+        _verifyQuorum(receiptDigest(redemptionId, servedTokens), sigs);
+        _settleRedemption(r, redemptionId, servedTokens);
+    }
+
+    function _openRedemption(bytes32 redemptionId) internal view returns (Redemption storage r) {
+        r = redemptions[redemptionId];
+        if (r.state != RedemptionState.Open) revert RedemptionNotOpen(redemptionId);
+        if (block.timestamp > r.deadline) revert RedemptionDeadlinePassed(redemptionId);
+    }
+
+    function _settleRedemption(Redemption storage r, bytes32 redemptionId, uint64 servedTokens) internal {
+        if (servedTokens > r.qtyTokens) revert ServedExceedsRequested(servedTokens, r.qtyTokens);
+        Lot storage lot = lots[r.lotId];
+        uint256 debit = (uint256(lot.notionalMicro) * servedTokens) / lot.qtyTokens;
+        lot.qtyTokens -= servedTokens;
+        lot.lockedTokens -= r.qtyTokens;
+        lot.notionalMicro -= uint128(debit);
+        liability[lot.issuer] -= debit;
+        r.state = RedemptionState.Settled;
+        openRedemptionOf[r.lotId] = bytes32(0);
+        if (lot.qtyTokens == 0) delete lots[r.lotId];
+        emit RedemptionSettled(redemptionId, servedTokens, debit);
+    }
+
+    /// The "definitely": deadline missed → the holder is made whole in cash from
+    /// the issuer's collateral, plus the penalty. Permissionless (keeper-friendly);
+    /// the payout always goes to the redemption's holder.
+    function claimDefault(bytes32 redemptionId) external returns (uint256 payout) {
+        Redemption storage r = redemptions[redemptionId];
+        if (r.state != RedemptionState.Open) revert RedemptionNotOpen(redemptionId);
+        if (block.timestamp <= r.deadline) revert RedemptionDeadlineNotPassed(redemptionId);
+        Lot storage lot = lots[r.lotId];
+        uint256 refundBase = (uint256(lot.notionalMicro) * r.qtyTokens) / lot.qtyTokens;
+        uint256 penalty = (refundBase * defaultPenaltyBps) / 10_000;
+        payout = refundBase + penalty;
+        address issuer = lot.issuer;
+        collateral[issuer] -= payout; // covered by the mint-time invariant
+        liability[issuer] -= refundBase;
+        lot.qtyTokens -= r.qtyTokens;
+        lot.lockedTokens -= r.qtyTokens;
+        lot.notionalMicro -= uint128(refundBase);
+        balances[r.holder] += payout;
+        r.state = RedemptionState.Defaulted;
+        openRedemptionOf[r.lotId] = bytes32(0);
+        if (lot.qtyTokens == 0) delete lots[r.lotId];
+        uint256 defaultId = _defaults.length;
+        _defaults.push(DefaultRecord({ issuer: issuer, amountMicro: uint128(payout), redemptionId: redemptionId }));
+        emit RedemptionDefaulted(defaultId, redemptionId, issuer, r.holder, payout);
+    }
+
+    /// Paid, unserved spend comes back as cash once the lot expires.
+    function reclaimExpired(bytes32 lotId) external returns (uint256 refund) {
+        Lot storage lot = lots[lotId];
+        if (lot.holder == address(0)) revert LotNotFound(lotId);
+        if (block.timestamp <= lot.expiry) revert LotNotExpired(lotId);
+        if (openRedemptionOf[lotId] != bytes32(0)) revert RedemptionAlreadyOpen(lotId);
+        refund = lot.notionalMicro;
+        address holder = lot.holder;
+        collateral[lot.issuer] -= refund;
+        liability[lot.issuer] -= refund;
+        balances[holder] += refund;
+        delete lots[lotId];
+        emit LotExpiredReclaimed(lotId, holder, refund);
+    }
+
+    // ═══════════════════════════════ Attesters + SP1 ═════════════════════════════
+
+    function setAttesters(address[] calldata signers, uint16 threshold) external onlyOwner {
+        uint256 n = _attesters.length();
+        for (uint256 i = n; i > 0; i--) {
+            _attesters.remove(_attesters.at(i - 1));
+        }
+        for (uint256 i = 0; i < signers.length; i++) {
+            _attesters.add(signers[i]);
+        }
+        require(threshold >= 1 && threshold <= _attesters.length(), "threshold");
+        attesterThreshold = threshold;
+        emit AttestersSet(signers, threshold);
+    }
+
+    function setSp1Verifier(address verifier, bytes32 vkey) external onlyOwner {
+        sp1Verifier = ISP1Verifier(verifier);
+        batchProgramVKey = vkey;
+        emit Sp1VerifierSet(verifier, vkey);
+    }
+
+    function attesters() external view returns (address[] memory) {
+        return _attesters.values();
+    }
+
+    /// m-of-n over `digest`: recovered signers strictly ascending (no duplicates),
+    /// each in the attester set, count >= threshold.
+    function _verifyQuorum(bytes32 digest, bytes[] calldata sigs) internal view {
+        uint16 threshold = attesterThreshold;
+        if (threshold == 0 || sigs.length < threshold) revert BadQuorum();
+        address last = address(0);
+        for (uint256 i = 0; i < sigs.length; i++) {
+            address signer = ECDSA.recover(digest, sigs[i]);
+            if (signer <= last || !_attesters.contains(signer)) revert BadQuorum();
+            last = signer;
+        }
+    }
+
+    // ═══════════════════════════════════ Views ═══════════════════════════════════
+
+    function hashFills(BatchFill[] calldata fills) external pure returns (bytes32) {
+        return keccak256(abi.encode(fills));
+    }
+
+    function defaultsCount() external view returns (uint256) {
+        return _defaults.length;
+    }
+
+    function getDefault(uint256 defaultId)
+        external
+        view
+        returns (address issuer, uint128 amountMicro, bytes32 redemptionId)
+    {
+        DefaultRecord storage d = _defaults[defaultId];
+        return (d.issuer, d.amountMicro, d.redemptionId);
+    }
+
+    function freeCollateral(address issuer) external view returns (uint256) {
+        return collateral[issuer] - requiredCollateral(issuer);
+    }
+}

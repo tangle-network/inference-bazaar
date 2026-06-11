@@ -1,0 +1,16 @@
+# SP1 guest. Build from THIS directory with `cargo prove build` (succinct
+# toolchain, riscv64im target). Excluded from the zk workspace so host target
+# triples never leak into the guest build (cf. starter-foundry sp1 family).
+[package]
+name = "surplus-batch-program"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace]
+
+[dependencies]
+sp1-zkvm = "6.1.0"
+serde = { version = "1", features = ["derive"] }
+surplus-settlement-core = { path = "../../crates/settlement-core" }
+surplus-batch-types = { path = "../lib" }

@@ -37,6 +37,11 @@ exposes the market over HTTP:
 | `POST /book` | depth snapshot + reference price + operator inventory |
 | `POST /mm-tick` | pull risk-gated quotes from the **mm-sidecar**, cancel-replace the operator's quotes |
 | `POST /ref` | push a reference price (driven by the live router feed in a full build) |
+| `POST /order-signed` | place an EIP-712 **signed firm order**; crosses against other signed orders become settleable fills |
+| `POST /rfq` | request a firm quote: the operator returns a **signed**, short-TTL `Order` for exactly the requested size |
+| `POST /rfq/fill` | cross a firm quote with a countersigned taker order → `SignedFill` into the outbox |
+| `GET /settlement/outbox` | the settleable fills awaiting submission (+ their `fillsHash`) |
+| `POST /settlement/flush` | submit the outbox via `settleFills` (feature `chain`); dry-run otherwise |
 
 Quoting is delegated to the **mm-sidecar** (the swappable brain — deterministic
 Avellaneda–Stoikov today, an agent later); the sidecar's risk verdict, not the
@@ -76,15 +81,31 @@ harness up` (local devnet), deploy via `cargo tangle blueprint deploy`, register
 request + approve the service, then submit the job (`cargo tangle blueprint jobs`).
 See `scripts/` and `deploy/`.
 
+## The settlement spine (built)
+
+The venue's fills are no longer advisory. `contracts/src/SurplusSettlement.sol`
+clears EIP-712 signed fills **atomically** (debit buyer / pay seller / mint a
+collateral-backed credit lot in one tx), enforces the redemption guarantee
+(holder receipt or attester quorum; deadline default pays the holder from
+issuer collateral + penalty; `SurplusBSM` slashes restake via tnt-core on top),
+and verifies compressed batches at one boundary with two interchangeable
+verifiers — attester quorum (`settleBatchAttested`) now, **SP1 proof**
+(`settleBatchProven`) when volume warrants. The SP1 program lives in
+`zk/program` (separate workspace; sp1-sdk and blueprint-sdk cannot share a
+graph) and proves the one delegated check — signature validity — committing
+`abi.encode(domainSeparator, fillsHash)`; everything else stays
+contract-enforced. `crates/settlement-core` is the shared digest/recovery core
+(venue, prover, guest); parity with Solidity is pinned by fixture tests both
+sides. Live proof: `scripts/settlement-e2e.sh` (anvil) runs atomic fill →
+receipt redemption → collateral default → attested batch → proven batch.
+
 ## Future tracks (documented seams, not built)
 
-- **zkVM settlement (SuccinctVM).** For trust-minimized off-chain matching, the
-  operator would prove each match batch (book state transition + fills) in a
-  zkVM and post the proof + new root on-chain, so settlement is verified, not
-  trusted. This is a new `MatchingEngine` impl that wraps `NativeBook` and emits
-  a proof alongside `PlaceOutcome` — the trait already isolates it from the
-  operator. Worth it only if operator trust is the bottleneck; the validator-set
-  model may suffice first.
+- **Full state-root rollup.** Today batch compression only delegates signature
+  checks; order/fill data still rides calldata and storage holds the truth. If
+  volume outgrows that, the SP1 program extends to prove matching + filled
+  accounting against a state root (the `MatchingEngine` trait and the
+  settleBatch boundary already isolate that change).
 - **On-chain AMM, off-chain orderbook (hybrid).** An on-chain constant-product
   AMM for inference credits sitting beside the off-chain book, with the operator
   routing/arbitraging between them (the 0x-style split). The AMM gives always-on

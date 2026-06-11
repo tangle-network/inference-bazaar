@@ -4,6 +4,7 @@
 //! (BlueprintRunner) drive THIS — the lib is the single source of the market.
 
 use crate::config::{Instrument, OperatorConfig};
+use crate::market::{SettleCtx, SignedState};
 use crate::sidecar::SidecarClient;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -12,7 +13,9 @@ use std::sync::Mutex;
 use surplus_orderbook::{Fill, MatchingEngine, NativeBook, Order, Side};
 
 /// The operator's own market-making orders carry this owner so it can
-/// cancel-replace them each tick and attribute fills to its inventory.
+/// cancel-replace them each tick and attribute fills to its inventory. When a
+/// settlement signer is configured the owner is the operator's EVM address
+/// instead (see [`Venue::mm_owner`]).
 pub const MM_OWNER: &str = "operator-mm";
 
 #[derive(Debug)]
@@ -21,6 +24,11 @@ pub enum VenueError {
     Rejected(String),
     NoReference,
     Sidecar(String),
+    /// Signed-order / RFQ surface used without SURPLUS_CHAIN_ID +
+    /// SURPLUS_SETTLEMENT_ADDR (and a key, where signing is required).
+    SettlementUnconfigured(&'static str),
+    /// On-chain submission failed; the outbox was restored.
+    Chain(String),
 }
 
 impl std::fmt::Display for VenueError {
@@ -30,24 +38,34 @@ impl std::fmt::Display for VenueError {
             VenueError::Rejected(s) => write!(f, "order rejected: {s}"),
             VenueError::NoReference => write!(f, "no reference price set"),
             VenueError::Sidecar(s) => write!(f, "sidecar error: {s}"),
+            VenueError::SettlementUnconfigured(what) => {
+                write!(f, "settlement not configured: {what}")
+            }
+            VenueError::Chain(e) => write!(f, "chain submission failed: {e}"),
         }
     }
 }
 
 impl std::error::Error for VenueError {}
 
-struct InstrumentVenue {
-    book: NativeBook,
-    ref_mid: f64,
-    inventory_tokens: i64,
-    drawdown_micro: f64,
+pub(crate) struct InstrumentVenue {
+    pub(crate) book: NativeBook,
+    pub(crate) ref_mid: f64,
+    pub(crate) inventory_tokens: i64,
+    pub(crate) drawdown_micro: f64,
 }
 
 pub struct Venue {
     pub cfg: OperatorConfig,
-    sidecar: SidecarClient,
-    venues: Mutex<HashMap<String, InstrumentVenue>>,
+    pub(crate) sidecar: SidecarClient,
+    pub(crate) venues: Mutex<HashMap<String, InstrumentVenue>>,
     seq: AtomicU64,
+    /// Settlement binding (EIP-712 domain, optional signer). None => legacy-only venue.
+    pub(crate) settle: Option<SettleCtx>,
+    /// Signed firm orders + the settlement outbox. Lock AFTER `venues`, never before.
+    pub(crate) signed: Mutex<SignedState>,
+    /// Owner string for the operator's own quotes in the book.
+    pub(crate) mm_owner: String,
 }
 
 impl Venue {
@@ -57,23 +75,36 @@ impl Venue {
         for inst in &cfg.instruments {
             venues.insert(inst.id.clone(), InstrumentVenue::from(inst));
         }
+        let settle = SettleCtx::from_config(cfg.settlement.as_ref());
+        let mm_owner = settle
+            .as_ref()
+            .and_then(SettleCtx::operator_address_hex)
+            .unwrap_or_else(|| MM_OWNER.to_string());
         Venue {
             cfg,
             sidecar,
             venues: Mutex::new(venues),
             seq: AtomicU64::new(1),
+            settle,
+            signed: Mutex::new(SignedState::default()),
+            mm_owner,
         }
+    }
+
+    /// Owner string the operator's own quotes carry in the book.
+    pub fn mm_owner(&self) -> &str {
+        &self.mm_owner
     }
 
     pub fn from_env() -> Self {
         Venue::new(OperatorConfig::from_env())
     }
 
-    fn next_id(&self, prefix: &str) -> String {
+    pub(crate) fn next_id(&self, prefix: &str) -> String {
         format!("{prefix}-{}", self.seq.fetch_add(1, Ordering::Relaxed))
     }
 
-    fn next_ts(&self) -> i64 {
+    pub(crate) fn next_ts(&self) -> i64 {
         self.seq.fetch_add(1, Ordering::Relaxed) as i64
     }
 
@@ -156,8 +187,8 @@ impl Venue {
             .book
             .place(order)
             .map_err(|e| VenueError::Rejected(e.to_string()))?;
-        apply_inventory(v, &out.fills);
-        let settlements = settlement_intents(&out.fills, rail);
+        apply_inventory(v, &out.fills, &self.mm_owner);
+        let settlements = settlement_intents(&out.fills, rail, &self.mm_owner);
         Ok(json!({
             "orderId": id,
             "fills": out.fills,
@@ -199,8 +230,18 @@ impl Venue {
         let v = venues
             .get_mut(instrument_id)
             .ok_or_else(|| VenueError::NotFound(instrument_id.to_string()))?;
-        for o in v.book.open_orders(MM_OWNER) {
-            v.book.cancel(&o.id);
+        // Cancel the operator's stale quotes. When they were signed firm orders,
+        // also drop them from the signed-order state — their digests carry a
+        // fresh salt every tick and never recur, and their signatures are never
+        // exposed over HTTP, so nothing can reference them again. Without this
+        // the maps would grow ~2 entries/tick forever on a quoted instrument.
+        {
+            let mut signed = self.signed.lock().unwrap();
+            for o in v.book.open_orders(&self.mm_owner) {
+                v.book.cancel(&o.id);
+                signed.orders.remove(&o.id);
+                signed.filled.remove(&o.id);
+            }
         }
         if !quote.valid {
             return Ok(json!({
@@ -212,15 +253,26 @@ impl Venue {
 
         let mut placed = Vec::new();
         let mut all_fills: Vec<Fill> = Vec::new();
+        let mut signed_fill_count = 0usize;
         for (side, q) in [(Side::Buy, &quote.bid), (Side::Sell, &quote.ask)] {
             let Some(q) = q else { continue };
+            // When a settlement signer is configured, the MM quote is a signed
+            // firm order: its book id is the EIP-712 digest, and any cross
+            // against another signed order yields a settleable fill.
+            let (id, owner) = match self.signed_mm_quote(instrument_id, side, q) {
+                Some((digest_hex, signed)) => {
+                    self.signed.lock().unwrap().orders.insert(digest_hex.clone(), signed);
+                    (digest_hex, self.mm_owner.clone())
+                }
+                None => (self.next_id("mm"), self.mm_owner.clone()),
+            };
             let order = Order {
-                id: self.next_id("mm"),
+                id,
                 instrument_id: instrument_id.to_string(),
                 side,
                 price: q.price.round() as i64,
                 qty: q.qty.round() as i64,
-                owner: MM_OWNER.to_string(),
+                owner,
                 ts: self.next_ts(),
             };
             let price = order.price;
@@ -234,11 +286,17 @@ impl Venue {
                 "side": side, "price": price, "qty": qty, "resting": out.resting.is_some(),
             }));
         }
-        apply_inventory(v, &all_fills);
+        apply_inventory(v, &all_fills, &self.mm_owner);
+        if let Some(ctx) = &self.settle {
+            let mut signed = self.signed.lock().unwrap();
+            signed_fill_count =
+                signed.pair_book_fills(&all_fills, &ctx.domain, crate::market::now_unix());
+        }
         Ok(json!({
             "quoting": true,
             "placed": placed,
             "fills": all_fills,
+            "signedFills": signed_fill_count,
             "rationale": quote.rationale,
             "inventoryTokens": v.inventory_tokens,
         }))
@@ -258,11 +316,11 @@ impl InstrumentVenue {
 
 /// Adjust the operator's inventory for every fill it was a party to. When the MM
 /// is maker, its side is the opposite of the taker's; when taker, the same.
-fn apply_inventory(v: &mut InstrumentVenue, fills: &[Fill]) {
+pub(crate) fn apply_inventory(v: &mut InstrumentVenue, fills: &[Fill], mm_owner: &str) {
     for f in fills {
-        let mm_side = if f.maker_owner == MM_OWNER {
+        let mm_side = if f.maker_owner == mm_owner {
             Some(f.taker_side.opposite())
-        } else if f.taker_owner == MM_OWNER {
+        } else if f.taker_owner == mm_owner {
             Some(f.taker_side)
         } else {
             None
@@ -274,15 +332,15 @@ fn apply_inventory(v: &mut InstrumentVenue, fills: &[Fill]) {
 }
 
 /// A settlement intent for each fill where a real buyer traded (not MM-vs-MM).
-fn settlement_intents(fills: &[Fill], rail: &str) -> Vec<Value> {
+fn settlement_intents(fills: &[Fill], rail: &str, mm_owner: &str) -> Vec<Value> {
     fills
         .iter()
         .filter_map(|f| {
-            let (buyer, operator) = if f.taker_owner != MM_OWNER && f.maker_owner == MM_OWNER {
+            let (buyer, operator) = if f.taker_owner != mm_owner && f.maker_owner == mm_owner {
                 (f.taker_owner.clone(), f.maker_owner.clone())
-            } else if f.maker_owner != MM_OWNER && f.taker_owner == MM_OWNER {
+            } else if f.maker_owner != mm_owner && f.taker_owner == mm_owner {
                 (f.maker_owner.clone(), f.taker_owner.clone())
-            } else if f.maker_owner != MM_OWNER && f.taker_owner != MM_OWNER {
+            } else if f.maker_owner != mm_owner && f.taker_owner != mm_owner {
                 (f.taker_owner.clone(), f.maker_owner.clone())
             } else {
                 return None;

@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# End-to-end smoke of the product loop against a running operator-lite + sidecar:
-#   push reference price -> operator quotes via sidecar -> buyer fills -> re-skew.
-# Proves the operator <-> sidecar <-> risk-gate path before on-chain wiring.
+# Smoke the lite venue over HTTP. Needs surplus-operator-lite + mm-sidecar up
+# (see scripts/devnet-up.sh). Exercises: ref push -> MM tick -> a buyer lifting
+# the MM's ask -> book + settlement-outbox state.
 set -euo pipefail
 OP="${SURPLUS_OPERATOR_ADDR:-127.0.0.1:9100}"
 INST="anthropic/claude-opus-4-8:output"
 
-echo "health:";       curl -fsS "http://$OP/health"; echo
-echo "set ref \$15/M:"; curl -fsS -X POST "http://$OP/ref"  -H 'content-type: application/json' \
+echo "health:";  curl -fsS "http://$OP/health"; echo
+echo "set ref \$15/M:"; curl -fsS -X POST "http://$OP/ref" -H 'content-type: application/json' \
   -d "{\"instrumentId\":\"$INST\",\"refMid\":15000000}"; echo
-echo "quote:";        curl -fsS -X POST "http://$OP/quote" -H 'content-type: application/json' \
+echo "mm tick (quotes from sidecar):"; curl -fsS -X POST "http://$OP/mm-tick" -H 'content-type: application/json' \
   -d "{\"instrumentId\":\"$INST\"}"; echo
-echo "buy 100k:";     curl -fsS -X POST "http://$OP/buy"   -H 'content-type: application/json' \
-  -d "{\"instrumentId\":\"$INST\",\"side\":\"buy\",\"qtyTokens\":100000}"; echo
-echo "re-quote (inventory-skewed):"; curl -fsS -X POST "http://$OP/quote" -H 'content-type: application/json' \
+echo "buyer lifts 100k:"; curl -fsS -X POST "http://$OP/order" -H 'content-type: application/json' \
+  -d "{\"instrumentId\":\"$INST\",\"side\":\"buy\",\"price\":15200000,\"qtyTokens\":100000,\"owner\":\"buyer-1\",\"rail\":\"router-credits\"}"; echo
+echo "book:"; curl -fsS -X POST "http://$OP/book" -H 'content-type: application/json' \
   -d "{\"instrumentId\":\"$INST\"}"; echo
+echo "settlement outbox (signed fills, if SURPLUS_OPERATOR_KEY configured):"
+curl -fsS "http://$OP/settlement/outbox"; echo

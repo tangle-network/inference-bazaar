@@ -1,0 +1,11 @@
+# Input/output types shared by the SP1 guest and the prover host, kept in
+# lockstep by construction (one definition, two consumers).
+[package]
+name = "surplus-batch-types"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+surplus-settlement-core = { workspace = true }
+serde = { workspace = true }
