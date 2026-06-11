@@ -5,8 +5,8 @@ inference.** This is the spending/metering side of the system. It is
 **non-colliding** with the settlement-agent's work (they own issuance + escrow +
 RFQ; this owns what happens when a buyer *uses* the credit they were issued).
 
-Status: not started. This doc is written to be implemented cold in a fresh
-session — it is the full brief.
+Status: **implemented** — `packages/redemption`, 12 tests green. Only the
+live-router wiring checkbox remains (Phase 8).
 
 ---
 
@@ -219,11 +219,11 @@ packages/redemption/
 
 ## 10. Acceptance criteria (Phase 5 boxes in ROADMAP.md)
 
-- [ ] `CreditBook` debit closes the unit; §5 invariants hold after every debit.
+- [x] `CreditBook` debit closes the unit; §5 invariants hold after every debit.
   *(closure.test.ts green)*
-- [ ] `RedemptionAdapter` selects + debits + instructs operator payout; simulated
+- [x] `RedemptionAdapter` selects + debits + instructs operator payout; simulated
   router pays the operator from backing. *(redemption.test.ts green)*
-- [ ] e2e proof: buy → meter → debit → pay → exhaust → refund. *(both suites)*
+- [x] e2e proof: buy → meter → debit → pay → exhaust → refund. *(both suites)*
 - [ ] Live router integration: a real `/v1/chat/completions` debits a real
   credit. *(separate — needs router code; opens the tcloud PR in Phase 8.)*
 
