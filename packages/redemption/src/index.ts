@@ -5,6 +5,12 @@ export {
 } from './adapter'
 export { costMicro, CreditBook, instrumentId } from './credit-book'
 export {
+  GuardedRedemptionAdapter,
+  isRedemptionRefusal,
+  type RedemptionLimits,
+  type RedemptionRefusal,
+} from './guard'
+export {
   ShieldedRedemptionPlanner,
   type PlannedSpendAuth,
   type ShieldedCreditBinding,
