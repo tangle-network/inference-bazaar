@@ -1,0 +1,14 @@
+[package]
+name = "surplus-matcher"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Deterministic epoch-batch matcher for the shared CLOB: a canonical-ordered set of signed orders -> BatchFills + fillsHash, reproducible bit-for-bit by peers (settleBatchAttested) and an SP1 circuit (settleBatchProven)."
+
+[lib]
+name = "surplus_matcher"
+path = "src/lib.rs"
+
+[dependencies]
+surplus-orderbook = { path = "../orderbook" }
+surplus-settlement-core = { path = "../settlement-core" }

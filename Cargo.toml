@@ -3,7 +3,7 @@
 # toolchains rooted at the same repo.
 [workspace]
 resolver = "2"
-members = ["crates/orderbook", "crates/settlement-core", "crates/settlement", "operator"]
+members = ["crates/orderbook", "crates/settlement-core", "crates/matcher", "crates/settlement", "operator"]
 
 # blueprint-sdk (alpha) pulls core2 transitively via libp2p-core -> multihash,
 # and core2 was yanked from crates.io. Point at the same git copy the reference
