@@ -1,0 +1,42 @@
+/**
+ * Real wallet wiring — the arena pattern: wagmi config via ConnectKit's
+ * getDefaultConfig, wrapped in blueprint-ui's Web3Shell (query client +
+ * wagmi provider) and ConnectKitProvider. Chains: Base Sepolia first (where
+ * the Surplus blueprint and settlement contracts live), then Tangle.
+ */
+import type { ReactNode } from 'react'
+import { http } from 'wagmi'
+import { createConfig } from 'wagmi'
+import { baseSepolia } from 'wagmi/chains'
+import { ConnectKitProvider, getDefaultConfig } from 'connectkit'
+import { defaultConnectKitOptions, tangleMainnet, tangleTestnet } from '@tangle-network/blueprint-ui'
+import { Web3Shell } from '@tangle-network/blueprint-ui/components'
+
+const chains = [baseSepolia, tangleTestnet, tangleMainnet] as const
+
+const config = createConfig(
+  getDefaultConfig({
+    chains,
+    transports: Object.fromEntries(
+      chains.map((c) => [c.id, http(c.rpcUrls.default.http[0])]),
+    ),
+    walletConnectProjectId:
+      import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '3fcc6bba6f1de962d911bb5b5c3dba68',
+    appName: 'Surplus',
+    appDescription: 'Open market for AI inference — prepaid inference-token credits.',
+    appUrl: typeof window !== 'undefined' ? window.location.origin : 'https://surplus-market.pages.dev',
+    appIcon: '/favicon.svg',
+  }),
+)
+
+export function Web3Provider({ children }: { children: ReactNode }) {
+  return (
+    <Web3Shell config={config}>
+      <ConnectKitProvider theme="auto" mode="auto" options={defaultConnectKitOptions}>
+        {children}
+      </ConnectKitProvider>
+    </Web3Shell>
+  )
+}
+
+export const SURPLUS_CHAIN = baseSepolia

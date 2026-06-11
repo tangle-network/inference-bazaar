@@ -31,9 +31,9 @@ export default function ActivityPage() {
           </Panel>
         </div>
 
-        <Panel className="mt-4" title="Recent fills" right={<span className="font-data text-[11px] text-[var(--s-text-muted)]">live</span>}>
+        <Panel className="mt-4" title="Recent fills" right={<span className="font-data text-[12px] text-[var(--s-text-muted)]">live</span>}>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] border-collapse font-data text-[12px]">
+            <table className="w-full min-w-[640px] border-collapse font-data text-[13px]">
               <thead>
                 <tr className="border-b border-[var(--s-divider)] text-left">
                   <th className="mono-label h-9 px-3">Side</th>

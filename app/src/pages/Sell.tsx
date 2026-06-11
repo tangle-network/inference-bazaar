@@ -92,7 +92,7 @@ export default function SellPage() {
                   )}
                 >
                   <Mark hue={v.hue} label={v.name} size={30} />
-                  <span className="text-center font-data text-[11px] font-medium leading-tight text-[var(--s-text-secondary)]">{v.name}</span>
+                  <span className="text-center font-data text-[12px] font-medium leading-tight text-[var(--s-text-secondary)]">{v.name}</span>
                 </button>
               )
             })}
@@ -117,10 +117,10 @@ export default function SellPage() {
                   >
                     <Mark hue={l.hue} glyph={l.glyph} label={l.name} size={26} />
                     <span className="flex-1">
-                      <span className="block font-data text-[13px] font-semibold text-[var(--s-text)]">{m.name}</span>
-                      <span className="block font-data text-[11px] text-[var(--s-text-muted)]">{l.name}</span>
+                      <span className="block font-data text-[14px] font-semibold text-[var(--s-text)]">{m.name}</span>
+                      <span className="block font-data text-[12px] text-[var(--s-text-muted)]">{l.name}</span>
                     </span>
-                    <span className="font-data text-[12px] tabular-nums text-[var(--s-text-muted)]">{pricePerM(m.list[kind])}</span>
+                    <span className="font-data text-[13px] tabular-nums text-[var(--s-text-muted)]">{pricePerM(m.list[kind])}</span>
                   </button>
                 )
               })}
@@ -146,7 +146,7 @@ export default function SellPage() {
 
               <Field label="Tokens to sell" hint={<>≈ {fmtTokens(amount)}</>}>
                 <Slider value={logTokens} min={Math.log10(1_000_000)} max={Math.log10(500_000_000)} step={0.01} onChange={setLogTokens} />
-                <div className="mt-1.5 flex justify-between font-data text-[10px] text-[var(--s-text-subtle)]">
+                <div className="mt-1.5 flex justify-between font-data text-[11px] text-[var(--s-text-subtle)]">
                   <span>1M</span>
                   <span>50M</span>
                   <span>500M</span>
@@ -155,7 +155,7 @@ export default function SellPage() {
 
               <Field label="Your discount to list" hint={<span className="text-[var(--s-emerald)]">{pct(discount, 0)} off</span>}>
                 <Slider value={discount} min={0.03} max={0.45} step={0.005} onChange={setDiscount} />
-                <div className="mt-2 flex items-center justify-between rounded-[6px] border border-[var(--s-divider)] px-3 py-2 font-data text-[12px]">
+                <div className="mt-2 flex items-center justify-between rounded-[6px] border border-[var(--s-divider)] px-3 py-2 font-data text-[13px]">
                   <span className="text-[var(--s-text-muted)]">
                     Effective price <span className="font-semibold text-[var(--s-text)]">{pricePerM(effectivePrice)}</span>
                     <span className="text-[var(--s-text-subtle)]"> / 1M</span>
@@ -190,23 +190,23 @@ export default function SellPage() {
                       value={apiKey}
                       onChange={(e) => setApiKey(e.target.value)}
                       placeholder="sk-or-v1-…"
-                      className="w-full bg-transparent font-data text-[13px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)]"
+                      className="w-full bg-transparent font-data text-[14px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)]"
                     />
                     {apiKey.length > 8 && <span className="i-ph:check-circle-fill text-[16px] text-[var(--s-emerald)]" />}
                   </div>
                 </Field>
-                <p className="mt-2 flex items-start gap-1.5 font-body text-[11px] leading-snug text-[var(--s-text-muted)]">
-                  <span className="i-ph:lock-simple mt-px text-[13px]" />
+                <p className="mt-2 flex items-start gap-1.5 font-body text-[12px] leading-snug text-[var(--s-text-muted)]">
+                  <span className="i-ph:lock-simple mt-px text-[14px]" />
                   Encrypted client-side and held by the fulfilling operator only for redemptions you sell. Revocable anytime.
                 </p>
               </div>
             ) : (
               <div className="mt-3 rounded-[6px] border border-[var(--s-divider)] px-3.5 py-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-data text-[12px] text-[var(--s-text-muted)]">Required collateral</span>
+                  <span className="font-data text-[13px] text-[var(--s-text-muted)]">Required collateral</span>
                   <span className="font-data text-[15px] font-bold tabular-nums text-[var(--s-text)]">{usd(collateralReq, 2)}</span>
                 </div>
-                <p className="mt-1.5 font-body text-[11px] leading-snug text-[var(--s-text-muted)]">
+                <p className="mt-1.5 font-body text-[12px] leading-snug text-[var(--s-text-muted)]">
                   Covers the lot's full refund value plus the {pct(0.05, 0)} default penalty. Returned as buyers redeem; the trustless path needs no API key.
                 </p>
               </div>
@@ -223,24 +223,24 @@ export default function SellPage() {
             <div className="flex items-center gap-3 px-4 py-3">
               <Mark hue={lab.hue} glyph={lab.glyph} label={lab.name} />
               <div className="min-w-0 flex-1">
-                <div className="font-data text-[13px] font-semibold text-[var(--s-text)]">{selectedModel.name}</div>
-                <div className="font-data text-[11px] text-[var(--s-text-muted)]">
+                <div className="font-data text-[14px] font-semibold text-[var(--s-text)]">{selectedModel.name}</div>
+                <div className="font-data text-[12px] text-[var(--s-text-muted)]">
                   {venueObj?.name} · {fmtTokens(amount)} {kind} · {compactUsd(grossTake * 1_000_000)} offered
                 </div>
               </div>
               <div className="text-right">
                 <Badge tone="emerald">{pct(discount, 0)} off</Badge>
-                <div className="mt-1 font-data text-[13px] font-bold tabular-nums text-[var(--s-accent)]">{pricePerM(effectivePrice)}</div>
+                <div className="mt-1 font-data text-[14px] font-bold tabular-nums text-[var(--s-accent)]">{pricePerM(effectivePrice)}</div>
               </div>
             </div>
           ) : (
             <div className="flex items-center gap-3 px-4 py-3 opacity-50">
               <div className="h-7 w-7 rounded-[6px] border border-dashed border-[var(--s-border)]" />
               <div className="flex-1">
-                <div className="font-data text-[13px] text-[var(--s-text-muted)]">Your offer preview</div>
-                <div className="font-data text-[11px] text-[var(--s-text-subtle)]">pick a venue and model to start</div>
+                <div className="font-data text-[14px] text-[var(--s-text-muted)]">Your offer preview</div>
+                <div className="font-data text-[12px] text-[var(--s-text-subtle)]">pick a venue and model to start</div>
               </div>
-              <span className="font-data text-[13px] text-[var(--s-text-subtle)]">— /1M</span>
+              <span className="font-data text-[14px] text-[var(--s-text-subtle)]">— /1M</span>
             </div>
           )}
         </div>
@@ -248,7 +248,7 @@ export default function SellPage() {
         <button onClick={() => setListed(true)} disabled={!ready} className="btn-primary mt-4 h-12 w-full !text-[14px]">
           {ready ? 'Sign & list offer' : 'Complete the steps above'}
         </button>
-        <p className="mt-2 text-center font-body text-[11px] text-[var(--s-text-muted)]">
+        <p className="mt-2 text-center font-body text-[12px] text-[var(--s-text-muted)]">
           Listing signs an EIP-712 order — no gas until a buyer fills it.
         </p>
        </div>
@@ -267,9 +267,9 @@ function Section({ label, done, children }: { label: string; done?: boolean; chi
             done ? 'border-[var(--s-accent)] bg-[var(--s-accent)]' : 'border-[var(--s-border)]',
           )}
         >
-          {done && <span className="i-ph:check text-[10px] text-[var(--s-accent-text)]" />}
+          {done && <span className="i-ph:check text-[11px] text-[var(--s-accent-text)]" />}
         </span>
-        <span className="mono-label !text-[var(--s-text-secondary)] !text-[11px]">{label}</span>
+        <span className="mono-label !text-[var(--s-text-secondary)] !text-[12px]">{label}</span>
       </div>
       <div className="pl-6">{children}</div>
     </div>
@@ -303,7 +303,7 @@ function ListedSuccess({
         <span className="i-ph:check-circle-fill text-[40px] text-[var(--s-accent)]" />
       </div>
       <h2 className="mt-4 font-display text-[22px] font-bold text-[var(--s-text)]">Offer is live</h2>
-      <p className="mt-1.5 font-body text-[13px] text-[var(--s-text-muted)]">
+      <p className="mt-1.5 font-body text-[14px] text-[var(--s-text-muted)]">
         {fmtTokens(amount)} tokens of {modelName} via {venueName}, {pct(discount, 0)} below list. Resting on the book.
       </p>
       <div className="mt-5 flex w-full items-center gap-3 panel px-4 py-3">
@@ -314,10 +314,10 @@ function ListedSuccess({
         </div>
         <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--s-emerald)]" />
       </div>
-      <button onClick={onView} className="btn-primary mt-5 h-11 w-full !text-[13px]">
+      <button onClick={onView} className="btn-primary mt-5 h-11 w-full !text-[14px]">
         View my offers
       </button>
-      <button onClick={onAgain} className="btn-secondary mt-2 h-9 w-full !text-[12px]">
+      <button onClick={onAgain} className="btn-secondary mt-2 h-9 w-full !text-[13px]">
         List another
       </button>
     </div>

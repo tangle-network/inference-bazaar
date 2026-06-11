@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { cn } from '~/lib/cn'
 import { toggleTheme, useTheme } from '~/lib/theme'
-import { truncAddr } from '~/lib/format'
+import { WalletButton } from '~/components/WalletButton'
 
 const NAV = [
   { to: '/', label: 'Markets', icon: 'i-ph:chart-line-up', end: true },
@@ -48,35 +48,6 @@ function ThemeButton() {
   )
 }
 
-function WalletButton() {
-  const [connected, setConnected] = useState(false)
-  const addr = '0x7a3fE2c1b9D04a6F18c7A9b2E4d5C6a8B0e1F234'
-  if (!connected) {
-    return (
-      <button onClick={() => setConnected(true)} className="btn-primary h-9">
-        <span className="i-ph:wallet text-[15px]" />
-        Connect
-      </button>
-    )
-  }
-  return (
-    <button
-      onClick={() => setConnected(false)}
-      className="flex h-9 items-center gap-2 rounded-[6px] border border-[var(--s-border)] bg-[var(--s-panel)] pl-1.5 pr-3 transition-colors hover:border-[var(--s-border-hover)]"
-      title="Disconnect"
-    >
-      <span
-        className="h-6 w-6 rounded-[5px]"
-        style={{ background: 'conic-gradient(from 90deg, var(--s-accent), var(--s-brand), var(--s-emerald), var(--s-accent))' }}
-      />
-      <span className="hidden font-data text-[12px] font-semibold text-[var(--s-text)] sm:inline">
-        {truncAddr(addr)}
-      </span>
-      <span className="h-1.5 w-1.5 rounded-full bg-[var(--s-emerald)]" />
-    </button>
-  )
-}
-
 function NavItems({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <nav className="flex flex-col gap-0.5">
@@ -88,7 +59,7 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
           onClick={onNavigate}
           className={({ isActive }) =>
             cn(
-              'group relative flex items-center gap-3 rounded-[7px] px-3 py-2 font-data text-[13px] font-medium transition-colors',
+              'group relative flex items-center gap-3 rounded-[8px] px-3 py-2.5 font-data text-[14px] font-medium transition-colors',
               isActive
                 ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
                 : 'text-[var(--s-text-muted)] hover:bg-[var(--s-panel)] hover:text-[var(--s-text-secondary)]',
@@ -100,7 +71,7 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
               {isActive && (
                 <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-[var(--s-accent)]" />
               )}
-              <span className={cn(item.icon, 'text-[18px]')} />
+              <span className={cn(item.icon, 'text-[19px]')} />
               {item.label}
             </>
           )}

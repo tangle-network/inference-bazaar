@@ -83,7 +83,7 @@ export default function BuyPage() {
                         <Mark hue={lab.hue} glyph={lab.glyph} label={lab.name} />
                         <span className="text-left">
                           <span className="block font-data text-[14px] font-semibold text-[var(--s-text)]">{model.name}</span>
-                          <span className="block font-data text-[11px] text-[var(--s-text-muted)]">{lab.name}</span>
+                          <span className="block font-data text-[12px] text-[var(--s-text-muted)]">{lab.name}</span>
                         </span>
                       </span>
                       <span className={cn('i-ph:caret-down text-[16px] text-[var(--s-text-muted)] transition-transform', picker && 'rotate-180')} />
@@ -106,8 +106,8 @@ export default function BuyPage() {
                               )}
                             >
                               <Mark hue={l.hue} glyph={l.glyph} label={l.name} size={24} />
-                              <span className="flex-1 font-data text-[13px] text-[var(--s-text)]">{m.name}</span>
-                              <span className="font-data text-[11px] text-[var(--s-text-muted)]">{pricePerM(m.list.output)}</span>
+                              <span className="flex-1 font-data text-[14px] text-[var(--s-text)]">{m.name}</span>
+                              <span className="font-data text-[12px] text-[var(--s-text-muted)]">{pricePerM(m.list.output)}</span>
                             </button>
                           )
                         })}
@@ -141,11 +141,11 @@ export default function BuyPage() {
                         }}
                         className="w-full bg-transparent font-data text-[15px] tabular-nums text-[var(--s-text)] outline-none"
                       />
-                      <span className="font-data text-[12px] text-[var(--s-text-muted)]">tokens</span>
+                      <span className="font-data text-[13px] text-[var(--s-text-muted)]">tokens</span>
                     </div>
                   </div>
                   <Slider value={logTokens} min={Math.log10(1_000_000)} max={Math.log10(5_000_000_000)} step={0.01} onChange={setLogTokens} />
-                  <div className="mt-1.5 flex justify-between font-data text-[10px] text-[var(--s-text-subtle)]">
+                  <div className="mt-1.5 flex justify-between font-data text-[11px] text-[var(--s-text-subtle)]">
                     <span>1M</span>
                     <span>100M</span>
                     <span>1B</span>
@@ -162,10 +162,10 @@ export default function BuyPage() {
                       left={
                         <span className="flex items-center gap-2">
                           <span className="i-ph:lightning-fill text-[15px] text-[var(--s-accent)]" />
-                          <span className="font-data text-[13px] font-semibold text-[var(--s-text)]">Best price (auto-route)</span>
+                          <span className="font-data text-[14px] font-semibold text-[var(--s-text)]">Best price (auto-route)</span>
                         </span>
                       }
-                      right={<span className="font-data text-[12px] tabular-nums text-[var(--s-accent)]">{pricePerM(chosen.price[kind])}</span>}
+                      right={<span className="font-data text-[13px] tabular-nums text-[var(--s-accent)]">{pricePerM(chosen.price[kind])}</span>}
                     />
                     {offers
                       .filter((o) => o.remainingTokens >= amount)
@@ -180,13 +180,13 @@ export default function BuyPage() {
                             left={
                               <span className="flex items-center gap-2">
                                 <span className="h-2 w-2 rounded-full" style={{ background: v.hue }} />
-                                <span className="font-data text-[12px] text-[var(--s-text-secondary)]">
+                                <span className="font-data text-[13px] text-[var(--s-text-secondary)]">
                                   {v.name} · {o.sellerLabel}
                                 </span>
-                                {o.verified && <span className="i-ph:seal-check text-[12px] text-[var(--s-accent)]" />}
+                                {o.verified && <span className="i-ph:seal-check text-[13px] text-[var(--s-accent)]" />}
                               </span>
                             }
-                            right={<span className="font-data text-[12px] tabular-nums text-[var(--s-text-secondary)]">{pricePerM(o.price[kind])}</span>}
+                            right={<span className="font-data text-[13px] tabular-nums text-[var(--s-text-secondary)]">{pricePerM(o.price[kind])}</span>}
                           />
                         )
                       })}
@@ -202,8 +202,8 @@ export default function BuyPage() {
               <div className="flex items-center justify-between border-b border-[var(--s-divider)] px-4 py-2.5">
                 <span className="mono-label !text-[var(--s-text-secondary)]">Firm quote</span>
                 {!placed && (
-                  <span className={cn('font-data text-[11px] tabular-nums', secs <= 15 ? 'text-[var(--s-crimson)]' : 'text-[var(--s-text-muted)]')}>
-                    <span className="i-ph:clock mr-1 inline-block translate-y-px text-[12px]" />
+                  <span className={cn('font-data text-[12px] tabular-nums', secs <= 15 ? 'text-[var(--s-crimson)]' : 'text-[var(--s-text-muted)]')}>
+                    <span className="i-ph:clock mr-1 inline-block translate-y-px text-[13px]" />
                     valid {secs}s
                   </span>
                 )}
@@ -223,13 +223,13 @@ export default function BuyPage() {
                     <Mark hue={lab.hue} glyph={lab.glyph} label={lab.name} />
                     <div className="min-w-0">
                       <div className="truncate font-data text-[14px] font-semibold text-[var(--s-text)]">{model.name}</div>
-                      <div className="font-data text-[11px] text-[var(--s-text-muted)]">
+                      <div className="font-data text-[12px] text-[var(--s-text-muted)]">
                         {fmtTokens(amount)} {kind} tokens
                       </div>
                     </div>
                   </div>
 
-                  <dl className="mt-4 space-y-2 font-data text-[13px]">
+                  <dl className="mt-4 space-y-2 font-data text-[14px]">
                     <Line label="Price / 1M" value={pricePerM(price)} />
                     <Line label="List price / 1M" value={<span className="text-[var(--s-text-muted)] line-through">{pricePerM(listPrice)}</span>} />
                     <Line label="Discount" value={<span className="text-[var(--s-emerald)]">{pct(chosen.discount, 1)}</span>} />
@@ -255,14 +255,14 @@ export default function BuyPage() {
                     {secs === 0 ? 'Quote expired — refresh' : 'Confirm purchase'}
                   </button>
                   {secs === 0 && (
-                    <button onClick={() => setSecs(QUOTE_TTL)} className="btn-secondary mt-2 h-9 w-full !text-[12px]">
+                    <button onClick={() => setSecs(QUOTE_TTL)} className="btn-secondary mt-2 h-9 w-full !text-[13px]">
                       Re-quote
                     </button>
                   )}
 
                   <div className="mt-3 flex items-start gap-2 rounded-[6px] bg-[var(--s-accent-soft)] px-3 py-2.5">
                     <span className="i-ph:shield-check-fill mt-px shrink-0 text-[15px] text-[var(--s-accent)]" />
-                    <p className="font-body text-[11px] leading-snug text-[var(--s-text-secondary)]">
+                    <p className="font-body text-[12px] leading-snug text-[var(--s-text-secondary)]">
                       Backed by operator collateral. Unserved spend is refunded in full <span className="text-[var(--s-accent)]">+ penalty</span>.
                     </p>
                   </div>
@@ -313,7 +313,7 @@ function RouteOption({
             active ? 'border-[var(--s-accent)] bg-[var(--s-accent)]' : 'border-[var(--s-border)]',
           )}
         >
-          {active && <span className="i-ph:check text-[10px] text-[var(--s-accent-text)]" />}
+          {active && <span className="i-ph:check text-[11px] text-[var(--s-accent-text)]" />}
         </span>
       </span>
     </button>
@@ -339,13 +339,13 @@ function QuoteFilled({
         <span className="i-ph:check-circle-fill text-[34px] text-[var(--s-accent)]" />
       </div>
       <h3 className="mt-3 font-display text-[17px] font-bold text-[var(--s-text)]">Credit lot minted</h3>
-      <p className="mt-1 font-body text-[12px] text-[var(--s-text-muted)]">
+      <p className="mt-1 font-body text-[13px] text-[var(--s-text-muted)]">
         {fmtTokens(amount)} tokens of {modelName} for {usd(cost, cost >= 100 ? 2 : 4)}. Redeemable through the router.
       </p>
-      <button onClick={onView} className="btn-primary mt-4 h-10 w-full !text-[13px]">
+      <button onClick={onView} className="btn-primary mt-4 h-10 w-full !text-[14px]">
         View in portfolio
       </button>
-      <button onClick={onAgain} className="btn-secondary mt-2 h-9 w-full !text-[12px]">
+      <button onClick={onAgain} className="btn-secondary mt-2 h-9 w-full !text-[13px]">
         Buy more
       </button>
     </div>

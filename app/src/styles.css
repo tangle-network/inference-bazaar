@@ -1,80 +1,99 @@
 /*
- * Surplus design tokens — the live shell palette (ported obsidian-terminal).
- * Dark is default; [data-theme="light"] remaps. Everything visible reads --s-*.
+ * Surplus design tokens — Obsidian Terminal (ai-trading-blueprints arena).
+ * Deep obsidian base, electric emerald gains, crimson losses, amber rankings,
+ * violet primary. Dark is default; [data-theme="light"] remaps. Everything
+ * visible reads --s-* so the palette is one-file swappable.
  */
 :root,
 [data-theme='dark'] {
-  --s-bg: #0a1716;
-  --s-bg-grad-1: #0b1a18;
-  --s-bg-grad-2: #081310;
-  --s-surface: #10211f;
-  --s-panel: #132927;
-  --s-panel-strong: #1b3936;
-  --s-border: #294340;
-  --s-border-hover: rgba(80, 210, 193, 0.5);
-  --s-divider: #213734;
+  /* Depth layering — arena bg-depth-1..4 */
+  --s-bg: #0a0a0f;
+  --s-surface: #12121a;
+  --s-panel: #1a1a25;
+  --s-panel-strong: #22222e;
 
-  --s-text: #f6fefd;
-  --s-text-secondary: #c2cecb;
-  --s-text-muted: #8a9794;
-  --s-text-subtle: #5f6c69;
+  --s-border: rgba(240, 240, 245, 0.07);
+  --s-border-hover: rgba(240, 240, 245, 0.16);
+  --s-divider: rgba(240, 240, 245, 0.06);
 
-  --s-accent: #50d2c1;
-  --s-accent-strong: #6fe0d2;
-  --s-accent-soft: #103631;
-  --s-accent-text: #06100e;
+  --s-text: #f0f0f5;
+  --s-text-secondary: #b8b8c8;
+  --s-text-muted: #8a8a9e;
+  --s-text-subtle: #5a5a6e;
 
-  --s-brand: #9b7cff;
-  --s-brand-strong: #b196ff;
-  --s-brand-soft: #221a3d;
+  /* Violet — the arena primary action color */
+  --s-accent: #a370ff;
+  --s-accent-strong: #b990ff;
+  --s-accent-soft: rgba(142, 89, 255, 0.14);
+  --s-accent-text: #f0f0f5;
+  --s-focus: #8e59ff;
 
-  --s-emerald: #3ddc97;
-  --s-emerald-soft: #103226;
-  --s-crimson: #ff5d6c;
-  --s-crimson-soft: #341620;
-  --s-amber: #f2c066;
-  --s-amber-soft: #322910;
-  --s-blue: #5bb6ff;
+  /* Electric blue — secondary brand axis */
+  --s-brand: #00b4ff;
+  --s-brand-strong: #4aabff;
+  --s-brand-soft: rgba(0, 180, 255, 0.12);
 
-  --s-shadow-pop: 0 18px 60px rgba(0, 0, 0, 0.45);
-  --header-h: 56px;
+  --s-emerald: #00ff88;
+  --s-emerald-soft: rgba(0, 255, 136, 0.1);
+  --s-crimson: #ff4d6a;
+  --s-crimson-soft: rgba(255, 59, 92, 0.12);
+  --s-amber: #ffb800;
+  --s-amber-soft: rgba(255, 184, 0, 0.1);
+  --s-blue: #4aabff;
+
+  /* Glass surfaces — arena glass-card */
+  --s-glass: rgba(18, 18, 26, 0.6);
+  --s-glass-strong: rgba(18, 18, 26, 0.8);
+
+  --s-glow-emerald: 0 0 20px rgba(0, 255, 136, 0.08), 0 0 60px rgba(0, 255, 136, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --s-glow-crimson: 0 0 20px rgba(255, 59, 92, 0.08), 0 0 60px rgba(255, 59, 92, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --s-glow-violet: 0 0 20px rgba(142, 89, 255, 0.1), 0 0 60px rgba(142, 89, 255, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+  --s-shadow-pop: 0 18px 60px rgba(0, 0, 0, 0.55);
+  --header-h: 60px;
 }
 
 [data-theme='light'] {
-  --s-bg: #eef4f2;
-  --s-bg-grad-1: #f3f8f6;
-  --s-bg-grad-2: #e6efec;
-  --s-surface: #ffffff;
+  --s-bg: #f8f8fc;
+  --s-surface: #eeeff5;
   --s-panel: #ffffff;
-  --s-panel-strong: #eef4f2;
-  --s-border: #d2e0dc;
-  --s-border-hover: rgba(13, 159, 140, 0.55);
-  --s-divider: #e0eae7;
+  --s-panel-strong: #e2e3eb;
 
-  --s-text: #0c1a18;
-  --s-text-secondary: #38474400;
-  --s-text-secondary: #3a4a47;
-  --s-text-muted: #5e6e6a;
-  --s-text-subtle: #8a9794;
+  --s-border: rgba(10, 10, 15, 0.1);
+  --s-border-hover: rgba(10, 10, 15, 0.2);
+  --s-divider: rgba(10, 10, 15, 0.08);
 
-  --s-accent: #0d9f8c;
-  --s-accent-strong: #0b8a79;
-  --s-accent-soft: #d6f1ec;
+  --s-text: #0e0e16;
+  --s-text-secondary: #44445a;
+  --s-text-muted: #6b6b82;
+  --s-text-subtle: #9494a8;
+
+  --s-accent: #7c3aed;
+  --s-accent-strong: #6d28d9;
+  --s-accent-soft: rgba(124, 58, 237, 0.1);
   --s-accent-text: #ffffff;
+  --s-focus: #7c3aed;
 
-  --s-brand: #6d28d9;
-  --s-brand-strong: #5b21b6;
-  --s-brand-soft: #ede7fb;
+  --s-brand: #008fcc;
+  --s-brand-strong: #006b99;
+  --s-brand-soft: rgba(0, 143, 204, 0.1);
 
-  --s-emerald: #06965e;
-  --s-emerald-soft: #d6f3e6;
-  --s-crimson: #c7374d;
-  --s-crimson-soft: #fbe1e5;
-  --s-amber: #9b6a11;
-  --s-amber-soft: #f6ecd2;
+  --s-emerald: #007a42;
+  --s-emerald-soft: rgba(0, 122, 66, 0.1);
+  --s-crimson: #c81e34;
+  --s-crimson-soft: rgba(200, 30, 52, 0.08);
+  --s-amber: #b88000;
+  --s-amber-soft: rgba(184, 128, 0, 0.12);
   --s-blue: #1f7fd0;
 
-  --s-shadow-pop: 0 18px 46px rgba(15, 35, 42, 0.16);
+  --s-glass: rgba(255, 255, 255, 0.75);
+  --s-glass-strong: rgba(255, 255, 255, 0.9);
+
+  --s-glow-emerald: 0 1px 3px rgba(10, 10, 15, 0.06);
+  --s-glow-crimson: 0 1px 3px rgba(10, 10, 15, 0.06);
+  --s-glow-violet: 0 1px 3px rgba(10, 10, 15, 0.06);
+
+  --s-shadow-pop: 0 18px 46px rgba(15, 20, 42, 0.16);
 }
 
 * {
@@ -89,14 +108,37 @@ body,
 body {
   margin: 0;
   font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 15px;
   color: var(--s-text);
-  background:
-    radial-gradient(1200px 600px at 80% -10%, color-mix(in srgb, var(--s-accent) 7%, transparent), transparent 60%),
-    radial-gradient(900px 500px at 0% 110%, color-mix(in srgb, var(--s-brand) 7%, transparent), transparent 55%),
-    linear-gradient(180deg, var(--s-bg-grad-1), var(--s-bg-grad-2));
+  background-color: var(--s-bg);
+  /* Arena mesh: emerald / violet / blue ellipses over the obsidian base. */
+  background-image:
+    radial-gradient(ellipse 1200px 700px at 85% -10%, rgba(142, 89, 255, 0.07), transparent 60%),
+    radial-gradient(ellipse 900px 600px at -5% 15%, rgba(0, 255, 136, 0.04), transparent 55%),
+    radial-gradient(ellipse 1000px 800px at 50% 115%, rgba(0, 180, 255, 0.05), transparent 60%);
   background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
 }
+[data-theme='light'] body {
+  background-image:
+    radial-gradient(ellipse 1200px 700px at 85% -10%, rgba(124, 58, 237, 0.05), transparent 60%),
+    radial-gradient(ellipse 900px 600px at -5% 15%, rgba(0, 122, 66, 0.04), transparent 55%);
+}
+/* Noise texture — arena's grain, dark only. */
+[data-theme='dark'] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+#root {
+  position: relative;
+  z-index: 1;
+}
+
 .font-display {
   font-family: 'Outfit', system-ui, sans-serif;
 }
@@ -108,13 +150,16 @@ body {
   font-family: 'DM Sans', system-ui, sans-serif;
 }
 
+::selection {
+  background: rgba(0, 255, 136, 0.2);
+}
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--s-border);
-  border-radius: 8px;
+  background: var(--s-divider);
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--s-border-hover);
@@ -132,6 +177,10 @@ textarea {
 button {
   cursor: pointer;
 }
+:focus-visible {
+  outline: 2px solid var(--s-focus);
+  outline-offset: 2px;
+}
 
 /* Range slider — themed track + thumb, used by the usage/discount sliders. */
 input[type='range'].s-range {
@@ -145,17 +194,17 @@ input[type='range'].s-range {
 input[type='range'].s-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: var(--s-accent);
   border: 3px solid var(--s-bg);
-  box-shadow: 0 0 0 1px var(--s-accent);
+  box-shadow: 0 0 0 1px var(--s-accent), 0 0 12px rgba(142, 89, 255, 0.4);
   cursor: pointer;
 }
 input[type='range'].s-range::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: var(--s-accent);
   border: 3px solid var(--s-bg);

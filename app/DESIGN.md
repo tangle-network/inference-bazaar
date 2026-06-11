@@ -7,11 +7,23 @@ markets. The tradeable instrument is `(model, tokenKind)` — output/input/cache
 tokens of a specific model — priced as a discount to the model's router list
 price (the reference, in micro-tsUSD per 1M tokens).
 
-Design language is the ai-trading-blueprint arena's **Obsidian Terminal**:
-Bloomberg-meets-luxury-crypto. Teal (`#50d2c1`) for the live market, violet for
-brand/actions, emerald gains / crimson losses, `IBM Plex Mono` tabular numerals,
-`Outfit` display, flat panels with hairline borders and inset accent bars. The
-whole app reads `--s-*` tokens, so light/dark is one attribute flip.
+Design language is the ai-trading-blueprints arena's **Obsidian Terminal**,
+hex-for-hex: obsidian blue-black depth layers (`#0A0A0F → #22222E`), violet
+primary actions (`#A370FF`, translucent fills + glow), electric emerald
+`#00FF88` gains / crimson `#FF4D6A` losses / amber `#FFB800` highlights,
+glass-card surfaces (backdrop blur + hairline borders), the arena mesh
+gradient + noise grain, `IBM Plex Mono` tabular numerals, `Outfit` display.
+The whole app reads `--s-*` tokens, so light/dark is one attribute flip.
+
+Shared components, not look-alikes: `Identicon` (blo) from
+`@tangle-network/blueprint-ui/components` for sellers/operators/wallet; the
+wallet is REAL — wagmi + ConnectKit via blueprint-ui's `Web3Shell` +
+`defaultConnectKitOptions`, chains Base Sepolia (where the Surplus blueprint
+and settlement contracts live) + Tangle testnet/mainnet, with balance, chain
+state, switch, copy, explorer, disconnect. Charts are chart.js
+(react-chartjs-2) with gradient area fills — the instrument chart plots the
+market price against the dashed list-price reference so the discount is the
+visible gap; table sparklines are the same component at row scale.
 
 Below: every page, the layouts considered, the choice, and **why**.
 

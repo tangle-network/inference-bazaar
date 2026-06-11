@@ -79,14 +79,14 @@ export default function PortfolioPage() {
                     <div className="flex items-center gap-2.5">
                       <Mark hue={lab.hue} glyph={lab.glyph} label={lab.name} />
                       <div className="min-w-0 flex-1">
-                        <div className="truncate font-data text-[13px] font-semibold text-[var(--s-text)]">{model.name}</div>
-                        <div className="font-data text-[11px] text-[var(--s-text-muted)]">{l.kind} · {pct(l.discount, 0)} off</div>
+                        <div className="truncate font-data text-[14px] font-semibold text-[var(--s-text)]">{model.name}</div>
+                        <div className="font-data text-[12px] text-[var(--s-text-muted)]">{l.kind} · {pct(l.discount, 0)} off</div>
                       </div>
                       <Badge tone={soon ? 'amber' : 'neutral'} icon="i-ph:clock">{l.expiresDays}d</Badge>
                     </div>
 
                     <div className="mt-3.5">
-                      <div className="mb-1 flex items-center justify-between font-data text-[11px]">
+                      <div className="mb-1 flex items-center justify-between font-data text-[12px]">
                         <span className="text-[var(--s-text-muted)]">{tokens(l.remaining)} of {tokens(l.total)} left</span>
                         <span className="tabular-nums text-[var(--s-text-secondary)]">{pct(usedPct, 0)} used</span>
                       </div>
@@ -101,8 +101,8 @@ export default function PortfolioPage() {
                         <div className="font-data text-[17px] font-bold tabular-nums text-[var(--s-text)]">{usd(value, 2)}</div>
                       </div>
                       <div className="flex gap-2">
-                        <Link to={`/m/${model.id}`} className="btn-secondary h-8 !text-[11px]">Market</Link>
-                        <button className="btn-primary h-8 !text-[11px]">Redeem</button>
+                        <Link to={`/m/${model.id}`} className="btn-secondary h-8 !text-[12px]">Market</Link>
+                        <button className="btn-primary h-8 !text-[12px]">Redeem</button>
                       </div>
                     </div>
                   </div>
@@ -133,22 +133,22 @@ export default function PortfolioPage() {
                         <td className="px-3 py-2.5">
                           <div className="flex items-center gap-2.5">
                             <Mark hue={lab.hue} glyph={lab.glyph} label={lab.name} size={24} />
-                            <span className="font-data text-[13px] text-[var(--s-text)]">{model.name}</span>
+                            <span className="font-data text-[14px] text-[var(--s-text)]">{model.name}</span>
                           </div>
                         </td>
-                        <td className="px-3 py-2.5 text-right font-data text-[12px] tabular-nums text-[var(--s-emerald)]">{pct(o.discount, 0)}</td>
-                        <td className="px-3 py-2.5 text-right font-data text-[12px] tabular-nums text-[var(--s-text-secondary)]">{tokens(o.remaining)}</td>
+                        <td className="px-3 py-2.5 text-right font-data text-[13px] tabular-nums text-[var(--s-emerald)]">{pct(o.discount, 0)}</td>
+                        <td className="px-3 py-2.5 text-right font-data text-[13px] tabular-nums text-[var(--s-text-secondary)]">{tokens(o.remaining)}</td>
                         <td className="px-3 py-2.5 text-right">
                           <div className="flex items-center justify-end gap-2">
                             <div className="h-1 w-14 overflow-hidden rounded-full bg-[var(--s-border)]">
                               <div className="h-full bg-[var(--s-accent)]" style={{ width: `${o.soldPct * 100}%` }} />
                             </div>
-                            <span className="font-data text-[12px] tabular-nums text-[var(--s-text-muted)]">{pct(o.soldPct, 0)}</span>
+                            <span className="font-data text-[13px] tabular-nums text-[var(--s-text-muted)]">{pct(o.soldPct, 0)}</span>
                           </div>
                         </td>
-                        <td className="px-3 py-2.5 text-right font-data text-[12px] tabular-nums text-[var(--s-emerald)]">{usd(o.netUsd, 0)}</td>
+                        <td className="px-3 py-2.5 text-right font-data text-[13px] tabular-nums text-[var(--s-emerald)]">{usd(o.netUsd, 0)}</td>
                         <td className="px-3 py-2.5 text-right">
-                          <button className="btn-secondary h-7 !text-[10px]">Cancel</button>
+                          <button className="btn-secondary h-7 !text-[11px]">Cancel</button>
                         </td>
                       </tr>
                     )

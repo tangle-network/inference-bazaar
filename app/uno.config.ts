@@ -4,11 +4,10 @@ import { presetWind4 } from 'unocss/preset-wind4'
 
 /*
  * OBSIDIAN TERMINAL — Surplus
- * Bloomberg terminal meets luxury crypto, ported from the ai-trading-blueprint
- * arena. Deep teal-green obsidian base, electric teal for the live market,
- * violet for brand/actions, emerald gains / crimson losses, amber for highlights.
- * Numbers are mono (IBM Plex Mono, tabular). Surfaces are flat panels with
- * hairline borders and inset accent bars — almost no drop shadow except popovers.
+ * The ai-trading-blueprints arena system, faithfully: deep obsidian blue-black
+ * base (#0A0A0F depth layers), violet primary actions, electric emerald gains /
+ * crimson losses / amber rankings, glass-card surfaces with backdrop blur and
+ * semantic glow shadows. Numbers are mono (IBM Plex Mono, tabular).
  */
 
 export default defineConfig({
@@ -20,22 +19,27 @@ export default defineConfig({
   ],
   transformers: [transformerDirectives()],
   shortcuts: {
-    // The canonical panel: flat surface, hairline border, subtle hover.
-    panel: 'bg-[var(--s-panel)] border border-[var(--s-border)] rounded-[6px]',
+    // Glass-card panels — arena obsidian-terminal surface treatment.
+    panel:
+      'bg-[var(--s-glass)] border border-[var(--s-border)] rounded-[10px] backdrop-blur-[16px]',
     'panel-hover':
-      'transition-[background-color,border-color] duration-150 hover:bg-[var(--s-panel-strong)] hover:border-[var(--s-border-hover)]',
-    'panel-strong': 'bg-[var(--s-panel-strong)] border border-[var(--s-border)] rounded-[6px]',
+      'transition-[background-color,border-color,box-shadow] duration-150 hover:bg-[var(--s-glass-strong)] hover:border-[var(--s-border-hover)]',
+    'panel-strong':
+      'bg-[var(--s-glass-strong)] border border-[var(--s-border)] rounded-[10px] backdrop-blur-[24px]',
     // Micro-label: the uppercase tracked mono caption used on every stat.
     'mono-label':
-      'font-data text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--s-text-muted)]',
+      'font-data text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--s-text-muted)]',
     'mono-num': 'font-data tabular-nums text-[var(--s-text)]',
-    // Primary action: solid teal. Secondary: panel. Danger: crimson text.
+    // Arena buttons: translucent violet fill + violet text, glow on hover.
     'btn-primary':
-      'inline-flex items-center justify-center gap-1.5 rounded-[6px] bg-[var(--s-accent)] px-3.5 font-data text-[13px] font-semibold uppercase tracking-wide text-[var(--s-accent-text)] transition-colors hover:bg-[var(--s-accent-strong)] disabled:opacity-40 disabled:cursor-not-allowed',
+      'inline-flex items-center justify-center gap-1.5 rounded-[8px] bg-[var(--s-accent-soft)] border border-[var(--s-accent)]/30 px-4 font-data text-[13px] font-semibold uppercase tracking-wide text-[var(--s-accent)] transition-all hover:bg-[var(--s-accent)]/24 hover:border-[var(--s-accent)]/50 hover:shadow-[var(--s-glow-violet)] disabled:opacity-40 disabled:cursor-not-allowed',
     'btn-secondary':
-      'inline-flex items-center justify-center gap-1.5 rounded-[6px] border border-[var(--s-border)] bg-[var(--s-panel)] px-3.5 font-data text-[13px] font-semibold uppercase tracking-wide text-[var(--s-text-secondary)] transition-colors hover:border-[var(--s-border-hover)] hover:text-[var(--s-text)] disabled:opacity-40 disabled:cursor-not-allowed',
+      'inline-flex items-center justify-center gap-1.5 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-glass)] px-4 font-data text-[13px] font-semibold uppercase tracking-wide text-[var(--s-text-secondary)] backdrop-blur-[8px] transition-colors hover:border-[var(--s-border-hover)] hover:text-[var(--s-text)] disabled:opacity-40 disabled:cursor-not-allowed',
     'btn-brand':
-      'inline-flex items-center justify-center gap-1.5 rounded-[6px] bg-[var(--s-brand)] px-3.5 font-data text-[13px] font-semibold uppercase tracking-wide text-white transition-colors hover:bg-[var(--s-brand-strong)] disabled:opacity-40 disabled:cursor-not-allowed',
+      'inline-flex items-center justify-center gap-1.5 rounded-[8px] bg-[var(--s-brand-soft)] border border-[var(--s-brand)]/30 px-4 font-data text-[13px] font-semibold uppercase tracking-wide text-[var(--s-brand)] transition-colors hover:bg-[var(--s-brand)]/24 hover:border-[var(--s-brand)]/50 disabled:opacity-40 disabled:cursor-not-allowed',
+    'glow-emerald': 'shadow-[var(--s-glow-emerald)]',
+    'glow-crimson': 'shadow-[var(--s-glow-crimson)]',
+    'glow-violet': 'shadow-[var(--s-glow-violet)]',
     'focus-ring':
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--s-accent)]/60',
   },
@@ -46,12 +50,13 @@ export default defineConfig({
   ],
   theme: {
     colors: {
-      // Stable accents usable directly (e.g. text-emerald, text-crimson).
-      emerald: { DEFAULT: '#3ddc97', soft: '#143c30' },
-      crimson: { DEFAULT: '#ff5d6c', soft: '#3a1620' },
-      amber: { DEFAULT: '#f2c066', soft: '#3a2f10' },
-      accent: { DEFAULT: '#50d2c1' },
-      brand: { DEFAULT: '#9b7cff' },
+      // Obsidian Terminal hues (ai-trading-blueprints arena), usable directly.
+      emerald: { DEFAULT: '#00FF88', soft: 'rgba(0,255,136,0.10)' },
+      crimson: { DEFAULT: '#FF4D6A', soft: 'rgba(255,59,92,0.12)' },
+      amber: { DEFAULT: '#FFB800', soft: 'rgba(255,184,0,0.10)' },
+      accent: { DEFAULT: '#A370FF' },
+      brand: { DEFAULT: '#00B4FF' },
+      violet: { DEFAULT: '#8B5CF6', 400: '#A370FF' },
     },
   },
   preflights: [

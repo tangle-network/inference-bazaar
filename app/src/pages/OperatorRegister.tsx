@@ -37,11 +37,11 @@ export default function OperatorRegisterPage() {
           <span className="i-ph:hard-drives text-[36px] text-[var(--s-accent)]" />
         </div>
         <h2 className="mt-4 font-display text-[22px] font-bold text-[var(--s-text)]">Registration submitted</h2>
-        <p className="mt-1.5 font-body text-[13px] text-[var(--s-text-muted)]">
+        <p className="mt-1.5 font-body text-[14px] text-[var(--s-text-muted)]">
           <span className="font-semibold text-[var(--s-text-secondary)]">{name}</span> is registering on-chain with a {usd(bond, 0)} bond.
           Your venue comes live once the service request is approved.
         </p>
-        <button onClick={() => navigate('/operators')} className="btn-primary mt-5 h-11 w-full max-w-xs !text-[13px]">
+        <button onClick={() => navigate('/operators')} className="btn-primary mt-5 h-11 w-full max-w-xs !text-[14px]">
           View operators
         </button>
       </div>
@@ -62,7 +62,7 @@ export default function OperatorRegisterPage() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. h100farm"
-              className="h-11 w-full rounded-[6px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 font-data text-[13px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)] focus:border-[var(--s-border-hover)]"
+              className="h-11 w-full rounded-[6px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 font-data text-[14px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)] focus:border-[var(--s-border-hover)]"
             />
           </Field>
 
@@ -80,7 +80,7 @@ export default function OperatorRegisterPage() {
                     )}
                   >
                     <span className="h-2 w-2 rounded-full" style={{ background: v.hue }} />
-                    <span className="truncate font-data text-[11px] text-[var(--s-text-secondary)]">{v.name}</span>
+                    <span className="truncate font-data text-[12px] text-[var(--s-text-secondary)]">{v.name}</span>
                   </button>
                 )
               })}
@@ -101,7 +101,7 @@ export default function OperatorRegisterPage() {
                     )}
                   >
                     <Mark hue={l.hue} glyph={l.glyph} label={l.name} size={18} />
-                    <span className="font-data text-[12px] text-[var(--s-text-secondary)]">{l.name}</span>
+                    <span className="font-data text-[13px] text-[var(--s-text-secondary)]">{l.name}</span>
                   </button>
                 )
               })}
@@ -123,7 +123,7 @@ export default function OperatorRegisterPage() {
                 value={endpoint}
                 onChange={(e) => setEndpoint(e.target.value)}
                 placeholder={reach === 'onion' ? 'xxxxxxxx…onion' : 'https://venue.example.com'}
-                className="w-full bg-transparent font-data text-[13px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)]"
+                className="w-full bg-transparent font-data text-[14px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)]"
               />
             </div>
           </Field>
@@ -140,7 +140,7 @@ export default function OperatorRegisterPage() {
                 value={bond}
                 onChange={(e) => setBond(Number(e.target.value))}
               />
-              <div className="mt-1.5 flex justify-between font-data text-[10px] text-[var(--s-text-subtle)]">
+              <div className="mt-1.5 flex justify-between font-data text-[11px] text-[var(--s-text-subtle)]">
                 <span>$1K</span>
                 <span>$100K</span>
                 <span>$200K</span>
@@ -157,7 +157,7 @@ export default function OperatorRegisterPage() {
                 value={feeBps}
                 onChange={(e) => setFeeBps(Number(e.target.value))}
               />
-              <div className="mt-1.5 flex justify-between font-data text-[10px] text-[var(--s-text-subtle)]">
+              <div className="mt-1.5 flex justify-between font-data text-[11px] text-[var(--s-text-subtle)]">
                 <span>0%</span>
                 <span>2.5%</span>
                 <span>5%</span>
@@ -167,7 +167,7 @@ export default function OperatorRegisterPage() {
 
           <div className="flex items-start gap-2.5 rounded-[6px] border border-[var(--s-divider)] bg-[var(--s-surface)] px-3.5 py-3">
             <span className="i-ph:shield-check-fill mt-0.5 shrink-0 text-[18px] text-[var(--s-accent)]" />
-            <p className="font-body text-[12px] leading-snug text-[var(--s-text-muted)]">
+            <p className="font-body text-[13px] leading-snug text-[var(--s-text-muted)]">
               Your bond backs the credits you mint. Fail to serve a valid redemption and the buyer is made whole from it —
               plus a restake slash through the blueprint. <span className="text-[var(--s-text-secondary)]">Serve reliably and it's fully yours.</span>
             </p>
@@ -178,7 +178,7 @@ export default function OperatorRegisterPage() {
           </button>
           <div className="flex items-center justify-center gap-2">
             <Badge icon="i-ph:cube">Base Sepolia</Badge>
-            <span className="font-data text-[11px] text-[var(--s-text-muted)]">registration is one on-chain tx</span>
+            <span className="font-data text-[12px] text-[var(--s-text-muted)]">registration is one on-chain tx</span>
           </div>
         </div>
       </div>

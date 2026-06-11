@@ -15,7 +15,7 @@ export function Orderbook({ bids, asks }: { bids: OrderLevel[]; asks: OrderLevel
   const asksDesc = [...asks].reverse()
 
   return (
-    <div className="font-data text-[12px]">
+    <div className="font-data text-[13px]">
       <div className="grid grid-cols-3 border-b border-[var(--s-divider)] px-3 py-1.5">
         <span className="mono-label">Price /1M</span>
         <span className="mono-label text-right">Size</span>
@@ -28,7 +28,7 @@ export function Orderbook({ bids, asks }: { bids: OrderLevel[]; asks: OrderLevel
       </div>
       <div className="flex items-center justify-between border-y border-[var(--s-divider)] bg-[var(--s-panel)] px-3 py-1.5">
         <span className="tabular-nums font-semibold text-[var(--s-text)]">{pricePerM(mid)}</span>
-        <span className="text-[11px] text-[var(--s-text-muted)]">
+        <span className="text-[12px] text-[var(--s-text-muted)]">
           spread {pricePerM(spread)} · {mid > 0 ? ((spread / mid) * 10000).toFixed(0) : '0'} bps
         </span>
       </div>

@@ -55,6 +55,8 @@ export interface Offer {
   modelId: string
   venueId: string
   seller: string // address or handle
+  /** Full 0x address — identicon source. */
+  sellerAddress: `0x${string}`
   sellerLabel: string
   verified: boolean
   /** discount to list, as a fraction (0.18 = 18% off). Same across kinds here. */

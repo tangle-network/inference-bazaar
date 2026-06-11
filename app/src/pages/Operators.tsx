@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom'
+import { Identicon } from '@tangle-network/blueprint-ui/components'
 import { PageHeader } from '~/components/PageHeader'
-import { Badge, Mark, Panel, Stat } from '~/components/ui'
+import { Badge, Panel, Stat } from '~/components/ui'
 import { cn } from '~/lib/cn'
 import { compactUsd, pct, tokens, usd } from '~/lib/format'
+import { addrOf } from '~/lib/mock'
 
 interface Op {
   handle: string
@@ -68,29 +70,31 @@ export default function OperatorsPage() {
               <tbody>
                 {OPERATORS.map((o) => (
                   <tr key={o.handle} className="border-b border-[var(--s-divider)] last:border-0 hover:bg-[var(--s-panel)]">
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-2.5">
-                        <Mark hue={o.hue} glyph="i-ph:hard-drives" label={o.handle} />
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-3">
+                        <span className="shrink-0 overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
+                          <Identicon address={addrOf(o.handle)} size={30} />
+                        </span>
                         <div>
-                          <div className="font-data text-[13px] font-semibold text-[var(--s-text)]">{o.handle}</div>
-                          <div className="font-data text-[11px] text-[var(--s-text-muted)]">{o.addr}</div>
+                          <div className="font-data text-[14px] font-semibold text-[var(--s-text)]">{o.handle}</div>
+                          <div className="font-data text-[13px] text-[var(--s-text-muted)]">{o.addr}</div>
                         </div>
                       </div>
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex flex-wrap gap-1">
                         {o.venues.map((v) => (
-                          <span key={v} className="rounded-[4px] bg-[var(--s-panel-strong)] px-1.5 py-0.5 font-data text-[10px] text-[var(--s-text-muted)]">
+                          <span key={v} className="rounded-[4px] bg-[var(--s-panel-strong)] px-1.5 py-0.5 font-data text-[11px] text-[var(--s-text-muted)]">
                             {v}
                           </span>
                         ))}
                       </div>
                     </td>
-                    <td className="px-3 py-2.5 text-right font-data text-[13px] tabular-nums text-[var(--s-text-secondary)]">{o.models}</td>
-                    <td className="px-3 py-2.5 text-right font-data text-[13px] tabular-nums text-[var(--s-text)]">{usd(o.bondUsd, 0)}</td>
-                    <td className="px-3 py-2.5 text-right font-data text-[13px] tabular-nums text-[var(--s-text-secondary)]">{compactUsd(o.served7dMicro)}</td>
-                    <td className="px-3 py-2.5 text-right font-data text-[13px] tabular-nums text-[var(--s-emerald)]">{pct(o.fillRate, 1)}</td>
-                    <td className="px-3 py-2.5 text-right font-data text-[13px] tabular-nums text-[var(--s-text-secondary)]">{pct(o.uptime, 2)}</td>
+                    <td className="px-3 py-2.5 text-right font-data text-[14px] tabular-nums text-[var(--s-text-secondary)]">{o.models}</td>
+                    <td className="px-3 py-2.5 text-right font-data text-[14px] tabular-nums text-[var(--s-text)]">{usd(o.bondUsd, 0)}</td>
+                    <td className="px-3 py-2.5 text-right font-data text-[14px] tabular-nums text-[var(--s-text-secondary)]">{compactUsd(o.served7dMicro)}</td>
+                    <td className="px-3 py-2.5 text-right font-data text-[14px] tabular-nums text-[var(--s-emerald)]">{pct(o.fillRate, 1)}</td>
+                    <td className="px-3 py-2.5 text-right font-data text-[14px] tabular-nums text-[var(--s-text-secondary)]">{pct(o.uptime, 2)}</td>
                     <td className="px-3 py-2.5 text-right">
                       {o.slashes === 0 ? (
                         <Badge tone="emerald" icon="i-ph:shield-check-fill">clean</Badge>

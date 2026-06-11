@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import 'virtual:uno.css'
 import './styles.css'
+import { Web3Provider } from '~/providers/web3'
 import { Shell } from '~/components/Shell'
 import MarketsPage from '~/pages/Markets'
 import ModelMarketPage from '~/pages/ModelMarket'
@@ -32,6 +33,8 @@ const router = createBrowserRouter([
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <RouterProvider router={router} />
+    <Web3Provider>
+      <RouterProvider router={router} />
+    </Web3Provider>
   </StrictMode>,
 )

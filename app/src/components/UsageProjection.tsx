@@ -38,21 +38,21 @@ export function UsageProjection({
         <div>
           <div className="mono-label">Projected monthly usage</div>
           <div className="mt-1 font-data text-[22px] font-bold tabular-nums text-[var(--s-text)]">
-            {fmtTokens(monthlyTokens)} <span className="text-[13px] font-medium text-[var(--s-text-muted)]">tokens</span>
+            {fmtTokens(monthlyTokens)} <span className="text-[14px] font-medium text-[var(--s-text-muted)]">tokens</span>
           </div>
         </div>
         <div className="text-right">
           <div className="mono-label">You save</div>
           <div className="mt-1 font-data text-[22px] font-bold tabular-nums text-[var(--s-emerald)]">
             {usd(saving, saving >= 100 ? 0 : 2)}
-            <span className="ml-1 text-[13px] font-medium text-[var(--s-text-muted)]">/mo</span>
+            <span className="ml-1 text-[14px] font-medium text-[var(--s-text-muted)]">/mo</span>
           </div>
         </div>
       </div>
 
       <div className="mt-4">
         <Slider value={logV} min={MIN} max={MAX} step={0.01} onChange={setLogV} />
-        <div className="mt-1.5 flex justify-between font-data text-[10px] text-[var(--s-text-subtle)]">
+        <div className="mt-1.5 flex justify-between font-data text-[11px] text-[var(--s-text-subtle)]">
           <span>1M</span>
           <span>50M</span>
           <span>1B</span>
@@ -63,7 +63,7 @@ export function UsageProjection({
       {/* Cost-vs-list bars */}
       <div className="mt-5 space-y-3">
         <div>
-          <div className="mb-1 flex items-center justify-between font-data text-[11px]">
+          <div className="mb-1 flex items-center justify-between font-data text-[12px]">
             <span className="text-[var(--s-text-muted)]">At list price</span>
             <span className="tabular-nums text-[var(--s-text-secondary)]">{usd(listCost, listCost >= 100 ? 0 : 2)}/mo</span>
           </div>
@@ -72,7 +72,7 @@ export function UsageProjection({
           </div>
         </div>
         <div>
-          <div className="mb-1 flex items-center justify-between font-data text-[11px]">
+          <div className="mb-1 flex items-center justify-between font-data text-[12px]">
             <span className="text-[var(--s-accent)]">Best market price</span>
             <span className="tabular-nums text-[var(--s-accent)]">{usd(bestCost, bestCost >= 100 ? 0 : 2)}/mo</span>
           </div>
@@ -85,7 +85,7 @@ export function UsageProjection({
         </div>
       </div>
 
-      <div className="mt-4 flex items-center justify-center gap-1.5 rounded-[6px] bg-[var(--s-emerald-soft)] py-2 font-data text-[12px] font-semibold text-[var(--s-emerald)]">
+      <div className="mt-4 flex items-center justify-center gap-1.5 rounded-[6px] bg-[var(--s-emerald-soft)] py-2 font-data text-[13px] font-semibold text-[var(--s-emerald)]">
         <span className="i-ph:trend-down text-[15px]" />
         {(savingPct * 100).toFixed(0)}% cheaper than list at this volume
       </div>

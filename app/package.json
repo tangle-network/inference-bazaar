@@ -10,11 +10,21 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@nanostores/react": "^0.7.3",
+    "@tangle-network/blueprint-ui": "^0.5.3",
+    "@tangle-network/sandbox-ui": "^0.17.0",
+    "@tanstack/react-query": "^5.101.0",
+    "chart.js": "^4.5.1",
     "clsx": "^2.1.1",
+    "connectkit": "^1.9.2",
+    "nanostores": "^0.10.3",
     "react": "^19.0.0",
+    "react-chartjs-2": "^5.3.1",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.9.5",
-    "tailwind-merge": "^3.2.0"
+    "tailwind-merge": "^3.2.0",
+    "viem": "^2.52.2",
+    "wagmi": "^3.6.16"
   },
   "devDependencies": {
     "@iconify-json/ph": "^1.2.2",
@@ -23,6 +33,7 @@
     "@types/react-dom": "^19.0.0",
     "@unocss/preset-wind4": "^66.5.10",
     "@vitejs/plugin-react": "^4.3.4",
+    "events": "^3.3.0",
     "typescript": "^5.8.0",
     "unocss": "^66.5.10",
     "vite": "^6.0.0",

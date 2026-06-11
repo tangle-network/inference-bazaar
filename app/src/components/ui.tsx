@@ -65,7 +65,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-[5px] px-1.5 py-0.5 font-data text-[11px] font-semibold uppercase tracking-wider leading-none',
+        'inline-flex items-center gap-1 rounded-[5px] px-1.5 py-0.5 font-data text-[12px] font-semibold uppercase tracking-wider leading-none',
         className,
       )}
       style={{ color: v.fg, background: v.bg }}
@@ -104,49 +104,17 @@ export function Stat({
   return (
     <div className={cn('min-w-0 px-3.5 py-2.5', className)}>
       <div className="mono-label truncate">{label}</div>
-      <div className="mt-1 truncate font-data text-[19px] font-bold leading-none tabular-nums" style={{ color }}>
+      <div className="mt-1.5 truncate font-data text-[24px] font-bold leading-none tabular-nums" style={{ color }}>
         {value}
       </div>
-      {sub != null && <div className="mt-1 truncate font-data text-[11px] text-[var(--s-text-muted)]">{sub}</div>}
+      {sub != null && <div className="mt-1.5 truncate font-data text-[12px] text-[var(--s-text-muted)]">{sub}</div>}
     </div>
   )
 }
 
-// ── Sparkline ─────────────────────────────────────────────────────────────────
+// ── Sparkline — real chart.js gradient-area trend (see charts.tsx) ───────────
 
-export function Sparkline({
-  points,
-  width = 96,
-  height = 28,
-  tone = 'accent',
-}: {
-  points: number[]
-  width?: number
-  height?: number
-  tone?: 'accent' | 'emerald' | 'crimson'
-}) {
-  if (points.length < 2) return <div style={{ width, height }} />
-  const min = Math.min(...points)
-  const max = Math.max(...points)
-  const span = max - min || 1
-  const stepX = width / (points.length - 1)
-  const d = points
-    .map((p, i) => `${i === 0 ? 'M' : 'L'}${(i * stepX).toFixed(1)},${(height - ((p - min) / span) * height).toFixed(1)}`)
-    .join(' ')
-  const up = points[points.length - 1]! >= points[0]!
-  const color =
-    tone === 'accent'
-      ? 'var(--s-accent)'
-      : up
-        ? 'var(--s-emerald)'
-        : 'var(--s-crimson)'
-  return (
-    <svg width={width} height={height} className="overflow-visible">
-      <path d={`${d} L${width},${height} L0,${height} Z`} fill={color} opacity={0.1} />
-      <path d={d} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
-  )
-}
+export { Sparkline } from './charts'
 
 // ── Segmented control ─────────────────────────────────────────────────────────
 

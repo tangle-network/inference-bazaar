@@ -6,7 +6,11 @@ import UnoCSS from 'unocss/vite'
 export default defineConfig({
   plugins: [UnoCSS(), react()],
   resolve: {
-    alias: { '~': fileURLToPath(new URL('./src', import.meta.url)) },
+    alias: {
+      '~': fileURLToPath(new URL('./src', import.meta.url)),
+      // wagmi connector chain pulls node:events in the browser bundle.
+      events: 'events',
+    },
   },
   server: { port: 5273, strictPort: false },
 })

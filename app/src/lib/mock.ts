@@ -32,6 +32,13 @@ function hash(s: string): number {
   return h >>> 0
 }
 
+/** Deterministic full EVM address from a seed — identicon-ready. */
+export function addrOf(seed: string): `0x${string}` {
+  let out = ''
+  for (let i = 0; i < 5; i++) out += hash(seed + ':' + i).toString(16).padStart(8, '0')
+  return `0x${out}` as `0x${string}`
+}
+
 export const LABS: Record<string, Lab> = {
   anthropic: { id: 'anthropic', name: 'Anthropic', hue: '#d97757', glyph: 'i-ph:brain' },
   openai: { id: 'openai', name: 'OpenAI', hue: '#10a37f', glyph: 'i-ph:circle-fill' },
@@ -127,6 +134,7 @@ function makeOffers(model: Model): Offer[] {
         modelId: model.id,
         venueId,
         seller: `0x${(hash(handle + oi) >>> 0).toString(16).padStart(8, '0')}…${(hash(venueId + k) % 9999).toString().padStart(4, '0')}`,
+        sellerAddress: addrOf(handle),
         sellerLabel: handle,
         verified,
         discount,

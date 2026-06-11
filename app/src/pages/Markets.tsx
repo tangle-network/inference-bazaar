@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { Identicon } from '@tangle-network/blueprint-ui/components'
 import { PageHeader } from '~/components/PageHeader'
 import { Badge, Mark, Segmented, Sparkline, Stat } from '~/components/ui'
 import { CAPABILITY_META, CAPABILITY_ORDER } from '~/lib/capabilities'
@@ -119,7 +120,7 @@ export default function MarketsPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search models, labs…"
-              className="h-9 w-56 rounded-[6px] border border-[var(--s-border)] bg-[var(--s-surface)] pl-8 pr-3 font-data text-[13px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)] focus:border-[var(--s-border-hover)]"
+              className="h-9 w-56 rounded-[6px] border border-[var(--s-border)] bg-[var(--s-surface)] pl-8 pr-3 font-data text-[14px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)] focus:border-[var(--s-border-hover)]"
             />
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -131,7 +132,7 @@ export default function MarketsPage() {
                   key={c}
                   onClick={() => toggleCap(c)}
                   className={cn(
-                    'inline-flex items-center gap-1.5 rounded-[6px] border px-2.5 py-1.5 font-data text-[12px] font-medium transition-colors',
+                    'inline-flex items-center gap-1.5 rounded-[6px] border px-2.5 py-1.5 font-data text-[13px] font-medium transition-colors',
                     active
                       ? 'border-transparent text-[var(--s-accent-text)]'
                       : 'border-[var(--s-border)] text-[var(--s-text-muted)] hover:border-[var(--s-border-hover)] hover:text-[var(--s-text-secondary)]',
@@ -146,7 +147,7 @@ export default function MarketsPage() {
             {caps.size > 0 && (
               <button
                 onClick={() => setCaps(new Set())}
-                className="font-data text-[12px] text-[var(--s-text-muted)] underline-offset-2 hover:text-[var(--s-crimson)] hover:underline"
+                className="font-data text-[13px] text-[var(--s-text-muted)] underline-offset-2 hover:text-[var(--s-crimson)] hover:underline"
               >
                 clear
               </button>
@@ -198,7 +199,7 @@ export default function MarketsPage() {
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="px-4 py-16 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+                    <td colSpan={10} className="px-4 py-16 text-center font-data text-[14px] text-[var(--s-text-muted)]">
                       No markets match those filters.
                     </td>
                   </tr>
@@ -238,11 +239,11 @@ function FeatureTile({
         <span className="font-data text-[20px] font-bold tabular-nums" style={{ color }}>
           {value}
         </span>
-        {valueSuffix && <span className="font-data text-[11px] text-[var(--s-text-muted)]">{valueSuffix}</span>}
+        {valueSuffix && <span className="font-data text-[12px] text-[var(--s-text-muted)]">{valueSuffix}</span>}
       </div>
       <div className="mt-1 flex items-center gap-1.5 truncate">
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: model.lab.hue }} />
-        <span className="truncate font-data text-[11px] text-[var(--s-text-secondary)] group-hover:text-[var(--s-text)]">
+        <span className="truncate font-data text-[12px] text-[var(--s-text-secondary)] group-hover:text-[var(--s-text)]">
           {model.model.name}
         </span>
       </div>
@@ -298,8 +299,8 @@ function ModelRow({
           <div className="flex items-center gap-2.5">
             <Mark hue={lab.hue} glyph={lab.glyph} label={lab.name} />
             <div className="min-w-0">
-              <div className="truncate font-data text-[13px] font-semibold text-[var(--s-text)]">{model.name}</div>
-              <div className="truncate font-data text-[11px] text-[var(--s-text-muted)]">
+              <div className="truncate font-data text-[14px] font-semibold text-[var(--s-text)]">{model.name}</div>
+              <div className="truncate font-data text-[12px] text-[var(--s-text-muted)]">
                 {lab.name} · {model.contextK >= 1000 ? `${model.contextK / 1000}M` : `${model.contextK}K`} ctx
               </div>
             </div>
@@ -316,7 +317,7 @@ function ModelRow({
                   style={{ background: `color-mix(in srgb, ${meta.hue} 14%, transparent)` }}
                   title={meta.label}
                 >
-                  <span className={cn(meta.icon, 'text-[13px]')} style={{ color: meta.hue }} />
+                  <span className={cn(meta.icon, 'text-[14px]')} style={{ color: meta.hue }} />
                 </span>
               )
             })}
@@ -325,20 +326,20 @@ function ModelRow({
         <td className="px-3 py-2.5 text-right">
           <Badge tone="emerald">{pct(stats.bestDiscount, 0)} off</Badge>
         </td>
-        <td className="px-3 py-2.5 text-right font-data text-[13px] font-semibold tabular-nums text-[var(--s-accent)]">
+        <td className="px-3 py-2.5 text-right font-data text-[14px] font-semibold tabular-nums text-[var(--s-accent)]">
           {pricePerM(stats.bestOut)}
         </td>
-        <td className="px-3 py-2.5 text-right font-data text-[12px] tabular-nums text-[var(--s-text-muted)] line-through">
+        <td className="px-3 py-2.5 text-right font-data text-[13px] tabular-nums text-[var(--s-text-muted)] line-through">
           {pricePerM(stats.listOut)}
         </td>
         <td className="px-3 py-2.5 text-right">
-          <div className="font-data text-[13px] tabular-nums text-[var(--s-text)]">{tokens(stats.liquidityTokens)}</div>
-          <div className="font-data text-[10px] tabular-nums text-[var(--s-text-muted)]">{compactUsd(stats.liquidityNotionalMicro)}</div>
+          <div className="font-data text-[14px] tabular-nums text-[var(--s-text)]">{tokens(stats.liquidityTokens)}</div>
+          <div className="font-data text-[11px] tabular-nums text-[var(--s-text-muted)]">{compactUsd(stats.liquidityNotionalMicro)}</div>
         </td>
-        <td className="px-3 py-2.5 text-right font-data text-[13px] tabular-nums text-[var(--s-text-secondary)]">
+        <td className="px-3 py-2.5 text-right font-data text-[14px] tabular-nums text-[var(--s-text-secondary)]">
           {compactUsd(stats.volume24hMicro)}
         </td>
-        <td className="px-3 py-2.5 text-right font-data text-[13px] tabular-nums text-[var(--s-text-secondary)]">
+        <td className="px-3 py-2.5 text-right font-data text-[14px] tabular-nums text-[var(--s-text-secondary)]">
           {stats.venues}
         </td>
         <td className="px-3 py-2.5">
@@ -383,10 +384,10 @@ function ExpandedVenues({
       <div className="mb-2 flex items-center justify-between px-1">
         <span className="mono-label">{offers.length} offers across {new Set(offers.map((o) => o.venueId)).size} venues</span>
         <div className="flex items-center gap-2">
-          <button onClick={onOpen} className="btn-secondary h-7 !text-[11px]">
-            Open market <span className="i-ph:arrow-up-right text-[12px]" />
+          <button onClick={onOpen} className="btn-secondary h-7 !text-[12px]">
+            Open market <span className="i-ph:arrow-up-right text-[13px]" />
           </button>
-          <button onClick={onBuy} className="btn-primary h-7 !text-[11px]">
+          <button onClick={onBuy} className="btn-primary h-7 !text-[12px]">
             Buy
           </button>
         </div>
@@ -413,34 +414,37 @@ function ExpandedVenues({
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       <span className="h-2 w-2 rounded-full" style={{ background: venue.hue }} />
-                      <span className="font-data text-[12px] text-[var(--s-text-secondary)]">{venue.name}</span>
+                      <span className="font-data text-[13px] text-[var(--s-text-secondary)]">{venue.name}</span>
                     </div>
                   </td>
                   <td className="px-3 py-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-data text-[12px] text-[var(--s-text)]">{o.sellerLabel}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="shrink-0 overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
+                        <Identicon address={o.sellerAddress} size={18} />
+                      </span>
+                      <span className="font-data text-[13px] text-[var(--s-text)]">{o.sellerLabel}</span>
                       {o.verified && (
-                        <span className="i-ph:seal-check text-[13px] text-[var(--s-accent)]" title="Verified supply" />
+                        <span className="i-ph:seal-check text-[14px] text-[var(--s-accent)]" title="Verified supply" />
                       )}
                     </div>
                   </td>
-                  <td className="px-3 py-2 text-right font-data text-[12px] tabular-nums text-[var(--s-emerald)]">
+                  <td className="px-3 py-2 text-right font-data text-[13px] tabular-nums text-[var(--s-emerald)]">
                     {pct(o.discount, 0)}
                   </td>
-                  <td className="px-3 py-2 text-right font-data text-[12px] font-semibold tabular-nums text-[var(--s-text)]">
+                  <td className="px-3 py-2 text-right font-data text-[13px] font-semibold tabular-nums text-[var(--s-text)]">
                     {pricePerM(o.price[kind])}
                   </td>
-                  <td className="px-3 py-2 text-right font-data text-[12px] tabular-nums text-[var(--s-text-muted)]">
+                  <td className="px-3 py-2 text-right font-data text-[13px] tabular-nums text-[var(--s-text-muted)]">
                     {tokens(o.offeredTokens)}
                   </td>
-                  <td className="px-3 py-2 text-right font-data text-[12px] tabular-nums text-[var(--s-text-muted)]">
+                  <td className="px-3 py-2 text-right font-data text-[13px] tabular-nums text-[var(--s-text-muted)]">
                     {tokens(o.soldTokens)}
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <span className="font-data text-[12px] tabular-nums text-[var(--s-text-secondary)]">{tokens(o.remainingTokens)}</span>
+                    <span className="font-data text-[13px] tabular-nums text-[var(--s-text-secondary)]">{tokens(o.remainingTokens)}</span>
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <button onClick={onBuy} className="btn-primary h-6 !px-2.5 !text-[10px]">
+                    <button onClick={onBuy} className="btn-primary h-6 !px-2.5 !text-[11px]">
                       Buy
                     </button>
                   </td>
