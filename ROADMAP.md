@@ -182,11 +182,12 @@ to the phase that delivers it.
 | 2 Venue in blueprint | ✅ done | — |
 | 3 On-chain bring-up | 🔜 next (`surplus`) | G4, G5 |
 | 4 RFQ + settlement | 🔁 in progress (`settlement-agent`) | G2 |
-| 5 Redemption spendable | 🔜 spec'd, ready to start | **G1** |
+| 5 Redemption spendable | ◔ 3/4 — sim proof + shielded-rail planner done; live wiring left | **G1** |
 | 6 Guarantees + abuse | ◻ not started | G3, G7 |
 | 7 Profit engine | ◔ harness done | — |
-| 8 Productionization | ◻ not started | G6 |
+| 8 Productionization | ◔ tcloud PR open (#41); rest not started | G6 |
 
-Tests today: 51 TS + 7 Rust green; operator (lite + blueprint) builds; venue
-runs inside a real `BlueprintRunner`. **Not yet live:** no on-chain job trigger,
-no spendable credit, no audited contracts.
+Tests today: 69 TS + 7 Rust green; operator (lite + blueprint) builds; venue
+runs inside a real `BlueprintRunner`; `@surplus/redemption` proves unit closure
+and plans the zero-router-change shielded spend rail. **Not yet live:** no
+on-chain job trigger, no live-router credit spend, no audited contracts.
