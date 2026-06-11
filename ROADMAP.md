@@ -136,19 +136,27 @@ to the phase that delivers it.
   when:** a refusal test produces a slash and makes the buyer whole.
 - [ ] **Double-spend protection on claim (G7).** A credit/SpendAuth nonce can be
   claimed at most once. **Done when:** a replay test is rejected on-chain.
-- [ ] **Rate limits + per-key spend caps (G7).** Enforced at redemption. **Done
-  when:** an over-cap call is refused and tested.
+- [x] **Rate limits + per-key spend caps (G7).** Enforced at redemption. **Done:**
+  `GuardedRedemptionAdapter` — per-owner rolling-window call/token/spend caps,
+  deterministic, fail-open to balance billing; `guard.test.ts` proves over-cap
+  refusal, window-slide recovery, per-owner isolation, no quota/backing leaks.
 
 ## Phase 7 — Profit engine: MM tuning + arbitrage `surplus`
 
 - [x] **Param sweep harness.** `mm-eval`. **Done.**
-- [ ] **Discount-capture / cross-operator arbitrage eval.** Seller lists below
+- [x] **Discount-capture / cross-operator arbitrage eval.** Seller lists below
   reference; operator buys cheap, reprices toward list; measure captured
-  discount. **Done when:** the backtest shows positive discount capture and
-  isolates it from spread PnL.
-- [ ] **Self-improving MM (bandit over params).** Promote params from the sweep
-  by realized PnL between sessions. **Done when:** a promotion gate beats the
-  static baseline on held-out seeds.
+  discount. **Done:** `mm-eval/discount.ts` — seeded backtest, FIFO lot
+  accounting with exact conservation (equity == proceeds − cost + residual
+  mark); positive capture on every seed incl. worst; isolation proven
+  structurally (one-sided strategy, zero spread PnL; below-edge dumps → zero
+  trades).
+- [ ] **Self-improving MM (bandit over params).** *Deferred post-launch by
+  decision (2026-06-10): promotion by realized PnL needs real sessions; on
+  simulated seeds the static sweep already selects params, so a bandit adds
+  machinery without information.* Pre-launch substitute: pin the sweep winner
+  as the operator default. **Done when (post-launch):** a promotion gate beats
+  the pinned baseline on real session PnL.
 
 ## Phase 8 — Productionization `surplus`
 
@@ -183,8 +191,8 @@ to the phase that delivers it.
 | 3 On-chain bring-up | 🔜 next (`surplus`) | G4, G5 |
 | 4 RFQ + settlement | 🔁 in progress (`settlement-agent`) | G2 |
 | 5 Redemption spendable | ◔ 3/4 — sim proof + shielded-rail planner done; live wiring left | **G1** |
-| 6 Guarantees + abuse | ◻ not started | G3, G7 |
-| 7 Profit engine | ◔ harness done | — |
+| 6 Guarantees + abuse | ◔ redemption caps done; slashing/default in contracts (settlement-agent, in flight) | G3, G7 |
+| 7 Profit engine | ◕ sweep + discount-capture done; bandit deferred post-launch | — |
 | 8 Productionization | ◔ tcloud PR open (#41); rest not started | G6 |
 
 Tests today: 69 TS + 7 Rust green; operator (lite + blueprint) builds; venue

@@ -1,4 +1,10 @@
 export {
+  runDiscountCapture,
+  type DiscountCaptureConfig,
+  type DiscountCaptureResult,
+  type DiscountSessionReport,
+} from './discount'
+export {
   aggregate,
   score,
   type ConfigMetrics,
