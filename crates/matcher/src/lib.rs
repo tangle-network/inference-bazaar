@@ -18,6 +18,12 @@
 //! (one matching truth): sells (the liquidity providers) rest cheapest-ask-first,
 //! buys then lift highest-bid-first at the maker's ask.
 
+pub mod consensus;
+
+pub use consensus::{
+    aggregate_attestation, elect_proposer, verify_proposal, Attestation, BatchProposal, Verdict,
+};
+
 use std::collections::{HashMap, HashSet};
 
 use surplus_orderbook::{MatchingEngine, NativeBook, Order as BookOrder, Side as BookSide};

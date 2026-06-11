@@ -12,3 +12,8 @@ path = "src/lib.rs"
 [dependencies]
 surplus-orderbook = { path = "../orderbook" }
 surplus-settlement-core = { path = "../settlement-core" }
+
+[dev-dependencies]
+# Signer for attestation tests only (recover_signer lives in settlement-core, but
+# producing test signatures needs a private-key signer). Not a lib dependency.
+surplus-settlement = { path = "../settlement" }
