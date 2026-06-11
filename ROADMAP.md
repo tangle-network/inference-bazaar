@@ -111,19 +111,20 @@ to the phase that delivers it.
 > credit usable. Non-colliding with the settlement spine (this is the
 > spending/metering side; they own issuance/escrow).
 
-- [ ] **Credit model + debit accounting.** A `Credit { model, tokenKind,
+- [x] **Credit model + debit accounting.** A `Credit { model, tokenKind,
   qtyRemaining, strikePrice, backing }` and a pure debit that closes the unit
-  (tokens bought = tokens metered = tokens spent). **Done when:** an
-  accounting test proves quota conservation across a redemption sequence and
-  refunds the unspent backing on exhaustion/expiry.
-- [ ] **Router metering adapter interface.** The typed seam the Tangle Router
+  (tokens bought = tokens metered = tokens spent). **Done:**
+  `@surplus/redemption` `CreditBook`; `closure.test.ts` proves quota + money
+  conservation after every debit and refund-on-exhaustion/expiry.
+- [x] **Router metering adapter interface.** The typed seam the Tangle Router
   implements to recognize a Surplus credit and debit its quota per inference
-  call at the strike price. **Done when:** a simulated router calls the adapter
-  and the operator is paid from escrow for metered usage.
-- [ ] **End-to-end redemption proof.** buy credit → meter N inference calls →
+  call at the strike price. **Done:** `RedemptionAdapter` +
+  `DefaultRedemptionAdapter` (soonest-expiry-first); `SimulatedRouter` pays the
+  operator from backing in `redemption.test.ts`.
+- [x] **End-to-end redemption proof.** buy credit → meter N inference calls →
   quota debits at strike → operator paid → quota exhausts → next credit/refund.
-  **Done when:** the e2e test passes against the simulated router + a mock
-  operator.
+  **Done:** 12 tests green across both suites — closure, overflow fallback,
+  expiry refund, wrong-instrument, roll-to-next-credit, determinism.
 - [ ] **Live router integration.** Wire the adapter into the real router so a
   credit redeems against live inference. **Done when:** a real
   `/v1/chat/completions` call debits a real credit and returns a completion.
