@@ -80,8 +80,12 @@ impl NativeBook {
         while i < book.len() {
             let cur = &book[i];
             let cur_before = match order.side {
-                Side::Buy => cur.price > order.price || (cur.price == order.price && cur.ts <= order.ts),
-                Side::Sell => cur.price < order.price || (cur.price == order.price && cur.ts <= order.ts),
+                Side::Buy => {
+                    cur.price > order.price || (cur.price == order.price && cur.ts <= order.ts)
+                }
+                Side::Sell => {
+                    cur.price < order.price || (cur.price == order.price && cur.ts <= order.ts)
+                }
             };
             if !cur_before {
                 break;
