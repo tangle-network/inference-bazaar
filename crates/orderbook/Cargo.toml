@@ -3,7 +3,7 @@ name = "surplus-orderbook"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "Open orderbook for inference-token credit markets. Swappable MatchingEngine trait + a native price-time-priority engine."
+description = "Open orderbook for inference-token credit markets. A native, deterministic, verifiable price-time-priority engine behind a MatchingEngine seam, plus a local/remote BookClient seam for the shared book."
 
 [lib]
 name = "surplus_orderbook"
@@ -11,10 +11,10 @@ path = "src/lib.rs"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+# Only for the BookClient location seam (object-safe async). The matching kernel
+# (NativeBook) stays sync, integer-only, and dependency-light on purpose — it is
+# the part peers re-execute and the SP1 circuit reproduces.
+async-trait = "0.1"
 
-[features]
-default = []
-# Optional adapter onto the `orderbook-rs` crate (joaquinbejar/OrderBook-rs).
-# Off by default so the native engine has no third-party dependency — the trait
-# is the seam, the dep is never load-bearing.
-orderbook-rs = []
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

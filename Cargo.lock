@@ -9043,7 +9043,9 @@ dependencies = [
 name = "surplus-orderbook"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "serde",
+ "tokio",
 ]
 
 [[package]]
