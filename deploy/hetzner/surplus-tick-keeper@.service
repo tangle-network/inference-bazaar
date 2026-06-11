@@ -1,0 +1,22 @@
+[Unit]
+Description=Surplus workflow_tick keeper (Base Sepolia blueprint 17, service %i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Instance name is the on-chain service id; the env file may add
+# TICK_KEY_FILE / TICK_RPC / TICK_INSTRUMENT overrides but should not
+# redefine TICK_SERVICE_ID.
+Environment=TICK_SERVICE_ID=%i
+EnvironmentFile=-/etc/surplus/tick-keeper-%i.env
+ExecStart=/opt/surplus/tick-keeper.sh
+# Hardening: read-only system, no privilege escalation. PrivateTmp is
+# deliberately NOT set — the keeper key file may live under /tmp.
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=read-only
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes

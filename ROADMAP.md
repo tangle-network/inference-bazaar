@@ -25,26 +25,55 @@ to the phase that delivers it.
   strike, settled with the holder's signed receipt. Walkthrough:
   docs/examples/spend-a-credit.md.)*
 - [x] **G2 — Atomic fills.** A match settles all-or-nothing: buyer escrow → credit
-  issued → payment released, or none of it. *(Phase 4 — injected-failure tests in
-  Settlement.t.sol, and demonstrated live on Base Sepolia: settleFills tx
-  `0x15a70fa6…` debited the buyer, paid the issuer minus fee, and minted lot
-  `0xd66a3647…` in one transaction.)*
+  issued → payment released, or none of it. *(Phase 4 — Replay.t.sol proves a
+  2-fill batch with one injected failure rolls back EVERY state slot (balances,
+  collateral, liability, fill caps); live on Base Sepolia twice: tsUSD tx
+  `0x15a70fa6…` and real-USDC tx `0x5faa5019…`. The operator pipeline is
+  crash-safe: signed fills journal to `$DATA_DIR/outbox.json` on every
+  mutation, restore on boot, and an in-process auto-flush loop submits every
+  30s with per-fill isolation — and the venue never signs a quote its on-chain
+  funding can't settle (freeCollateral/balance-capped quoting, observed live
+  refusing an over-committed RFQ).)*
 - [ ] **G3 — Buyers definitely get their spend.** A credit is a claim on a bonded
   operator; refusal of a valid credit is slashable; unfulfillable → escrow
   refund. *(Phase 4 + 6, settlement-agent)*
 - [x] **G4 — The venue runs on-chain.** `workflow_tick` is triggered by a real
-  on-chain job on a deployed blueprint, not an HTTP poke. *(Phase 3 — done on
-  devnet AND Base Sepolia; result txs in the Phase 3 boxes.)*
+  on-chain job on a deployed blueprint, not an HTTP poke — autonomously.
+  *(Phase 3 devnet + Base Sepolia proofs, now driven by a production keeper:
+  `surplus-tick-keeper@{3,4}.timer` on the Hetzner box submits the job
+  on-chain every 5 min per service with flock'd nonce safety and a loud
+  fail-closed low-balance refusal (proven end-to-end on both services:
+  service 3 job `0x78f546be…` → result `0x2666698f…`, service 4 job
+  `0x463754f7…` → result `0x19488eab…` — no human in the loop. Known
+  limitation: submitJob is owner-gated, so the keeper shares the operator key
+  with the runtime's result consumer; a nonce-cache collision crashes the
+  runner, which systemd restarts and the producer re-delivers — observed
+  self-healing. Reference prices journal to `$DATA_DIR/refs.json` so a
+  restarted venue quotes immediately instead of burning the next tick on
+  NoReference.)*
 - [x] **G5 — Money is real.** Settlement clears on at least one rail against a
-  real chain / the live router, not a stub. *(Done: SurplusSettlement
-  `0x1cD49739…` + MockUSD live on Base Sepolia; the Hetzner venue quotes signed
-  firm orders; scripts/e2e-firm-buy.mjs executed a real RFQ→sign→fill→
-  settleFills buy — tx `0x15a70fa6…`, buyer balance 13,246,000→0, issuer
-  +12,981,080 (2% fee), collateral-backed lot minted.)*
+  real chain / the live router, not a stub. *(Done on REAL money: a second
+  SurplusSettlement `0xf6A64921…` is live on Base Sepolia bound to canonical
+  Circle USDC `0x036CbD53…`. The dedicated USDC venue (Hetzner, port 9600,
+  surplus-usdc.…sslip.io) quoted a signed firm order; e2e ran
+  RFQ→sign→fill→settleFills in real USDC — tx `0x5faa5019…`, 20,000 Sonnet
+  output tokens at $13.546/M = 0.27092 USDC, collateral-backed lot
+  `0xa9c85825…` minted — then spent it on a real router completion: 32 metered
+  tokens debited 20,000→19,968 releasing exactly 433 micro-USDC at the locked
+  strike, redemption `0xbbf7c74e…` settled. The tsUSD rail (`0x1cD49739…`,
+  tx `0x15a70fa6…`) remains the app's demo rail.)*
 - [ ] **G6 — Contracts audited.** Every contract on the value path has a review
   sign-off. *(Phase 8)*
-- [ ] **G7 — Abuse-bounded.** Rate limits, per-key spend caps, and double-spend
-  protection on claim are enforced and tested. *(Phase 6)*
+- [x] **G7 — Abuse-bounded.** Rate limits, per-key spend caps, and double-spend
+  protection on claim are enforced and tested. *(Done: contracts/test/Replay.t.sol
+  — exact-fill replay, cross-batch attested replay, receipt cross-redemption
+  replay, claim/reclaim replay all revert (58 forge tests green). Venue side:
+  `/redeem` is holder-gated by an EIP-712 `ServeRequest` signature binding the
+  exact message bytes + token cap + expiry, with consumed-auth replay
+  rejection; per-IP token-bucket rate limiting across the HTTP surface
+  (10× cost on /redeem) — forged-signer, missing-auth, and 429 throttling all
+  verified against the live venue. Redemption-side per-owner spend caps:
+  GuardedRedemptionAdapter (guard.test.ts).)*
 
 ---
 
@@ -116,15 +145,23 @@ to the phase that delivers it.
 
 ## Phase 4 — RFQ + atomic settlement spine 🔁 `settlement-agent`
 
-- [~] **Signed firm quotes.** Every CLOB order + RFQ response is EIP-712 signed;
-  a match yields a signed fill. **Done when:** a fill carries verifiable
-  buyer-auth + operator-quote signatures.
-- [~] **Atomic single-fill settlement (G2).** Escrow buyer → issue credit →
-  release payment, or refund on timeout — all-or-nothing. **Done when:** a test
-  proves no partial state survives an injected failure at each step.
-- [~] **Validator-attested batch.** N fills batched; validator quorum attests;
-  one settlement. **Done when:** a batch settles behind a quorum signature and a
-  bad batch is rejected.
+- [x] **Signed firm quotes.** Every CLOB order + RFQ response is EIP-712 signed;
+  a match yields a signed fill. **Done:** one `Order` struct serves book and
+  RFQ; `SignedFill::pair` verifies both signatures at pairing and the contract
+  re-verifies on `settleFills` — both live fills (`0x15a70fa6…`, `0x5faa5019…`)
+  carried buyer + operator signatures verified on-chain.
+- [x] **Atomic single-fill settlement (G2).** Escrow buyer → issue credit →
+  release payment, or refund on timeout — all-or-nothing. **Done:**
+  Replay.t.sol `test_batchAllOrNothing_stateSnapshotUnchanged` injects a
+  failure into fill #2 of a batch and asserts every balance, collateral,
+  liability, and fill-cap slot is byte-identical after the revert (fill #1
+  included); Settlement.t.sol covers each individual revert path.
+- [x] **Validator-attested batch.** N fills batched; validator quorum attests;
+  one settlement. **Done:** Batch.t.sol — a 2-of-3 quorum settles a 2-fill
+  batch; below-threshold, non-attester, duplicate-signer, and replayed
+  attestations all revert; limits still bind under attestation. (Live-chain
+  exercise lands with the shared-CLOB matcher, docs/specs/shared-clob.md
+  Phase B, which settles exclusively through this path.)
 - [ ] **SP1 batch proof.** Swap quorum attestation for a SuccinctVM validity
   proof of the matching circuit. **Done when:** the settlement contract verifies
   a real proof and rejects a forged one. *(toolchain present: `~/.sp1`.)*
@@ -161,8 +198,12 @@ to the phase that delivers it.
 - [ ] **Slashing-backed redemption (G3).** Credit → bonded operator; refusal of a
   valid credit slashes (`MultiAssetDelegation`); unfulfillable → refund. **Done
   when:** a refusal test produces a slash and makes the buyer whole.
-- [ ] **Double-spend protection on claim (G7).** A credit/SpendAuth nonce can be
-  claimed at most once. **Done when:** a replay test is rejected on-chain.
+- [x] **Double-spend protection on claim (G7).** A credit/SpendAuth nonce can be
+  claimed at most once. **Done:** Replay.t.sol — identical-fill replay
+  (Overfill), settled/defaulted redemption replay (RedemptionNotOpen), receipt
+  replayed across redemptions (BadReceipt — digest binds the redemptionId),
+  reclaim replay (LotNotFound), all rejected on-chain; plus consumed
+  serve-auth replay rejected at the venue.
 - [x] **Rate limits + per-key spend caps (G7).** Enforced at redemption. **Done:**
   `GuardedRedemptionAdapter` — per-owner rolling-window call/token/spend caps,
   deterministic, fail-open to balance billing; `guard.test.ts` proves over-cap
@@ -187,8 +228,11 @@ to the phase that delivers it.
 
 ## Phase 8 — Productionization `surplus`
 
-- [ ] **Operator on the Hetzner box.** Deploy the operator binary to the
-  blueprint-operators host. **Done when:** it registers from the box and serves.
+- [x] **Operator on the Hetzner box.** **Done:** three venues serve from
+  blueprint-operators (178.104.232.124): services 3 + 4 (blueprint runtimes,
+  on-chain registered, TLS via Caddy at surplus./surplus2.…sslip.io) and the
+  USDC venue (surplus-usdc.…sslip.io), plus the mm-sidecar, the quoter timer,
+  and the tick keepers — all systemd-managed (deploy/hetzner/).
 - [ ] **Contracts audited (G6).** Review every value-path contract. **Done when:**
   a sign-off exists per contract.
 - [ ] **Price-oracle integrity.** Sanity-bound the router reference feed so the
@@ -215,12 +259,12 @@ to the phase that delivers it.
 | 0 Engine (TS) | ✅ done | — |
 | 1 Orderbook + venue | ✅ done | — |
 | 2 Venue in blueprint | ✅ done | — |
-| 3 On-chain bring-up | ✅ done — devnet + Base Sepolia, G4 closed | G4, G5 |
-| 4 RFQ + settlement | 🔁 in progress (`settlement-agent`) | G2 |
-| 5 Redemption spendable | ◔ 3/4 — sim proof + shielded-rail planner done; live wiring left | **G1** |
-| 6 Guarantees + abuse | ◔ redemption caps done; slashing/default in contracts (settlement-agent, in flight) | G3, G7 |
+| 3 On-chain bring-up | ✅ done — devnet + Base Sepolia + autonomous tick keeper | G4, G5 |
+| 4 RFQ + settlement | ◕ signed quotes, atomic fills, attested batch done; SP1 proof left | G2 ✅ |
+| 5 Redemption spendable | ✅ done — live router spend proven on tsUSD AND real USDC | G1 ✅ |
+| 6 Guarantees + abuse | ◕ G7 closed (replay suite, serve-auth, rate limits, caps); slashing (G3) left | G3, G7 ✅ |
 | 7 Profit engine | ◕ sweep + discount-capture done; bandit deferred post-launch | — |
-| 8 Productionization | ◔ tcloud PR open (#41); rest not started | G6 |
+| 8 Productionization | ◑ Hetzner fleet live, tcloud PR open (#41); audit/oracle/legal left | G6 |
 
 Tests today: 69 TS + 7 Rust green; operator (lite + blueprint) builds; venue
 runs inside a real `BlueprintRunner`; `@surplus/redemption` proves unit closure

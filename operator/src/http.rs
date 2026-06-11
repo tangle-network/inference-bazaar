@@ -19,6 +19,7 @@ use surplus_orderbook::Side;
 pub type Shared = Arc<Venue>;
 
 pub fn router(venue: Shared) -> Router {
+    let limiter = Arc::new(crate::ratelimit::RateLimiter::from_env());
     Router::new()
         .route("/health", get(health))
         .route("/instruments", get(instruments))
@@ -36,7 +37,37 @@ pub fn router(venue: Shared) -> Router {
         .route("/redeem/receipt", post(redeem_receipt))
         .route("/settlement/outbox", get(settlement_outbox))
         .route("/settlement/flush", post(settlement_flush))
+        .layer(axum::middleware::from_fn_with_state(limiter, crate::ratelimit::limit))
         .with_state(venue)
+}
+
+/// Background settlement pump: flush the outbox (and refresh the on-chain
+/// funding cache that bounds quoting) every `SURPLUS_FLUSH_INTERVAL_SECS`.
+/// Fills clear without any external poke; failures requeue and retry on the
+/// next tick. Spawned by both the lite and the blueprint bins.
+pub fn spawn_auto_flush(venue: Shared) {
+    let interval = std::env::var("SURPLUS_FLUSH_INTERVAL_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|v: &u64| *v >= 5)
+        .unwrap_or(30);
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(interval));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            if let Err(e) = venue.refresh_chain_cache().await {
+                tracing::debug!("chain cache refresh skipped: {e}");
+            }
+            if venue.outbox_len() == 0 {
+                continue;
+            }
+            match venue.flush_settlement().await {
+                Ok(report) => tracing::info!(%report, "auto-flush"),
+                Err(e) => tracing::warn!("auto-flush failed (requeued): {e}"),
+            }
+        }
+    });
 }
 
 async fn redeem_serve(

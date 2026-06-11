@@ -1,0 +1,26 @@
+[Unit]
+Description=Surplus USDC venue (real Circle USDC rail, settlement 0xf6A64921)
+After=network.target surplus-mm-sidecar.service
+Wants=surplus-mm-sidecar.service
+
+[Service]
+Environment=RUST_LOG=info,surplus_operator=debug
+Environment=DATA_DIR=/opt/surplus-usdc/data
+Environment=SURPLUS_SIDECAR_URL=http://127.0.0.1:9310
+Environment=SURPLUS_ROUTER_URL=https://router.tangle.tools
+Environment=SURPLUS_OPERATOR_ADDR=127.0.0.1:9600
+Environment=SURPLUS_INSTRUMENT=claude-sonnet-4-6:output
+Environment=SURPLUS_MM_SIZE=100000
+Environment=SURPLUS_MM_LEVELS=2
+Environment=SURPLUS_CHAIN_ID=84532
+Environment=SURPLUS_SETTLEMENT_ADDR=0xf6A64921b62E09c9646675BEe6A11Fcd533d6783
+Environment=SURPLUS_OPERATOR_KEY=<issuer-key>
+Environment=SURPLUS_ROUTER_API_KEY=<router-api-key>
+Environment=SURPLUS_RPC_URL=https://sepolia.base.org
+ExecStart=/opt/surplus/surplus-operator-lite
+Restart=always
+RestartSec=5
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run surplus workflow_tick keeper every 5 minutes (service %i)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=60
+Persistent=false
+
+[Install]
+WantedBy=timers.target

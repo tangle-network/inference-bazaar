@@ -3,11 +3,13 @@ import { createPublicClient, createWalletClient, http, parseAbi, keccak256, toHe
 import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts'
 import { baseSepolia } from 'viem/chains'
 
-const RPC = 'https://sepolia.base.org'
-const VENUE = 'https://surplus.178.104.232.124.sslip.io'
-const SETTLEMENT = '0x1cD49739e9CF48C4906aDb44021dd8cE0d8aBa64'
-const USD = '0x14Ff9231D03Fd9AD75e553004585f13Ff51db630'
-const FUNDER_KEY = process.env.FUNDER_KEY // gas only
+const RPC = process.env.RPC ?? 'https://sepolia.base.org'
+const VENUE = process.env.VENUE ?? 'https://surplus.178.104.232.124.sslip.io'
+const SETTLEMENT = process.env.SETTLEMENT ?? '0x1cD49739e9CF48C4906aDb44021dd8cE0d8aBa64'
+const USD = process.env.USD ?? '0x14Ff9231D03Fd9AD75e553004585f13Ff51db630'
+// 'mint' (test tsUSD, open mint) or 'transfer' (real USDC: the funder pays).
+const FUND_MODE = process.env.FUND_MODE ?? 'mint'
+const FUNDER_KEY = process.env.FUNDER_KEY // gas (and USDC when FUND_MODE=transfer)
 
 const settlementAbi = parseAbi([
   'function deposit(uint256 amount)',
@@ -17,6 +19,8 @@ const settlementAbi = parseAbi([
 const usdAbi = parseAbi([
   'function mint(address to, uint256 amount)',
   'function approve(address spender, uint256 amount) returns (bool)',
+  'function transfer(address to, uint256 amount) returns (bool)',
+  'function balanceOf(address) view returns (uint256)',
 ])
 
 const pub = createPublicClient({ chain: baseSepolia, transport: http(RPC) })
@@ -36,8 +40,8 @@ if ((await pub.getBalance({ address: buyer.address })) < 100000000000000n) {
   await pub.waitForTransactionReceipt({ hash: tx })
 }
 
-const INSTRUMENT = 'claude-sonnet-4-6:output'
-const QTY = 1_000_000
+const INSTRUMENT = process.env.INSTRUMENT ?? 'claude-sonnet-4-6:output'
+const QTY = Number(process.env.QTY ?? 1_000_000)
 
 // 1. Firm quote from the live operator.
 const rfq = await (await fetch(`${VENUE}/rfq`, {
@@ -49,9 +53,15 @@ console.log('maker quote:', rfq.order.priceMicroPerM, 'micro/1M, signed by', rfq
 
 const costMicro = BigInt(Math.round((rfq.order.priceMicroPerM * QTY) / 1e6))
 
-// 2. Fund: mint, approve, deposit.
-tx = await wallet.writeContract({ address: USD, abi: usdAbi, functionName: 'mint', args: [buyer.address, costMicro] })
-await pub.waitForTransactionReceipt({ hash: tx })
+// 2. Fund: mint (test token) or real transfer from the funder, then approve + deposit.
+if ((await pub.readContract({ address: USD, abi: usdAbi, functionName: 'balanceOf', args: [buyer.address] })) < costMicro) {
+  if (FUND_MODE === 'transfer') {
+    tx = await funder.writeContract({ address: USD, abi: usdAbi, functionName: 'transfer', args: [buyer.address, costMicro] })
+  } else {
+    tx = await wallet.writeContract({ address: USD, abi: usdAbi, functionName: 'mint', args: [buyer.address, costMicro] })
+  }
+  await pub.waitForTransactionReceipt({ hash: tx })
+}
 tx = await wallet.writeContract({ address: USD, abi: usdAbi, functionName: 'approve', args: [SETTLEMENT, costMicro] })
 await pub.waitForTransactionReceipt({ hash: tx })
 tx = await wallet.writeContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'deposit', args: [costMicro] })
@@ -70,7 +80,7 @@ const taker = {
   salt: keccak256(toHex('e2e-proof-' + Date.now())),
 }
 const signature = await wallet.signTypedData({
-  domain: { name: 'SurplusSettlement', version: '1', chainId: 84532, verifyingContract: SETTLEMENT },
+  domain: { name: 'SurplusSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT },
   types: { Order: [
     { name: 'instrument', type: 'bytes32' }, { name: 'side', type: 'uint8' },
     { name: 'priceMicroPerM', type: 'uint64' }, { name: 'qtyTokens', type: 'uint64' },

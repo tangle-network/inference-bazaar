@@ -26,6 +26,30 @@ export const EIP712_DOMAIN = {
   verifyingContract: SETTLEMENT.address,
 } as const
 
+/** Holder authorization for one venue serve call (operator-verified EIP-712). */
+export const SERVE_DOMAIN = {
+  name: 'SurplusServe',
+  version: '1',
+  chainId: 84532,
+  verifyingContract: '0x1cD49739e9CF48C4906aDb44021dd8cE0d8aBa64',
+} as const
+
+export const SERVE_TYPES = {
+  ServeRequest: [
+    { name: 'redemptionId', type: 'bytes32' },
+    { name: 'messagesHash', type: 'bytes32' },
+    { name: 'maxTokens', type: 'uint64' },
+    { name: 'expiry', type: 'uint64' },
+  ],
+} as const
+
+export const RECEIPT_TYPES = {
+  RedemptionReceipt: [
+    { name: 'redemptionId', type: 'bytes32' },
+    { name: 'servedTokens', type: 'uint64' },
+  ],
+} as const
+
 export const ORDER_TYPES = {
   Order: [
     { name: 'instrument', type: 'bytes32' },

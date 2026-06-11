@@ -101,14 +101,22 @@ impl OperatorConfig {
             }),
             _ => None,
         };
+        // Boot instrument: `<model>:<kind>` (more arrive via list_instrument
+        // jobs on blueprint venues). A standalone venue picks its market here.
+        let boot_instrument = std::env::var("SURPLUS_INSTRUMENT")
+            .unwrap_or_else(|_| "anthropic/claude-opus-4-8:output".to_string());
+        let (model_id, token_kind) = match boot_instrument.rsplit_once(':') {
+            Some((m, k)) if k == "input" || k == "output" => (m.to_string(), k.to_string()),
+            _ => (boot_instrument.clone(), "output".to_string()),
+        };
         OperatorConfig {
             sidecar_url,
             router_url,
             settlement,
             instruments: vec![Instrument {
-                id: "anthropic/claude-opus-4-8:output".to_string(),
-                model_id: "anthropic/claude-opus-4-8".to_string(),
-                token_kind: "output".to_string(),
+                id: boot_instrument,
+                model_id,
+                token_kind,
                 tick_size: 1000,
                 min_qty: 1000,
             }],

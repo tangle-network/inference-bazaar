@@ -7,7 +7,7 @@ use crate::config::{Instrument, OperatorConfig};
 use crate::market::{SettleCtx, SignedState};
 use crate::sidecar::SidecarClient;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use surplus_orderbook::{Fill, MatchingEngine, NativeBook, Order, Side};
@@ -67,8 +67,31 @@ pub struct Venue {
     pub(crate) signed: Mutex<SignedState>,
     /// Owner string for the operator's own quotes in the book.
     pub(crate) mm_owner: String,
-    /// Tokens served per open redemption, pending the holder's receipt.
-    pub(crate) redeem_served: Mutex<HashMap<String, u64>>,
+    /// Per-redemption serve progress, pending the holder's receipt.
+    pub(crate) redeem: Mutex<HashMap<String, RedeemProgress>>,
+    /// Last-known on-chain funding of the operator (collateral headroom for
+    /// minting sells, cash balance for buys). Refreshed by the auto-flush loop
+    /// and on demand by the RFQ path; `fetched_at == 0` means never fetched —
+    /// quoting is then unbounded (legacy / chainless mode).
+    pub(crate) chain_cache: Mutex<ChainCache>,
+}
+
+/// Serve-side state of one open redemption: how much has been served (pending
+/// the holder's signed receipt) and which serve authorizations were already
+/// consumed — a captured `ServeRequest` signature cannot be replayed to burn
+/// the holder's quota twice.
+#[derive(Default)]
+pub(crate) struct RedeemProgress {
+    pub served: u64,
+    pub used_auths: HashSet<surplus_settlement::core::alloy_primitives::B256>,
+}
+
+#[derive(Default, Clone, Copy)]
+pub(crate) struct ChainCache {
+    pub free_collateral_micro: u128,
+    pub balance_micro: u128,
+    pub penalty_bps: u16,
+    pub fetched_at: u64,
 }
 
 impl Venue {
@@ -83,7 +106,7 @@ impl Venue {
             .as_ref()
             .and_then(SettleCtx::operator_address_hex)
             .unwrap_or_else(|| MM_OWNER.to_string());
-        Venue {
+        let venue = Venue {
             cfg,
             sidecar,
             venues: Mutex::new(venues),
@@ -91,7 +114,33 @@ impl Venue {
             settle,
             signed: Mutex::new(SignedState::default()),
             mm_owner,
-            redeem_served: Mutex::new(HashMap::new()),
+            redeem: Mutex::new(HashMap::new()),
+            chain_cache: Mutex::new(ChainCache::default()),
+        };
+        venue.load_outbox();
+        venue.load_refs();
+        venue
+    }
+
+    /// Restore journaled reference prices (see `set_ref`). Stale-by-a-restart
+    /// refs are acceptable: the quoter refreshes them within a minute, and the
+    /// risk gate bounds deviation regardless.
+    fn load_refs(&self) {
+        let Some(path) = refs_path() else { return };
+        let Ok(raw) = std::fs::read(&path) else { return };
+        let Ok(saved) = serde_json::from_slice::<HashMap<String, f64>>(&raw) else { return };
+        let mut venues = self.venues.lock().unwrap();
+        let mut restored = 0;
+        for (id, ref_mid) in saved {
+            if let Some(v) = venues.get_mut(&id) {
+                if v.ref_mid <= 0.0 && ref_mid > 0.0 {
+                    v.ref_mid = ref_mid;
+                    restored += 1;
+                }
+            }
+        }
+        if restored > 0 {
+            tracing::info!(restored, "restored reference prices from journal");
         }
     }
 
@@ -121,12 +170,18 @@ impl Venue {
         out
     }
 
-    /// Register a new instrument at runtime (the `list_instrument` job).
+    /// Register a new instrument at runtime (the `list_instrument` job or the
+    /// boot replay of the instrument journal — hence the ref restore here).
     pub fn register_instrument(&self, inst: Instrument) -> Value {
         let mut venues = self.venues.lock().unwrap();
-        venues
+        let v = venues
             .entry(inst.id.clone())
             .or_insert_with(|| InstrumentVenue::from(&inst));
+        if v.ref_mid <= 0.0 {
+            if let Some(saved) = load_saved_ref(&inst.id) {
+                v.ref_mid = saved;
+            }
+        }
         json!({ "ok": true, "instrumentId": inst.id })
     }
 
@@ -136,6 +191,12 @@ impl Venue {
             .get_mut(instrument_id)
             .ok_or_else(|| VenueError::NotFound(instrument_id.to_string()))?;
         v.ref_mid = ref_mid;
+        // Journal refs so a restarted venue quotes immediately instead of
+        // erroring NoReference until the next quoter pass (an on-chain tick
+        // landing in that window would burn the job for nothing).
+        let snapshot: HashMap<String, f64> =
+            venues.iter().filter(|(_, v)| v.ref_mid > 0.0).map(|(k, v)| (k.clone(), v.ref_mid)).collect();
+        persist_refs(&snapshot);
         Ok(json!({ "ok": true, "refMid": ref_mid }))
     }
 
@@ -276,10 +337,14 @@ impl Venue {
         let mut placed = Vec::new();
         let mut all_fills: Vec<Fill> = Vec::new();
         let mut signed_fill_count = 0usize;
+        // Ladder depth is a signed commitment too: spend the same funding
+        // budgets the RFQ path enforces, deepest levels dropped first.
+        let mut budgets = self.quote_budgets(crate::market::now_unix());
+        let min_qty = v.instrument.min_qty.max(1) as u64;
         for (side, touch) in [(Side::Buy, &quote.bid), (Side::Sell, &quote.ask)] {
             let Some(touch) = touch else { continue };
             for lvl in 0..ladder_levels {
-            let q = &crate::sidecar::Quote {
+            let mut q = crate::sidecar::Quote {
                 price: match side {
                     Side::Buy => touch.price - (lvl * level_step) as f64,
                     Side::Sell => touch.price + (lvl * level_step) as f64,
@@ -289,6 +354,28 @@ impl Venue {
             if q.price <= 0.0 {
                 continue;
             }
+            if let Some((sell_budget, buy_budget)) = &mut budgets {
+                let budget: &mut u128 = match side {
+                    Side::Sell => sell_budget,
+                    Side::Buy => buy_budget,
+                };
+                let price = q.price.round() as u64;
+                let max_qty = budget
+                    .saturating_mul(1_000_000)
+                    .saturating_sub(500_000)
+                    .checked_div(price.max(1) as u128)
+                    .unwrap_or(0)
+                    .min(u64::MAX as u128) as u64;
+                let qty = (q.qty.round() as u64).min(max_qty);
+                if qty < min_qty {
+                    continue;
+                }
+                q.qty = qty as f64;
+                *budget = budget.saturating_sub(
+                    surplus_settlement::core::cost_micro(price, qty).to::<u128>(),
+                );
+            }
+            let q = &q;
             // When a settlement signer is configured, the MM quote is a signed
             // firm order: its book id is the EIP-712 digest, and any cross
             // against another signed order yields a settleable fill.
@@ -325,6 +412,9 @@ impl Venue {
             let mut signed = self.signed.lock().unwrap();
             signed_fill_count =
                 signed.pair_book_fills(&all_fills, &ctx.domain, crate::market::now_unix());
+            if signed_fill_count > 0 {
+                crate::market::persist_outbox(&signed.outbox);
+            }
         }
         Ok(json!({
             "quoting": true,
@@ -347,6 +437,25 @@ impl InstrumentVenue {
             drawdown_micro: 0.0,
         }
     }
+}
+
+fn refs_path() -> Option<std::path::PathBuf> {
+    std::env::var("DATA_DIR").ok().map(|d| std::path::Path::new(&d).join("refs.json"))
+}
+
+fn persist_refs(refs: &HashMap<String, f64>) {
+    let Some(path) = refs_path() else { return };
+    let tmp = path.with_extension("json.tmp");
+    let Ok(bytes) = serde_json::to_vec(refs) else { return };
+    if let Err(e) = std::fs::write(&tmp, &bytes).and_then(|()| std::fs::rename(&tmp, &path)) {
+        tracing::warn!("refs journal write failed: {e}");
+    }
+}
+
+fn load_saved_ref(instrument_id: &str) -> Option<f64> {
+    let raw = std::fs::read(refs_path()?).ok()?;
+    let saved: HashMap<String, f64> = serde_json::from_slice(&raw).ok()?;
+    saved.get(instrument_id).copied().filter(|r| *r > 0.0)
 }
 
 /// Adjust the operator's inventory for every fill it was a party to. When the MM

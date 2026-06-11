@@ -14,6 +14,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let venue = Arc::new(Venue::from_env());
+    http::spawn_auto_flush(venue.clone());
     let app = http::router(venue);
 
     let addr = std::env::var("SURPLUS_OPERATOR_ADDR").unwrap_or_else(|_| "127.0.0.1:9100".into());

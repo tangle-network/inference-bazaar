@@ -193,6 +193,7 @@ impl BackgroundService for MarketVenueService {
         let (tx, rx) = oneshot::channel();
         // Publish the venue so job handlers can reach it.
         let _ = VENUE.set(self.venue.clone());
+        http::spawn_auto_flush(self.venue.clone());
         let app = http::router(self.venue.clone());
         let addr = self.addr.clone();
         tokio::spawn(async move {

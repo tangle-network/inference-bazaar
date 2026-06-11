@@ -226,6 +226,9 @@ impl Venue {
             SignedEntry { instrument_id: instrument_id.clone(), signed },
         );
         let paired = signed_state.pair_book_fills(&out.fills, &ctx.domain, now);
+        if paired > 0 {
+            persist_outbox(&signed_state.outbox);
+        }
         apply_inventory(v, &out.fills, self.mm_owner());
         Ok(json!({
             "orderDigest": digest_hex,
@@ -338,6 +341,42 @@ impl Venue {
         if qty < min_qty as u64 {
             return Err(VenueError::Rejected(format!("qty {qty} below min {min_qty}")));
         }
+        // A firm quote is a real commitment: cap it by on-chain funding net of
+        // everything already signed but not yet settled, so the venue never
+        // signs a trade the contract would reject (InsufficientCollateral /
+        // InsufficientBalance) after execution.
+        {
+            let now = now_unix();
+            let stale = self.chain_cache.lock().unwrap().fetched_at + 15 < now;
+            if stale {
+                if let Err(e) = self.refresh_chain_cache().await {
+                    tracing::warn!("chain cache refresh failed, quoting on last known funding: {e}");
+                }
+            }
+        }
+        let qty = match self.quote_budgets(now_unix()) {
+            None => qty,
+            Some((sell_budget, buy_budget)) => {
+                let budget = match maker_side {
+                    Side::Sell => sell_budget,
+                    Side::Buy => buy_budget,
+                };
+                // cost(qty) = (price*qty + 500_000) / 1e6 must fit the budget.
+                let max_qty = budget
+                    .saturating_mul(1_000_000)
+                    .saturating_sub(500_000)
+                    .checked_div(price as u128)
+                    .unwrap_or(0)
+                    .min(u64::MAX as u128) as u64;
+                qty.min(max_qty)
+            }
+        };
+        if qty < min_qty as u64 {
+            return Err(VenueError::Rejected(
+                "insufficient on-chain funding to back this quote (deposit collateral or balance)"
+                    .into(),
+            ));
+        }
         let order = Order {
             instrument: instrument_hash(instrument_id),
             side: match maker_side {
@@ -403,6 +442,7 @@ impl Venue {
             }
         }
         signed_state.outbox.push(fill.clone());
+        persist_outbox(&signed_state.outbox);
         Ok(json!({
             "filled": true,
             "qtyTokens": qty,
@@ -442,9 +482,11 @@ impl Venue {
         let now = now_unix();
         let (mut fills, expired): (Vec<SignedFill>, Vec<SignedFill>) = {
             let mut signed_state = self.signed.lock().unwrap();
-            std::mem::take(&mut signed_state.outbox)
+            let parts = std::mem::take(&mut signed_state.outbox)
                 .into_iter()
-                .partition(|f| f.buy.order.expiry >= now && f.sell.order.expiry >= now)
+                .partition(|f| f.buy.order.expiry >= now && f.sell.order.expiry >= now);
+            persist_outbox(&signed_state.outbox);
+            parts
         };
         for f in &expired {
             tracing::error!(
@@ -528,6 +570,135 @@ impl Venue {
         let mut restored = fills;
         restored.extend(std::mem::take(&mut signed_state.outbox));
         signed_state.outbox = restored;
+        persist_outbox(&signed_state.outbox);
+    }
+
+    pub fn outbox_len(&self) -> usize {
+        self.signed.lock().unwrap().outbox.len()
+    }
+
+    /// Restore fills journaled by a previous run. Safe to resubmit: the
+    /// contract's cumulative fill caps reject anything that already settled,
+    /// and the flush path drops terminal failures fill-by-fill.
+    pub(crate) fn load_outbox(&self) {
+        let Some(path) = outbox_path() else { return };
+        let Ok(raw) = std::fs::read(&path) else { return };
+        match serde_json::from_slice::<Vec<SignedFill>>(&raw) {
+            Ok(fills) if !fills.is_empty() => {
+                tracing::info!(count = fills.len(), "restored settlement outbox from journal");
+                self.signed.lock().unwrap().outbox = fills;
+            }
+            Ok(_) => {}
+            Err(e) => tracing::error!("outbox journal unreadable (keeping file): {e}"),
+        }
+    }
+
+    /// Refresh the cached on-chain funding that bounds firm quoting. A no-op
+    /// without the `chain` feature or RPC config (cache stays at fetched_at=0
+    /// => quoting unbounded, the legacy/devnet behavior).
+    pub async fn refresh_chain_cache(&self) -> Result<(), VenueError> {
+        #[cfg(feature = "chain")]
+        {
+            let Some(ctx) = self.settle.as_ref() else { return Ok(()) };
+            let (Some(rpc), Some(key), Some(signer)) =
+                (ctx.rpc_url.as_deref(), ctx.operator_key.as_deref(), ctx.signer.as_ref())
+            else {
+                return Ok(());
+            };
+            let op = signer.address();
+            let client =
+                surplus_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
+                    .await
+                    .map_err(|e| VenueError::Chain(e.to_string()))?;
+            let free = client
+                .free_collateral(op)
+                .await
+                .map_err(|e| VenueError::Chain(e.to_string()))?;
+            let bal = client
+                .balance_of(op)
+                .await
+                .map_err(|e| VenueError::Chain(e.to_string()))?;
+            let penalty = client
+                .default_penalty_bps()
+                .await
+                .map_err(|e| VenueError::Chain(e.to_string()))?;
+            let mut cache = self.chain_cache.lock().unwrap();
+            cache.free_collateral_micro = free.try_into().unwrap_or(u128::MAX);
+            cache.balance_micro = bal.try_into().unwrap_or(u128::MAX);
+            cache.penalty_bps = penalty;
+            cache.fetched_at = now_unix();
+        }
+        Ok(())
+    }
+
+    /// Cost (micro) of the operator's signed commitments not yet settled
+    /// on-chain: queued outbox fills plus live unexpired signed orders. These
+    /// claim funding the contract doesn't know about yet, so quoting must
+    /// reserve against them.
+    pub(crate) fn outstanding_commitments(&self, op: Address, now: u64) -> (u128, u128) {
+        let signed_state = self.signed.lock().unwrap();
+        let mut sell: u128 = 0;
+        let mut buy: u128 = 0;
+        for f in &signed_state.outbox {
+            if f.sell.order.trader == op {
+                sell += f.cost_micro();
+            }
+            if f.buy.order.trader == op {
+                buy += f.cost_micro();
+            }
+        }
+        for (digest, e) in &signed_state.orders {
+            let o = &e.signed.order;
+            if o.trader != op || o.expiry < now {
+                continue;
+            }
+            let remaining = signed_state.remaining(digest, o);
+            if remaining == 0 {
+                continue;
+            }
+            let cost = surplus_settlement::core::cost_micro(o.priceMicroPerM, remaining)
+                .to::<u128>();
+            if o.side == SIDE_SELL {
+                sell += cost;
+            } else {
+                buy += cost;
+            }
+        }
+        (sell, buy)
+    }
+
+    /// Cost budgets (micro) still committable on each side, from the last
+    /// chain-cache refresh. None => unbounded (no chain binding yet).
+    pub(crate) fn quote_budgets(&self, now: u64) -> Option<(u128, u128)> {
+        let cache = *self.chain_cache.lock().unwrap();
+        if cache.fetched_at == 0 {
+            return None;
+        }
+        let op = self.settle.as_ref()?.signer.as_ref()?.address();
+        let (out_sell, out_buy) = self.outstanding_commitments(op, now);
+        // Mint-time invariant: (outstanding + new) * (1 + penalty) <= freeCollateral.
+        let sellable = cache.free_collateral_micro * 10_000
+            / (10_000 + cache.penalty_bps as u128);
+        Some((sellable.saturating_sub(out_sell), cache.balance_micro.saturating_sub(out_buy)))
+    }
+}
+
+/// Journal path for the settlement outbox; `None` disables persistence (dev).
+fn outbox_path() -> Option<std::path::PathBuf> {
+    std::env::var("DATA_DIR").ok().map(|d| std::path::Path::new(&d).join("outbox.json"))
+}
+
+/// Write the outbox journal (atomic rename). Called under the `signed` lock,
+/// which serializes writers.
+pub(crate) fn persist_outbox(outbox: &[SignedFill]) {
+    let Some(path) = outbox_path() else { return };
+    let tmp = path.with_extension("json.tmp");
+    let bytes = match serde_json::to_vec(outbox) {
+        Ok(b) => b,
+        Err(e) => return tracing::error!("outbox serialize failed: {e}"),
+    };
+    if let Err(e) = std::fs::write(&tmp, &bytes).and_then(|()| std::fs::rename(&tmp, &path)) {
+        tracing::error!("outbox journal write failed: {e}");
     }
 }
 

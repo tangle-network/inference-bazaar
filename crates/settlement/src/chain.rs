@@ -67,6 +67,8 @@ sol! {
             bytes32 lotId, address holder, uint64 qtyTokens, uint64 deadline, uint8 state
         );
         function receiptDigest(bytes32 redemptionId, uint64 servedTokens) external view returns (bytes32);
+        function freeCollateral(address issuer) external view returns (uint256);
+        function defaultPenaltyBps() external view returns (uint16);
 
         event FillSettled(
             bytes32 indexed buyOrderHash,
@@ -331,6 +333,14 @@ impl SettlementClient {
 
     pub async fn filled(&self, order_hash: B256) -> anyhow::Result<u64> {
         Ok(self.contract.filled(order_hash).call().await?)
+    }
+
+    pub async fn free_collateral(&self, issuer: Address) -> anyhow::Result<U256> {
+        Ok(self.contract.freeCollateral(issuer).call().await?)
+    }
+
+    pub async fn default_penalty_bps(&self) -> anyhow::Result<u16> {
+        Ok(self.contract.defaultPenaltyBps().call().await?)
     }
 
     /// Sanity check: the deployed contract's domain separator must equal the
