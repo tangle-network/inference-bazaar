@@ -5,6 +5,12 @@ export {
 } from './adapter'
 export { costMicro, CreditBook, instrumentId } from './credit-book'
 export {
+  ShieldedRedemptionPlanner,
+  type PlannedSpendAuth,
+  type ShieldedCreditBinding,
+  type ShieldedRedemptionPlannerOptions,
+} from './shielded-rail'
+export {
   MockOperator,
   SimulatedRouter,
   type ServeOutcome,

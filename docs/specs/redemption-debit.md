@@ -217,6 +217,39 @@ packages/redemption/
     redemption.test.ts# §8.3–8.6 overflow, expiry, wrong-instrument, determinism
 ```
 
+## 9.5 Live rail without router changes: ShieldedCredits + SpendAuth
+
+The router's existing x402 path already implements the spend leg: verify
+`X-Payment-Signature`, skip balance billing entirely, proxy to the operator,
+claim the authorized amount to the operator on-chain. `shielded-rail.ts` maps
+the debit engine onto it:
+
+- **Issuance (settlement side):** fund a *dedicated* ShieldedCredits
+  commitment with exactly `backingMicro`; hand the buyer the spending key.
+  That commitment is the credit's escrow — it cannot fund more than
+  `qtyIssued` tokens at strike, so the quota is enforced in money terms
+  on-chain.
+- **Spend (this package):** `ShieldedRedemptionPlanner.authorize(call)`
+  debits the book and emits a SpendAuth whose `amount` is exactly the debit's
+  operator payout, pinned to the selling operator's address (the router
+  rejects auths whose operator ≠ routed operator, so only the seller can
+  serve and claim). Nonces are per-commitment monotonic and only consumed by
+  successful debits. Sum of auth amounts over any sequence == backing issued
+  (proven in `shielded-rail.test.ts`).
+- **Distinct flows:** crossing the spread (buying the lot) pays
+  `strike × qty` once via settlement's rails; that payment *funds* this
+  commitment. Redemption then meters it out to the operator per call. Credits
+  are deliberately NOT bearer ERC-20s (§1) — secondary trading is re-listing
+  the unspent remainder on the orderbook (close + refund + reissue), not
+  wallet transfers.
+- **Known imprecision (router-side, later):** `claimPayment(authHash,
+  recipient)` claims the *authorized* amount, and SpendAuth is signed
+  pre-serve — exact per-call closure on the live rail therefore requires the
+  planner to be driven by *metered* counts (authorize-after-meter, as the
+  operator venue does) or the small router change to claim metered cost.
+  Refusal of a valid pinned auth is the Phase 6 slashing condition; the
+  escrow itself protects principal (unserved backing refunds at expiry).
+
 ## 10. Acceptance criteria (Phase 5 boxes in ROADMAP.md)
 
 - [x] `CreditBook` debit closes the unit; §5 invariants hold after every debit.
