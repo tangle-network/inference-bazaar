@@ -1,27 +1,36 @@
 # Surplus operator.
 #
-# Two binaries, mirroring the llm-inference-blueprint split:
-#   - `surplus-operator-lite`: HTTP-only operator (market API + sidecar wiring +
-#     settlement intents), no Tangle substrate. This is what runs in local e2e
-#     and the first testnet smoke; it depends only on stable crates so it builds
-#     fast and is easy to reason about.
-#   - `surplus-operator` (added next): the full BlueprintRunner that registers
-#     on-chain via blueprint-sdk and listens for jobs. Gated behind the
-#     `blueprint` feature so the lite path never pulls the alpha SDK.
+# One library (the venue: open orderbook + sidecar quoting + settlement intents)
+# driven by two binaries:
+#   - `surplus-operator-lite`: HTTP-only venue, no Tangle substrate. Local e2e +
+#     first testnet smoke; stable deps only, builds fast.
+#   - `surplus-operator` (feature `blueprint`): the full BlueprintRunner that
+#     registers on-chain via blueprint-sdk and drives the SAME venue from job
+#     handlers (workflow_tick, list_instrument, status). The alpha SDK is pulled
+#     ONLY when the `blueprint` feature is on, so the lite path stays light.
 [package]
 name = "surplus-operator"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
+[lib]
+name = "surplus_operator"
+path = "src/lib.rs"
+
 [[bin]]
 name = "surplus-operator-lite"
 path = "src/main.rs"
 
+[[bin]]
+name = "surplus-operator"
+path = "src/bin/blueprint.rs"
+required-features = ["blueprint"]
+
 [dependencies]
 surplus-orderbook = { path = "../crates/orderbook" }
 axum = { version = "0.7", features = ["json", "macros"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -29,7 +38,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 
+# On-chain blueprint deps — pulled only with `--features blueprint`.
+blueprint-sdk = { version = "0.2.0-alpha.6", features = ["std", "tangle", "macros"], optional = true }
+alloy-sol-types = { version = "1", optional = true }
+
 [features]
-# Full on-chain operator (BlueprintRunner + tangle-inference-core). Off by
-# default so `cargo build` of the lite operator stays light.
-blueprint = []
+default = []
+blueprint = ["dep:blueprint-sdk", "dep:alloy-sol-types"]

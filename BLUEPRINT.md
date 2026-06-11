@@ -49,14 +49,32 @@ Proven live end to end: seller lists surplus → MM ticks and crosses → buyers
 lift the seller and the MM → inventory tracks correctly → settlement intents emit
 on the chosen rail.
 
-## On-chain runner (next)
+## On-chain runner (built)
 
-`surplus-operator-lite` is the HTTP venue with no Tangle substrate — for local
-e2e and the first testnet smoke. The full `surplus-operator` (behind the
-`blueprint` feature) adds the `BlueprintRunner`: on-chain registration via
-`blueprint-sdk`, the job handlers in `blueprint.toml`, and `tangle-inference-core`
-billing. Deploy with `cargo tangle blueprint deploy` (see `scripts/` and
-`deploy/`).
+The venue runs INSIDE a real Tangle `BlueprintRunner`. `operator/src/bin/blueprint.rs`
+(bin `surplus-operator`, `--features blueprint`) mirrors the llm-inference-blueprint
+operator:
+
+- The venue starts as a `BackgroundService` (the market is live before the
+  runner polls jobs).
+- On-chain jobs drive it, wired via `Router::new().route(JOB, handler.layer(TangleLayer))`:
+  - **`workflow_tick` (job 30)** — the main thing the runner triggers: runs an
+    `mm_tick` (pull risk-gated quotes, cancel-replace the operator's quotes).
+  - `list_instrument` (0), `status` (4).
+- Job arg/result types are `sol!` ABI structs; `main()` loads `BlueprintEnvironment`,
+  handles registration mode, and runs `BlueprintRunner::builder(TangleConfig, env)
+  .router(router()).producer(TangleProducer).consumer(TangleConsumer)
+  .background_service(venue).run()`.
+
+Verified: compiles against the full alpha SDK (rustc 1.91, `core2` patched like
+the reference repos — see `rust-toolchain.toml` and the root `[patch.crates-io]`),
+and the binary boots the real blueprint CLI (`surplus-operator run --data-dir …
+--http-rpc-url …`).
+
+**Next:** trigger `workflow_tick` through an actual on-chain job — `cargo tangle
+harness up` (local devnet), deploy via `cargo tangle blueprint deploy`, register +
+request + approve the service, then submit the job (`cargo tangle blueprint jobs`).
+See `scripts/` and `deploy/`.
 
 ## Future tracks (documented seams, not built)
 

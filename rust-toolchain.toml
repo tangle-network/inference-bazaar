@@ -1,0 +1,7 @@
+# The Tangle blueprint SDK (alpha) requires rustc 1.91 — same pin as the
+# reference blueprints. The orderbook crate + lite operator build on stable too,
+# but pinning the workspace keeps the on-chain (`blueprint` feature) build green.
+[toolchain]
+channel = "1.91"
+components = ["cargo", "rustfmt", "clippy", "rust-src"]
+profile = "minimal"
