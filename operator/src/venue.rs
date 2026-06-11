@@ -67,6 +67,8 @@ pub struct Venue {
     pub(crate) signed: Mutex<SignedState>,
     /// Owner string for the operator's own quotes in the book.
     pub(crate) mm_owner: String,
+    /// Tokens served per open redemption, pending the holder's receipt.
+    pub(crate) redeem_served: Mutex<HashMap<String, u64>>,
 }
 
 impl Venue {
@@ -89,6 +91,7 @@ impl Venue {
             settle,
             signed: Mutex::new(SignedState::default()),
             mm_owner,
+            redeem_served: Mutex::new(HashMap::new()),
         }
     }
 

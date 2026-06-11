@@ -10,6 +10,7 @@
 pub mod config;
 pub mod http;
 pub mod market;
+pub mod redeem;
 pub mod sidecar;
 pub mod venue;
 

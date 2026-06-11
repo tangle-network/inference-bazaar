@@ -31,9 +31,32 @@ pub fn router(venue: Shared) -> Router {
         .route("/order-signed", post(place_signed))
         .route("/rfq", post(rfq_quote))
         .route("/rfq/fill", post(rfq_fill))
+        // Redemption: spend a credit lot on real inference (gate G1).
+        .route("/redeem", post(redeem_serve))
+        .route("/redeem/receipt", post(redeem_receipt))
         .route("/settlement/outbox", get(settlement_outbox))
         .route("/settlement/flush", post(settlement_flush))
         .with_state(venue)
+}
+
+async fn redeem_serve(
+    State(v): State<Shared>,
+    Json(b): Json<crate::redeem::RedeemServeBody>,
+) -> impl IntoResponse {
+    match v.redeem_serve(b).await {
+        Ok(val) => Json(val).into_response(),
+        Err(e) => (err_status(&e), e.to_string()).into_response(),
+    }
+}
+
+async fn redeem_receipt(
+    State(v): State<Shared>,
+    Json(b): Json<crate::redeem::RedeemReceiptBody>,
+) -> impl IntoResponse {
+    match v.redeem_receipt(b).await {
+        Ok(val) => Json(val).into_response(),
+        Err(e) => (err_status(&e), e.to_string()).into_response(),
+    }
 }
 
 fn err_status(e: &VenueError) -> StatusCode {

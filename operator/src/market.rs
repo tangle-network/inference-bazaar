@@ -157,6 +157,11 @@ pub struct RfqFillBody {
 // ─────────────────────────────── Venue: market ops ───────────────────────────
 
 impl Venue {
+    /// Settlement context accessor for sibling modules (redemption serving).
+    pub(crate) fn settle_ctx_pub(&self) -> Result<&SettleCtx, VenueError> {
+        self.settle_ctx()
+    }
+
     fn settle_ctx(&self) -> Result<&SettleCtx, VenueError> {
         self.settle
             .as_ref()

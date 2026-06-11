@@ -59,6 +59,14 @@ sol! {
         function liability(address issuer) external view returns (uint256);
         function filled(bytes32 orderHash) external view returns (uint64);
         function defaultsCount() external view returns (uint256);
+        function lots(bytes32 lotId) external view returns (
+            address holder, address issuer, bytes32 instrument,
+            uint64 qtyTokens, uint64 lockedTokens, uint64 expiry, uint128 notionalMicro
+        );
+        function redemptions(bytes32 redemptionId) external view returns (
+            bytes32 lotId, address holder, uint64 qtyTokens, uint64 deadline, uint8 state
+        );
+        function receiptDigest(bytes32 redemptionId, uint64 servedTokens) external view returns (bytes32);
 
         event FillSettled(
             bytes32 indexed buyOrderHash,
@@ -207,6 +215,22 @@ impl SettlementClient {
                     .map(|l| l.inner.redemptionId)
             })
             .ok_or_else(|| anyhow::anyhow!("RedemptionRequested event missing"))
+    }
+
+    /// Open-redemption + lot reads for the serving side.
+    pub async fn get_redemption(
+        &self,
+        redemption_id: B256,
+    ) -> anyhow::Result<ISurplusSettlement::redemptionsReturn> {
+        Ok(self.contract.redemptions(redemption_id).call().await?)
+    }
+
+    pub async fn get_lot(&self, lot_id: B256) -> anyhow::Result<ISurplusSettlement::lotsReturn> {
+        Ok(self.contract.lots(lot_id).call().await?)
+    }
+
+    pub async fn receipt_digest(&self, redemption_id: B256, served: u64) -> anyhow::Result<B256> {
+        Ok(self.contract.receiptDigest(redemption_id, served).call().await?)
     }
 
     pub async fn settle_redemption(

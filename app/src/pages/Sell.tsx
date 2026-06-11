@@ -7,11 +7,11 @@ import { Panel } from '~/components/ui'
 import { ProviderLogo } from '~/lib/logos'
 import { cn } from '~/lib/cn'
 import { compactUsd, pricePerM, tokens } from '~/lib/format'
-import { CHAIN, useBook, useCatalog, useInstruments } from '~/lib/api'
+import { CHAIN, useCatalog, useInstruments } from '~/lib/api'
 import { useMyLots, type CreditLot } from '~/lib/settlement'
 import { instrumentHash } from '~/lib/settlement'
 import { STEP_LABEL, useFirmTrade, type TradeProgress, type TradeReceipt } from '~/lib/trade'
-import { useVenueRegistry } from '~/lib/venues'
+import { useAggBook, useVenueRegistry } from '~/lib/venues'
 
 /**
  * Selling is transferring something you provably hold: a credit lot on
@@ -40,8 +40,8 @@ export default function SellPage() {
   const [selected, setSelected] = useState<CreditLot | null>(null)
   const active = selected ?? sellable[0]?.lot ?? null
   const activeInstrument = sellable.find((s) => s.lot.lotId === active?.lotId)?.instrument ?? null
-  const book = useBook(activeInstrument?.id ?? null)
-  const bestBid = book.data?.book.bids[0]?.price ?? null
+  const book = useAggBook(registry.data, activeInstrument?.id ?? null)
+  const bestBid = book.data?.bids[0]?.price ?? null
 
   const [progress, setProgress] = useState<TradeProgress | null>(null)
   const [receipt, setReceipt] = useState<TradeReceipt | null>(null)

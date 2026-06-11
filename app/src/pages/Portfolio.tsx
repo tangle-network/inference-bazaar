@@ -1,4 +1,5 @@
-import { useAccount, useBalance, useReadContract } from 'wagmi'
+import { useState } from 'react'
+import { useAccount, useBalance, usePublicClient, useReadContract, useWriteContract } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import { formatUnits } from 'viem'
 import { Identicon } from '@tangle-network/blueprint-ui/components'
@@ -7,7 +8,73 @@ import { PageHeader } from '~/components/PageHeader'
 import { Panel, Stat } from '~/components/ui'
 import { compactUsd, tokens, truncAddr } from '~/lib/format'
 import { CHAIN, useInstruments } from '~/lib/api'
-import { instrumentHash, SETTLEMENT, SETTLEMENT_ABI, useMyLots } from '~/lib/settlement'
+import { instrumentHash, SETTLEMENT, SETTLEMENT_ABI, useMyLots, type CreditLot } from '~/lib/settlement'
+import { VENUE_URL } from '~/lib/api'
+
+const REDEEM_ABI = [
+  { type: 'function', name: 'requestRedemption', inputs: [{ name: 'lotId', type: 'bytes32' }, { name: 'qty', type: 'uint64' }], outputs: [{ name: '', type: 'bytes32' }], stateMutability: 'nonpayable' },
+  { type: 'function', name: 'openRedemptionOf', inputs: [{ name: 'lotId', type: 'bytes32' }], outputs: [{ name: '', type: 'bytes32' }], stateMutability: 'view' },
+] as const
+
+/** Open a redemption on a lot, then hand the holder the exact consume call. */
+function SpendLot({ lot }: { lot: CreditLot }) {
+  const client = usePublicClient({ chainId: CHAIN.id })
+  const { writeContractAsync } = useWriteContract()
+  const [redemptionId, setRedemptionId] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function open() {
+    setBusy(true)
+    setError(null)
+    try {
+      const existing = (await client!.readContract({
+        address: SETTLEMENT.address, abi: REDEEM_ABI, functionName: 'openRedemptionOf', args: [lot.lotId],
+      })) as string
+      if (existing !== `0x${'0'.repeat(64)}`) {
+        setRedemptionId(existing)
+        return
+      }
+      const qty = lot.qtyTokens - lot.lockedTokens
+      const tx = await writeContractAsync({
+        address: SETTLEMENT.address, abi: REDEEM_ABI, functionName: 'requestRedemption',
+        args: [lot.lotId, qty], chainId: CHAIN.id,
+      })
+      await client!.waitForTransactionReceipt({ hash: tx })
+      const rid = (await client!.readContract({
+        address: SETTLEMENT.address, abi: REDEEM_ABI, functionName: 'openRedemptionOf', args: [lot.lotId],
+      })) as string
+      setRedemptionId(rid)
+    } catch (e) {
+      setError(e instanceof Error ? e.message.split('\n')[0]! : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (redemptionId) {
+    const curl = `curl -s ${VENUE_URL}/redeem -H 'content-type: application/json' -d '{"redemptionId":"${redemptionId}","messages":[{"role":"user","content":"Hello"}],"maxTokens":200}'`
+    return (
+      <div className="w-full rounded-[8px] border border-[var(--s-emerald)]/25 bg-[var(--s-emerald-soft)] px-3 py-2.5">
+        <div className="font-data text-[12px] font-semibold text-[var(--s-emerald)]">
+          Redemption open — consume it with one call:
+        </div>
+        <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap break-all font-data text-[11px] leading-relaxed text-[var(--s-text-secondary)]">{curl}</pre>
+        <div className="mt-1 font-data text-[11px] text-[var(--s-text-muted)]">
+          Full walkthrough: docs/examples/spend-a-credit.md — sign the returned receiptDigest to settle.
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button onClick={open} disabled={busy} className="btn-primary h-9">
+        {busy ? 'Opening…' : 'Spend'}
+      </button>
+      {error && <span className="font-data text-[11px] text-[var(--s-crimson)]">{error}</span>}
+    </div>
+  )
+}
 
 const ERC20_ABI = [
   {
@@ -143,6 +210,7 @@ export default function PortfolioPage() {
                 >
                   settlement tx ↗
                 </a>
+                <SpendLot lot={lot} />
               </div>
             )
           })}

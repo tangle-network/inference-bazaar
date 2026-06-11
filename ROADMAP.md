@@ -16,9 +16,14 @@ Fable agent on the RFQ/settlement spine.
 All of these must be simultaneously true to call Surplus production. Each links
 to the phase that delivers it.
 
-- [ ] **G1 — A credit is spendable.** A bought credit redeems into real metered
+- [x] **G1 — A credit is spendable.** A bought credit redeems into real metered
   inference through the Tangle Router, debiting its token quota at the locked
-  price. *(Phase 5)*
+  price. *(Done: venue `/redeem` + `/redeem/receipt` serve router inference
+  against an open on-chain redemption; scripts/e2e-redeem.mjs spent lot
+  `0xd66a3647…` on a real Claude completion — 35 metered tokens debited the
+  lot 1,000,000→999,965 and released exactly 463 micro at the $13.246/M
+  strike, settled with the holder's signed receipt. Walkthrough:
+  docs/examples/spend-a-credit.md.)*
 - [x] **G2 — Atomic fills.** A match settles all-or-nothing: buyer escrow → credit
   issued → payment released, or none of it. *(Phase 4 — injected-failure tests in
   Settlement.t.sol, and demonstrated live on Base Sepolia: settleFills tx
@@ -144,9 +149,12 @@ to the phase that delivers it.
   quota debits at strike → operator paid → quota exhausts → next credit/refund.
   **Done:** 12 tests green across both suites — closure, overflow fallback,
   expiry refund, wrong-instrument, roll-to-next-credit, determinism.
-- [ ] **Live router integration.** Wire the adapter into the real router so a
-  credit redeems against live inference. **Done when:** a real
-  `/v1/chat/completions` call debits a real credit and returns a completion.
+- [x] **Live router integration.** **Done:** the operator's redemption worker
+  serves `/v1/chat/completions` through the live router and debits the
+  on-chain credit at the locked strike (operator/src/redeem.rs; proof in
+  scripts/e2e-redeem.mjs — real completion, quota 1,000,000→999,965).
+  Router-native debit (tcloud#41 wire contract) remains the v2 ergonomics
+  path; the credit is spendable today.
 
 ## Phase 6 — Redemption guarantees + abuse bounds (G3, G7) `settlement-agent` + `surplus`
 

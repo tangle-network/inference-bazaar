@@ -136,20 +136,6 @@ export function useBook(instrumentId: string | null) {
   })
 }
 
-/** Books for many instruments at once (markets table). */
-export function useBooks(instrumentIds: string[]) {
-  return useQuery({
-    queryKey: ['books', instrumentIds.join(',')],
-    queryFn: async () => {
-      const entries = await Promise.all(
-        instrumentIds.map(async (id) => [id, await fetchBook(id).catch(() => null)] as const),
-      )
-      return new Map(entries.filter(([, b]) => b !== null) as [string, VenueBook][])
-    },
-    enabled: instrumentIds.length > 0,
-    refetchInterval: 15_000,
-  })
-}
 
 export function useVenueHealth() {
   return useQuery({
@@ -164,27 +150,6 @@ export function useVenueHealth() {
   })
 }
 
-export interface PlaceOrderResult {
-  ok?: boolean
-  orderId?: string
-  fills?: { price: number; qty_tokens?: number; qtyTokens?: number }[]
-  [k: string]: unknown
-}
-
-/** Place a real order on the live venue book. `owner` is the wallet address. */
-export async function placeOrder(params: {
-  instrumentId: string
-  side: 'buy' | 'sell'
-  price: number
-  qtyTokens: number
-  owner: string
-}): Promise<PlaceOrderResult> {
-  return getJson<PlaceOrderResult>(`${VENUE_URL}/order`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ ...params, rail: 'router-credits' }),
-  })
-}
 
 export function useSettlementOutbox() {
   return useQuery({
@@ -194,41 +159,3 @@ export function useSettlementOutbox() {
   })
 }
 
-// ── Derived market stats (pure, from real book + catalog) ────────────────────
-
-export interface MarketRow {
-  instrument: VenueInstrument
-  model: CatalogModel
-  book: VenueBook | null
-  listMicroPerM: number
-  bestAsk: number | null
-  bestBid: number | null
-  /** 1 − ask/list when both known. */
-  discount: number | null
-  liquidityTokens: number
-  liquidityNotionalMicro: number
-}
-
-export function deriveRow(
-  instrument: VenueInstrument,
-  model: CatalogModel,
-  book: VenueBook | null,
-): MarketRow {
-  const list = instrument.token_kind === 'output' ? model.outputMicroPerM : model.inputMicroPerM
-  const bestAsk = book?.book.asks[0]?.price ?? null
-  const bestBid = book?.book.bids[0]?.price ?? null
-  const levels = book ? [...book.book.bids, ...book.book.asks] : []
-  const liquidityTokens = levels.reduce((s, l) => s + l.qty, 0)
-  const liquidityNotionalMicro = levels.reduce((s, l) => s + Math.round((l.price * l.qty) / 1e6), 0)
-  return {
-    instrument,
-    model,
-    book,
-    listMicroPerM: list,
-    bestAsk,
-    bestBid,
-    discount: bestAsk !== null && list > 0 ? 1 - bestAsk / list : null,
-    liquidityTokens,
-    liquidityNotionalMicro,
-  }
-}
