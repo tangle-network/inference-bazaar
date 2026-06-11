@@ -1,0 +1,25 @@
+{
+  "name": "@surplus/mm-eval",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "sweep": "tsx src/demo.ts"
+  },
+  "dependencies": {
+    "@surplus/market-core": "workspace:*",
+    "@surplus/mm-loop": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0"
+  }
+}
