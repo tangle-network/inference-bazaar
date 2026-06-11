@@ -1,0 +1,28 @@
+# Tangle Harness config — local Surplus devnet
+#
+# Usage: cargo tangle harness up   (use the 0.5.0-alpha cargo-tangle at
+# .cargo-tangle-target/release/cargo-tangle; the crates.io alpha.23 has no
+# `harness` subcommand).
+#
+# Spins up Anvil with the pre-seeded Tangle protocol (blueprint 0), creates an
+# on-chain service for the operator, and runs the surplus blueprint binary.
+# The mm-sidecar (quoting brain, :9110) is started separately:
+#   SURPLUS_MM_SIDECAR_PORT=9110 pnpm --filter @surplus/mm-sidecar start
+
+[chain]
+anvil = true
+chain_id = 31338
+
+[[blueprint]]
+name = "surplus"
+path = "."
+binary = ".cargo-op-target/release/surplus-operator"
+port = 9100
+health_path = "/health"
+startup_timeout_secs = 180
+
+[blueprint.env]
+SURPLUS_SIDECAR_URL = "http://127.0.0.1:9110"
+SURPLUS_ROUTER_URL = "https://router.tangle.tools"
+SURPLUS_OPERATOR_ADDR = "127.0.0.1:9100"
+RUST_LOG = "info,surplus_operator=debug"

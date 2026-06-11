@@ -71,21 +71,26 @@ to the phase that delivers it.
 
 ## Phase 3 — On-chain devnet bring-up + trigger 🔜 `surplus`
 
-- [ ] **Local devnet up.** `cargo tangle harness up` runs Anvil + Tangle (chain
-  31338). **Done when:** `cargo tangle blueprint list` shows the chain and the
-  RPC answers.
-- [ ] **Deploy ShieldedCredits to the devnet.** `forge script` the
-  `shielded-payment-gateway` deploy against 31338. **Done when:** the contract
-  address is recorded and `getAccount` returns for a funded commitment.
-- [ ] **Deploy the Surplus blueprint.** `cargo tangle blueprint deploy` from
-  `blueprint.toml`. **Done when:** a `blueprintId` is returned and visible in
-  `blueprint list`.
-- [ ] **Register + request + approve the service.** **Done when:** a `serviceId`
-  is active with this operator in the set.
-- [ ] **Trigger `workflow_tick` on-chain (G4).** Submit the job via `cargo tangle
-  blueprint jobs`. **Done when:** the on-chain job call produces a
-  `WorkflowTickResult` and the operator's book shows the MM's quotes — i.e. the
-  runner (not an HTTP poke) drove a tick.
+- [x] **Local devnet up.** `cargo tangle harness up` runs Anvil + Tangle. **Done:**
+  harness.toml committed; chain answers (snapshot chain id 31337), blueprint
+  list shows the pre-seeded protocol; operator healthy on :9100.
+- [x] **Deploy ShieldedCredits to the devnet.** **Done:** ShieldedCredits
+  `0x56D13Eb2…`, ShieldedGateway `0xE8addD62…`; a commitment funded with
+  1_490_000 micro-tsUSD (a 100k-token credit's backing at $14.90/M) and
+  `getAccount` returns it. Bonus: the firm rail too — MockUSD, SurplusSettlement
+  `0x071586BA…`, SurplusBSM, SP1MockVerifierStrict.
+- [x] **Deploy the Surplus blueprint.** **Done:** `blueprint deploy tangle
+  --definition deploy/blueprint-definition.toml` → blueprintId 1 (tx
+  `0x932a580a…`), 31-entry positional job table with `workflow_tick` at 30.
+- [x] **Register + request + approve the service.** **Done:** operator
+  `0x709979…` registered, request 2 approved (snapshot's
+  `approveService(uint64,uint8)` — the 0.13.0 ApprovalParams selector is not
+  on the snapshot proxy), serviceId 1 Active on blueprint 1.
+- [x] **Trigger `workflow_tick` on-chain (G4).** **Done:** `submitJob(1, 30, …)`
+  → runner executed the tick → result tx `0x52e87e37…` carries
+  `WorkflowTickResult { quoting: true, rationale: "q=0.00 lots,
+  reservation=15000000, halfSpread=45563" }` and the book shows the MM's
+  two-sided quotes (bid 14_954_000 / ask 15_046_000, 50k tokens per side).
 - [ ] **Base Sepolia deploy (G5).** Repeat deploy/register against chain 84532
   using the committed tnt-core manifest. **Done when:** `workflow_tick`
   triggers on Base Sepolia and the tx is linkable.
@@ -188,7 +193,7 @@ to the phase that delivers it.
 | 0 Engine (TS) | ✅ done | — |
 | 1 Orderbook + venue | ✅ done | — |
 | 2 Venue in blueprint | ✅ done | — |
-| 3 On-chain bring-up | 🔜 next (`surplus`) | G4, G5 |
+| 3 On-chain bring-up | ◕ devnet G4 done; Base Sepolia (G5) left | G4, G5 |
 | 4 RFQ + settlement | 🔁 in progress (`settlement-agent`) | G2 |
 | 5 Redemption spendable | ◔ 3/4 — sim proof + shielded-rail planner done; live wiring left | **G1** |
 | 6 Guarantees + abuse | ◔ redemption caps done; slashing/default in contracts (settlement-agent, in flight) | G3, G7 |

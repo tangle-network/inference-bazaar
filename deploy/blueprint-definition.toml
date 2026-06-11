@@ -1,0 +1,115 @@
+# Deployable Surplus blueprint definition (cargo tangle blueprint deploy tangle
+# --definition deploy/blueprint-definition.toml). This is the on-chain shape;
+# blueprint.toml stays the human manifest. Job indices are POSITIONAL on-chain:
+# 0-4 are the lifecycle jobs, 5-29 are reserved no-ops, 30 is workflow_tick —
+# matching the WORKFLOW_TICK_JOB=30 convention the operator's router expects.
+
+metadata_uri = "https://github.com/tangle-network/surplus"
+manager = "0x0000000000000000000000000000000000000000"
+metadata_file = "blueprint-metadata.json"
+
+[metadata]
+name = "surplus"
+description = "Open market for AI inference — buy/sell prepaid inference token credits, operators make markets."
+author = "Tangle"
+category = "inference-market"
+license = "MIT OR Apache-2.0"
+
+supported_memberships = ["dynamic"]
+
+[[jobs]]
+name = "list_instrument"
+description = "List a (model, tokenKind) credit market with tick size + min qty."
+
+[[jobs]]
+name = "configure"
+description = "Set quoting params + risk limits for an instrument."
+
+[[jobs]]
+name = "start_making"
+description = "Begin making a market in an instrument (enable the tick)."
+
+[[jobs]]
+name = "stop_making"
+description = "Stop making a market (pull quotes, disable the tick)."
+
+[[jobs]]
+name = "status"
+description = "Operator health, instruments, inventory, PnL."
+
+[[jobs]]
+name = "reserved_5"
+[[jobs]]
+name = "reserved_6"
+[[jobs]]
+name = "reserved_7"
+[[jobs]]
+name = "reserved_8"
+[[jobs]]
+name = "reserved_9"
+[[jobs]]
+name = "reserved_10"
+[[jobs]]
+name = "reserved_11"
+[[jobs]]
+name = "reserved_12"
+[[jobs]]
+name = "reserved_13"
+[[jobs]]
+name = "reserved_14"
+[[jobs]]
+name = "reserved_15"
+[[jobs]]
+name = "reserved_16"
+[[jobs]]
+name = "reserved_17"
+[[jobs]]
+name = "reserved_18"
+[[jobs]]
+name = "reserved_19"
+[[jobs]]
+name = "reserved_20"
+[[jobs]]
+name = "reserved_21"
+[[jobs]]
+name = "reserved_22"
+[[jobs]]
+name = "reserved_23"
+[[jobs]]
+name = "reserved_24"
+[[jobs]]
+name = "reserved_25"
+[[jobs]]
+name = "reserved_26"
+[[jobs]]
+name = "reserved_27"
+[[jobs]]
+name = "reserved_28"
+[[jobs]]
+name = "reserved_29"
+
+[[jobs]]
+name = "workflow_tick"
+description = "Periodic tick: pull reference price, fetch sidecar quotes, place/update quotes."
+
+[[sources]]
+kind = "native"
+fetcher = "github"
+entrypoint = "surplus-operator"
+
+[sources.github]
+owner = "tangle-network"
+repo = "surplus"
+tag = "v0.1.0"
+
+[[sources.github.binaries]]
+name = "surplus-operator"
+arch = "amd64"
+os = "linux"
+sha256 = "a4addf36e15fbc728c84faea1b3adf2808cf1418ebc00dfb04a3d0ec35ae9321"
+
+[[sources.binaries]]
+name = "surplus-operator"
+arch = "amd64"
+os = "linux"
+sha256 = "a4addf36e15fbc728c84faea1b3adf2808cf1418ebc00dfb04a3d0ec35ae9321"

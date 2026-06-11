@@ -1,0 +1,8 @@
+{
+  "name": "surplus",
+  "description": "Open market for AI inference — buy/sell prepaid inference token credits, operators make markets.",
+  "author": "Tangle",
+  "category": "inference-market",
+  "license": "MIT OR Apache-2.0",
+  "code_repository": "https://github.com/tangle-network/surplus"
+}
