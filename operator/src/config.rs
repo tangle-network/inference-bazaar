@@ -89,7 +89,4 @@ impl OperatorConfig {
         }
     }
 
-    pub fn instrument(&self, id: &str) -> Option<&Instrument> {
-        self.instruments.iter().find(|i| i.id == id)
-    }
 }

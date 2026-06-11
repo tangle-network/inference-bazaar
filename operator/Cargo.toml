@@ -19,6 +19,7 @@ name = "surplus-operator-lite"
 path = "src/main.rs"
 
 [dependencies]
+surplus-orderbook = { path = "../crates/orderbook" }
 axum = { version = "0.7", features = ["json", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 serde = { version = "1", features = ["derive"] }

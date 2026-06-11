@@ -1,0 +1,6 @@
+# Rust workspace for the Surplus blueprint (operator + orderbook). The TS
+# packages live under packages/ and are managed by pnpm; these are independent
+# toolchains rooted at the same repo.
+[workspace]
+resolver = "2"
+members = ["crates/orderbook", "operator"]

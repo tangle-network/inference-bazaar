@@ -1,0 +1,20 @@
+[package]
+name = "surplus-orderbook"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Open orderbook for inference-token credit markets. Swappable MatchingEngine trait + a native price-time-priority engine."
+
+[lib]
+name = "surplus_orderbook"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[features]
+default = []
+# Optional adapter onto the `orderbook-rs` crate (joaquinbejar/OrderBook-rs).
+# Off by default so the native engine has no third-party dependency — the trait
+# is the seam, the dep is never load-bearing.
+orderbook-rs = []
