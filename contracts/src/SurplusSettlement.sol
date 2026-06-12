@@ -111,10 +111,9 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
     bytes32 public constant ORDER_TYPEHASH = keccak256(
         "Order(bytes32 instrument,uint8 side,uint64 priceMicroPerM,uint64 qtyTokens,bytes32 lotId,address trader,uint64 expiry,bytes32 salt)"
     );
-    bytes32 public constant RECEIPT_TYPEHASH =
-        keccak256("RedemptionReceipt(bytes32 redemptionId,uint64 servedTokens)");
+    bytes32 public constant RECEIPT_TYPEHASH = keccak256("RedemptionReceipt(bytes32 redemptionId,uint64 servedTokens)");
     bytes32 public constant BATCH_TYPEHASH =
-        keccak256("SettlementBatch(uint64 batchNonce,bytes32 fillsHash)");
+        keccak256("SettlementBatch(bytes32 bookId,uint64 batchNonce,bytes32 fillsHash)");
 
     // ═══════════════════════════════════ Config ══════════════════════════════════
 
@@ -128,8 +127,22 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
     ISP1Verifier public sp1Verifier; // zero => proven path disabled
     bytes32 public batchProgramVKey;
 
-    EnumerableSet.AddressSet private _attesters;
-    uint16 public attesterThreshold;
+    /// One matching domain: a shared order book run by one service instance's
+    /// operator set. Each book has its OWN attester quorum (instance #2's
+    /// operators get no signing power over instance #1's batches), its OWN
+    /// nonce (instances settle in parallel — concurrent quorums on different
+    /// books never race or invalidate each other), and its OWN fee cut (the
+    /// party that funds the instance earns from its flow). The protocol-level
+    /// `feeBps`/`feeRecipient` stay global and unchanged.
+    struct Book {
+        uint16 threshold; // 0 => book not registered
+        uint16 feeBps; // book sponsor's take on fill notional, on top of the protocol fee
+        uint64 nonce; // per-book batch nonce — scopes every quorum signature
+        address feeRecipient;
+        EnumerableSet.AddressSet attesters;
+    }
+
+    mapping(bytes32 => Book) private _books;
 
     // ═══════════════════════════════════ State ═══════════════════════════════════
 
@@ -145,7 +158,6 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
     mapping(bytes32 => bytes32) public openRedemptionOf; // lotId => open redemption id
 
     DefaultRecord[] private _defaults;
-    uint64 public batchNonce;
     uint64 private _redemptionNonce;
 
     // ═══════════════════════════════════ Events ══════════════════════════════════
@@ -164,7 +176,9 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
         uint256 costMicro,
         bytes32 lotId
     );
-    event BatchSettled(uint64 indexed batchNonce, bytes32 fillsHash, uint256 fillCount, bool proven);
+    event BatchSettled(
+        bytes32 indexed bookId, uint64 indexed batchNonce, bytes32 fillsHash, uint256 fillCount, bool proven
+    );
     event RedemptionRequested(
         bytes32 indexed redemptionId,
         bytes32 indexed lotId,
@@ -183,7 +197,9 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
     );
     event LotExpiredReclaimed(bytes32 indexed lotId, address indexed holder, uint256 refundMicro);
     event LotTransferred(bytes32 indexed lotId, address indexed from, address indexed to);
-    event AttestersSet(address[] attesters, uint16 threshold);
+    event BookRegistered(
+        bytes32 indexed bookId, address[] attesters, uint16 threshold, uint16 feeBps, address feeRecipient
+    );
     event Sp1VerifierSet(address verifier, bytes32 vkey);
 
     // ═══════════════════════════════════ Errors ══════════════════════════════════
@@ -210,6 +226,9 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
     error ServedExceedsRequested(uint64 served, uint64 requested);
     error BadReceipt(bytes32 redemptionId);
     error BadQuorum();
+    error UnknownBook(bytes32 bookId);
+    error InvalidThreshold();
+    error InvalidFee();
     error ProvenPathDisabled();
     error ZeroAmount();
 
@@ -220,8 +239,11 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
         uint16 _defaultPenaltyBps,
         uint16 _feeBps,
         address _feeRecipient
-    ) EIP712("SurplusSettlement", "1") Ownable(msg.sender) {
-        require(_feeBps <= 10_000 && _defaultPenaltyBps <= 10_000, "bps");
+    )
+        EIP712("SurplusSettlement", "1")
+        Ownable(msg.sender)
+    {
+        if (_feeBps > 10_000 || _defaultPenaltyBps > 10_000) revert InvalidFee();
         paymentToken = _paymentToken;
         creditTtl = _creditTtl;
         redemptionWindow = _redemptionWindow;
@@ -310,37 +332,60 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
             FillInput calldata f = fills[i];
             bytes32 buyHash = _verifySig(f.buy, f.buySig);
             bytes32 sellHash = _verifySig(f.sell, f.sellSig);
-            _applyFill(f.buy, buyHash, f.sell, sellHash, f.qtyTokens, f.execPriceMicroPerM);
+            _applyFill(f.buy, buyHash, f.sell, sellHash, f.qtyTokens, f.execPriceMicroPerM, 0, address(0));
         }
     }
 
     /// Compressed path, quorum-vouched signatures. The attestation covers
-    /// (batchNonce, fillsHash) under this contract's EIP-712 domain.
-    function settleBatchAttested(BatchFill[] calldata fills, bytes[] calldata sigs) external {
+    /// (bookId, the book's nonce, fillsHash) under this contract's EIP-712
+    /// domain, so a quorum signature is single-use within its own book and
+    /// meaningless in any other — books settle in parallel, never racing.
+    function settleBatchAttested(bytes32 bookId, BatchFill[] calldata fills, bytes[] calldata sigs) external {
+        Book storage book = _books[bookId];
+        if (book.threshold == 0) revert UnknownBook(bookId);
         bytes32 fillsHash = keccak256(abi.encode(fills));
-        bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(BATCH_TYPEHASH, batchNonce, fillsHash)));
-        _verifyQuorum(digest, sigs);
-        _applyBatch(fills, fillsHash, false);
+        bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(BATCH_TYPEHASH, bookId, book.nonce, fillsHash)));
+        _verifyQuorum(book, digest, sigs);
+        _applyBatch(bookId, book, fills, fillsHash, false);
     }
 
     /// Compressed path, proof-vouched signatures. The SP1 program re-derives every
     /// order digest under this domain separator, recovers each signer, and commits
     /// (domainSeparator, fillsHash) as public values — so a proof binds to exactly
     /// this contract on exactly this chain and exactly these fills.
-    function settleBatchProven(BatchFill[] calldata fills, bytes calldata proof) external {
+    function settleBatchProven(bytes32 bookId, BatchFill[] calldata fills, bytes calldata proof) external {
         if (address(sp1Verifier) == address(0)) revert ProvenPathDisabled();
+        Book storage book = _books[bookId];
+        if (book.threshold == 0) revert UnknownBook(bookId);
         bytes32 fillsHash = keccak256(abi.encode(fills));
         sp1Verifier.verifyProof(batchProgramVKey, abi.encode(_domainSeparatorV4(), fillsHash), proof);
-        _applyBatch(fills, fillsHash, true);
+        _applyBatch(bookId, book, fills, fillsHash, true);
     }
 
-    function _applyBatch(BatchFill[] calldata fills, bytes32 fillsHash, bool proven) internal {
+    function _applyBatch(
+        bytes32 bookId,
+        Book storage book,
+        BatchFill[] calldata fills,
+        bytes32 fillsHash,
+        bool proven
+    )
+        internal
+    {
         for (uint256 i = 0; i < fills.length; i++) {
             BatchFill calldata f = fills[i];
-            _applyFill(f.buy, _hashOrderMem(f.buy), f.sell, _hashOrderMem(f.sell), f.qtyTokens, f.execPriceMicroPerM);
+            _applyFill(
+                f.buy,
+                _hashOrderMem(f.buy),
+                f.sell,
+                _hashOrderMem(f.sell),
+                f.qtyTokens,
+                f.execPriceMicroPerM,
+                book.feeBps,
+                book.feeRecipient
+            );
         }
-        emit BatchSettled(batchNonce, fillsHash, fills.length, proven);
-        batchNonce++;
+        emit BatchSettled(bookId, book.nonce, fillsHash, fills.length, proven);
+        book.nonce++;
     }
 
     function _verifySig(Order calldata o, bytes calldata sig) internal view returns (bytes32 structHash) {
@@ -364,8 +409,12 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
         Order calldata sell,
         bytes32 sellHash,
         uint64 qty,
-        uint64 execPrice
-    ) internal {
+        uint64 execPrice,
+        uint16 bookFeeBps,
+        address bookFeeRecipient
+    )
+        internal
+    {
         if (buy.side != 0 || sell.side != 1 || buy.instrument != sell.instrument || buy.lotId != bytes32(0)) {
             revert InvalidOrderPair();
         }
@@ -391,8 +440,10 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
         if (buyerBal < cost) revert InsufficientBalance(buyerBal, cost);
         balances[buy.trader] = buyerBal - cost;
         uint256 fee = (cost * feeBps) / 10_000;
-        balances[sell.trader] += cost - fee;
+        uint256 bookFee = (cost * bookFeeBps) / 10_000;
+        balances[sell.trader] += cost - fee - bookFee;
         balances[feeRecipient] += fee;
+        if (bookFee > 0) balances[bookFeeRecipient] += bookFee;
 
         bytes32 newLotId = keccak256(abi.encode(buyHash, sellHash, sellFilled));
         if (sell.lotId == bytes32(0)) {
@@ -478,7 +529,9 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
             state: RedemptionState.Open
         });
         openRedemptionOf[lotId] = redemptionId;
-        emit RedemptionRequested(redemptionId, lotId, lot.issuer, msg.sender, qty, uint64(block.timestamp) + redemptionWindow);
+        emit RedemptionRequested(
+            redemptionId, lotId, lot.issuer, msg.sender, qty, uint64(block.timestamp) + redemptionWindow
+        );
     }
 
     function receiptDigest(bytes32 redemptionId, uint64 servedTokens) public view returns (bytes32) {
@@ -498,12 +551,17 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
     /// Dispute path: an attester quorum vouches the service happened (validators
     /// check the router's usage records). Same digest, m-of-n instead of holder.
     function settleRedemptionAttested(
+        bytes32 bookId,
         bytes32 redemptionId,
         uint64 servedTokens,
         bytes[] calldata sigs
-    ) external {
+    )
+        external
+    {
+        Book storage book = _books[bookId];
+        if (book.threshold == 0) revert UnknownBook(bookId);
         Redemption storage r = _openRedemption(redemptionId);
-        _verifyQuorum(receiptDigest(redemptionId, servedTokens), sigs);
+        _verifyQuorum(book, receiptDigest(redemptionId, servedTokens), sigs);
         _settleRedemption(r, redemptionId, servedTokens);
     }
 
@@ -570,17 +628,36 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
 
     // ═══════════════════════════════ Attesters + SP1 ═════════════════════════════
 
-    function setAttesters(address[] calldata signers, uint16 threshold) external onlyOwner {
-        uint256 n = _attesters.length();
+    /// Register (or rotate) a matching domain: its attester quorum, threshold,
+    /// and the fee cut routed to whoever funds/operates the instance behind it.
+    /// Owner-gated for the same reason the old global set was: an attester
+    /// quorum can vouch for order signatures the contract never sees, so book
+    /// membership is exactly as trust-critical as the old `setAttesters`. The
+    /// proven (SP1) path is what eventually makes this permissionless.
+    function registerBook(
+        bytes32 bookId,
+        address[] calldata signers,
+        uint16 threshold,
+        uint16 bookFeeBps,
+        address bookFeeRecipient
+    )
+        external
+        onlyOwner
+    {
+        if (bookFeeBps > 1000 || (bookFeeBps > 0 && bookFeeRecipient == address(0))) revert InvalidFee();
+        Book storage book = _books[bookId];
+        uint256 n = book.attesters.length();
         for (uint256 i = n; i > 0; i--) {
-            _attesters.remove(_attesters.at(i - 1));
+            book.attesters.remove(book.attesters.at(i - 1));
         }
         for (uint256 i = 0; i < signers.length; i++) {
-            _attesters.add(signers[i]);
+            book.attesters.add(signers[i]);
         }
-        require(threshold >= 1 && threshold <= _attesters.length(), "threshold");
-        attesterThreshold = threshold;
-        emit AttestersSet(signers, threshold);
+        if (threshold < 1 || threshold > book.attesters.length()) revert InvalidThreshold();
+        book.threshold = threshold;
+        book.feeBps = bookFeeBps;
+        book.feeRecipient = bookFeeRecipient;
+        emit BookRegistered(bookId, signers, threshold, bookFeeBps, bookFeeRecipient);
     }
 
     function setSp1Verifier(address verifier, bytes32 vkey) external onlyOwner {
@@ -589,19 +666,32 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
         emit Sp1VerifierSet(verifier, vkey);
     }
 
-    function attesters() external view returns (address[] memory) {
-        return _attesters.values();
+    function bookAttesters(bytes32 bookId) external view returns (address[] memory) {
+        return _books[bookId].attesters.values();
+    }
+
+    function bookNonce(bytes32 bookId) external view returns (uint64) {
+        return _books[bookId].nonce;
+    }
+
+    function bookThreshold(bytes32 bookId) external view returns (uint16) {
+        return _books[bookId].threshold;
+    }
+
+    function bookFee(bytes32 bookId) external view returns (uint16 feeBps_, address recipient) {
+        Book storage book = _books[bookId];
+        return (book.feeBps, book.feeRecipient);
     }
 
     /// m-of-n over `digest`: recovered signers strictly ascending (no duplicates),
     /// each in the attester set, count >= threshold.
-    function _verifyQuorum(bytes32 digest, bytes[] calldata sigs) internal view {
-        uint16 threshold = attesterThreshold;
+    function _verifyQuorum(Book storage book, bytes32 digest, bytes[] calldata sigs) internal view {
+        uint16 threshold = book.threshold;
         if (threshold == 0 || sigs.length < threshold) revert BadQuorum();
         address last = address(0);
         for (uint256 i = 0; i < sigs.length; i++) {
             address signer = ECDSA.recover(digest, sigs[i]);
-            if (signer <= last || !_attesters.contains(signer)) revert BadQuorum();
+            if (signer <= last || !book.attesters.contains(signer)) revert BadQuorum();
             last = signer;
         }
     }

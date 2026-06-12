@@ -50,8 +50,12 @@ sol! {
         uint64 servedTokens;
     }
 
+    /// What an attester quorum signs. `bookId` is the matching domain — one
+    /// shared book per service instance — so a quorum signature is single-use
+    /// within its own book's nonce sequence and meaningless in any other book.
     #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     struct SettlementBatch {
+        bytes32 bookId;
         uint64 batchNonce;
         bytes32 fillsHash;
     }
@@ -82,8 +86,14 @@ pub fn receipt_digest(redemption_id: B256, served_tokens: u64, domain: &Eip712Do
     .eip712_signing_hash(domain)
 }
 
-pub fn batch_digest(batch_nonce: u64, fills_hash: B256, domain: &Eip712Domain) -> B256 {
+pub fn batch_digest(
+    book_id: B256,
+    batch_nonce: u64,
+    fills_hash: B256,
+    domain: &Eip712Domain,
+) -> B256 {
     SettlementBatch {
+        bookId: book_id,
         batchNonce: batch_nonce,
         fillsHash: fills_hash,
     }

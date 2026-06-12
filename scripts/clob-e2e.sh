@@ -40,9 +40,11 @@ USD=$(grep -oP 'MockUSD: \K0x\w+' <<<"$OUT")
 echo "deployed: settlement=$SETTLEMENT usd=$USD"
 
 # The on-chain quorum the epoch service's co-signatures must clear.
-cast send "$SETTLEMENT" "setAttesters(address[],uint16)" "[$OP_A_ADDR,$OP_B_ADDR]" 2 \
+BOOK="0x0000000000000000000000000000000000000000000000000000000000000000"
+cast send "$SETTLEMENT" "registerBook(bytes32,address[],uint16,uint16,address)" \
+  "$BOOK" "[$OP_A_ADDR,$OP_B_ADDR]" 2 0 "0x0000000000000000000000000000000000000000" \
   --private-key "$DEPLOYER_KEY" --rpc-url "$RPC" >/dev/null
-echo "attesters set: 2-of-2 [$OP_A_ADDR, $OP_B_ADDR]"
+echo "book $BOOK registered: 2-of-2 [$OP_A_ADDR, $OP_B_ADDR]"
 
 CLOB_OPERATORS="$OP_A_ADDR=http://127.0.0.1:$PORT_A,$OP_B_ADDR=http://127.0.0.1:$PORT_B"
 start_operator() { # port key

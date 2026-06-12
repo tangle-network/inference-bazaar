@@ -20,7 +20,7 @@ contract BatchTest is SettlementTestBase {
             abi.encodePacked(
                 "\x19\x01",
                 settlement.domainSeparator(),
-                keccak256(abi.encode(settlement.BATCH_TYPEHASH(), settlement.batchNonce(), fillsHash))
+                keccak256(abi.encode(settlement.BATCH_TYPEHASH(), BOOK, settlement.bookNonce(BOOK), fillsHash))
             )
         );
         return quorumSign(digest);
@@ -29,11 +29,11 @@ contract BatchTest is SettlementTestBase {
     function test_attestedBatchApplies_bothFills() public {
         SurplusSettlement.BatchFill[] memory fills = batchFills();
         uint256 buyerBefore = settlement.balances(buyer);
-        settlement.settleBatchAttested(fills, attestBatch(fills));
+        settlement.settleBatchAttested(BOOK, fills, attestBatch(fills));
 
         // fill 1: (15e6 * 30k + 5e5)/1e6 = 450_000; fill 2: (14.5e6 * 20k)/1e6 = 290_000
         assertEq(settlement.balances(buyer), buyerBefore - 740_000);
-        assertEq(settlement.batchNonce(), 1, "nonce advanced");
+        assertEq(settlement.bookNonce(BOOK), 1, "nonce advanced");
         bytes32 buyHash = settlement.hashOrder(fills[0].buy);
         assertEq(settlement.filled(buyHash), 50_000, "fill caps enforced in batch path too");
     }
@@ -41,10 +41,10 @@ contract BatchTest is SettlementTestBase {
     function test_attestationReplayRejected_nonceAdvanced() public {
         SurplusSettlement.BatchFill[] memory fills = batchFills();
         bytes[] memory sigs = attestBatch(fills);
-        settlement.settleBatchAttested(fills, sigs);
+        settlement.settleBatchAttested(BOOK, fills, sigs);
         // Same signatures again: digest now embeds nonce 1, recovery yields non-attesters.
         vm.expectRevert(SurplusSettlement.BadQuorum.selector);
-        settlement.settleBatchAttested(fills, sigs);
+        settlement.settleBatchAttested(BOOK, fills, sigs);
     }
 
     function test_belowThresholdRejected() public {
@@ -53,7 +53,7 @@ contract BatchTest is SettlementTestBase {
         bytes[] memory one = new bytes[](1);
         one[0] = sigs[0];
         vm.expectRevert(SurplusSettlement.BadQuorum.selector);
-        settlement.settleBatchAttested(fills, one);
+        settlement.settleBatchAttested(BOOK, fills, one);
     }
 
     function test_nonAttesterSignatureRejected() public {
@@ -63,7 +63,7 @@ contract BatchTest is SettlementTestBase {
             abi.encodePacked(
                 "\x19\x01",
                 settlement.domainSeparator(),
-                keccak256(abi.encode(settlement.BATCH_TYPEHASH(), settlement.batchNonce(), fillsHash))
+                keccak256(abi.encode(settlement.BATCH_TYPEHASH(), BOOK, settlement.bookNonce(BOOK), fillsHash))
             )
         );
         bytes[] memory sigs = new bytes[](2);
@@ -72,7 +72,7 @@ contract BatchTest is SettlementTestBase {
         (v, r, s) = vm.sign(0xBAD2, digest);
         sigs[1] = abi.encodePacked(r, s, v);
         vm.expectRevert(SurplusSettlement.BadQuorum.selector);
-        settlement.settleBatchAttested(fills, sigs);
+        settlement.settleBatchAttested(BOOK, fills, sigs);
     }
 
     function test_duplicateSignerRejected_byStrictOrdering() public {
@@ -82,7 +82,7 @@ contract BatchTest is SettlementTestBase {
         dup[0] = sigs[0];
         dup[1] = sigs[0];
         vm.expectRevert(SurplusSettlement.BadQuorum.selector);
-        settlement.settleBatchAttested(fills, dup);
+        settlement.settleBatchAttested(BOOK, fills, dup);
     }
 
     function test_attestedBatchStillEnforcesLimits() public {
@@ -95,13 +95,13 @@ contract BatchTest is SettlementTestBase {
         vm.expectRevert(
             abi.encodeWithSelector(SurplusSettlement.Overfill.selector, settlement.hashOrder(b), 50_000, 60_000)
         );
-        settlement.settleBatchAttested(fills, sigs);
+        settlement.settleBatchAttested(BOOK, fills, sigs);
     }
 
     function test_provenPathDisabledByDefault() public {
         SurplusSettlement.BatchFill[] memory fills = batchFills();
         vm.expectRevert(SurplusSettlement.ProvenPathDisabled.selector);
-        settlement.settleBatchProven(fills, hex"");
+        settlement.settleBatchProven(BOOK, fills, hex"");
     }
 
     function test_provenBatch_bindsDomainAndFillsHash() public {
@@ -114,7 +114,7 @@ contract BatchTest is SettlementTestBase {
         verifier.expect(vkey, abi.encode(settlement.domainSeparator(), fillsHash));
 
         uint256 buyerBefore = settlement.balances(buyer);
-        settlement.settleBatchProven(fills, hex"deadbeef");
+        settlement.settleBatchProven(BOOK, fills, hex"deadbeef");
         assertEq(settlement.balances(buyer), buyerBefore - 740_000);
     }
 
@@ -127,16 +127,16 @@ contract BatchTest is SettlementTestBase {
         // Verifier expects different fills => the contract-computed publicValues mismatch.
         verifier.expect(vkey, abi.encode(settlement.domainSeparator(), keccak256("other")));
         vm.expectRevert("publicValues");
-        settlement.settleBatchProven(fills, hex"deadbeef");
+        settlement.settleBatchProven(BOOK, fills, hex"deadbeef");
     }
 
     function test_provenReplaySafe_fillCapsBlockDoubleApply() public {
         SurplusSettlement.BatchFill[] memory fills = batchFills();
         settlement.setSp1Verifier(address(new SP1MockVerifierAccept()), bytes32("vk"));
-        settlement.settleBatchProven(fills, hex"");
+        settlement.settleBatchProven(BOOK, fills, hex"");
         // Orders are now fully filled; re-applying the same proof/batch reverts.
         vm.expectRevert();
-        settlement.settleBatchProven(fills, hex"");
+        settlement.settleBatchProven(BOOK, fills, hex"");
     }
 
     function test_hashFillsMatchesAbiEncode() public view {

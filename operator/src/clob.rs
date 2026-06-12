@@ -107,6 +107,10 @@ pub fn cancel_digest(chain_id: U256, settlement: Address, order_hash: B256) -> B
 
 #[derive(Clone, Debug)]
 pub struct ClobConfig {
+    /// The matching domain (contract `Book`) this fleet settles through —
+    /// `SURPLUS_CLOB_BOOK`, 0x-hex bytes32. Must be registered on-chain via
+    /// `registerBook` with exactly this operator set. Default: the zero book.
+    pub book_id: B256,
     pub epoch_secs: u64,
     /// Quorum size — must equal the contract's `attesterThreshold`.
     pub threshold: usize,
@@ -161,7 +165,14 @@ impl ClobConfig {
             }
             Err(_) => 10,
         };
+        let book_id = match std::env::var("SURPLUS_CLOB_BOOK") {
+            Ok(v) => v
+                .parse()
+                .map_err(|_| anyhow::anyhow!("SURPLUS_CLOB_BOOK '{v}' is not bytes32 hex"))?,
+            Err(_) => B256::ZERO,
+        };
         Ok(Some(ClobConfig {
+            book_id,
             epoch_secs,
             threshold,
             operators,
@@ -486,6 +497,10 @@ impl Clob {
         &self.venue.settle.as_ref().expect("checked in new()").domain
     }
 
+    pub(crate) fn book_id(&self) -> B256 {
+        self.cfg.book_id
+    }
+
     fn signer(&self) -> &surplus_settlement::Signer {
         self.venue
             .settle
@@ -626,7 +641,7 @@ impl Clob {
         }
 
         let batch_nonce = self.read_batch_nonce().await?;
-        let digest = batch_digest(batch_nonce, batch.fills_hash, &domain);
+        let digest = batch_digest(self.cfg.book_id, batch_nonce, batch.fills_hash, &domain);
 
         // One signature, two jobs: it is the proposer's attestation AND the
         // proposal's transport authentication (peers verify it recovers to the
@@ -638,6 +653,7 @@ impl Clob {
         }];
         let wire = WireProposal {
             epoch,
+            book_id: self.cfg.book_id,
             batch_nonce,
             instrument_id: inst.id.clone(),
             proposer: self.me,
@@ -696,7 +712,7 @@ impl Clob {
     async fn read_batch_nonce(&self) -> anyhow::Result<u64> {
         #[cfg(feature = "chain")]
         if let Some(client) = self.chain_client().await? {
-            return client.batch_nonce().await;
+            return client.book_nonce(self.cfg.book_id).await;
         }
         Ok(0)
     }
@@ -704,7 +720,9 @@ impl Clob {
     async fn submit(&self, fills: &[BatchFill], sigs: Vec<Vec<u8>>) -> anyhow::Result<String> {
         #[cfg(feature = "chain")]
         if let Some(client) = self.chain_client().await? {
-            let tx = client.settle_batch_fills_attested(fills, sigs).await?;
+            let tx = client
+                .settle_batch_fills_attested(self.cfg.book_id, fills, sigs)
+                .await?;
             return Ok(format!("{tx:#x}"));
         }
         tracing::info!(
@@ -744,6 +762,16 @@ impl Clob {
                 json!({ "verdict": "stale-epoch", "current": current, "proposed": wire.epoch }),
             ));
         }
+        if wire.book_id != self.cfg.book_id {
+            return Err((
+                StatusCode::FORBIDDEN,
+                json!({
+                    "verdict": "foreign-book",
+                    "ours": format!("{:#x}", self.cfg.book_id),
+                    "proposed": format!("{:#x}", wire.book_id),
+                }),
+            ));
+        }
         let elected = elect_proposer(&self.cfg.addresses(), wire.epoch);
         if elected != Some(wire.proposer) {
             return Err((
@@ -761,7 +789,7 @@ impl Clob {
         // stranding orders with no key — and burn a full match_epoch per
         // request. One ecrecover, before any expensive work.
         let domain = self.domain().clone();
-        let claimed_digest = batch_digest(wire.batch_nonce, wire.fills_hash, &domain);
+        let claimed_digest = batch_digest(wire.book_id, wire.batch_nonce, wire.fills_hash, &domain);
         let proposer_sig =
             surplus_settlement::core::hex::decode(wire.proposer_sig.trim_start_matches("0x"))
                 .unwrap_or_default();
@@ -781,6 +809,7 @@ impl Clob {
         let my_orders = self.snapshot(&wire.instrument_id);
         let proposal = BatchProposal {
             epoch: wire.epoch,
+            book_id: wire.book_id,
             batch_nonce: wire.batch_nonce,
             instrument_id: wire.instrument_id,
             proposer: wire.proposer,
@@ -788,7 +817,7 @@ impl Clob {
             fills_hash: wire.fills_hash,
         };
         match verify_proposal(&proposal, &my_orders, inst.tick_size, inst.min_qty, &domain) {
-            Verdict::Sign(digest) => {
+            Verdict::Sign { digest, batch } => {
                 // Co-sign safety net: never vouch for a batch that includes an
                 // order this node knows is cancelled — the contract would revert
                 // OrderIsCancelled and grief the whole batch. (verify_proposal is
@@ -804,16 +833,10 @@ impl Clob {
                     ));
                 }
                 // Final for this node: prune what the batch fills so the next
-                // epoch cannot re-match (and overfill) settled orders.
-                let inner: Vec<Order> = proposal.orders.iter().map(|s| s.order.clone()).collect();
-                let recomputed = match_epoch(
-                    &proposal.instrument_id,
-                    inst.tick_size,
-                    inst.min_qty,
-                    &domain,
-                    &inner,
-                );
-                self.prune_filled(&recomputed.fills);
+                // epoch cannot re-match (and overfill) settled orders. The
+                // verified batch came back with the verdict — no second
+                // match_epoch run.
+                self.prune_filled(&batch.fills);
                 Ok(WireAttestation {
                     attester: self.me,
                     signature: format!(
@@ -902,6 +925,8 @@ pub struct WireCancel {
 #[serde(rename_all = "camelCase")]
 pub struct WireProposal {
     pub epoch: u64,
+    /// The matching domain (contract `Book`) — peers refuse foreign books.
+    pub book_id: B256,
     pub batch_nonce: u64,
     pub instrument_id: String,
     pub proposer: Address,

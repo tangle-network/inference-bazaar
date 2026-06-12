@@ -22,10 +22,12 @@ use surplus_settlement::{Signer, SIDE_BUY, SIDE_SELL};
 /// The proposer's transport-auth signature over the claimed batch digest.
 fn proposer_sig(key: &str, batch_nonce: u64, fills_hash: B256) -> String {
     let dom = surplus_settlement::domain(CHAIN_ID, CONTRACT.parse().unwrap());
-    let sig =
-        Signer::from_hex(key)
-            .unwrap()
-            .sign_digest(batch_digest(batch_nonce, fills_hash, &dom));
+    let sig = Signer::from_hex(key).unwrap().sign_digest(batch_digest(
+        B256::ZERO,
+        batch_nonce,
+        fills_hash,
+        &dom,
+    ));
     format!("0x{}", surplus_settlement::core::hex::encode(sig))
 }
 
@@ -166,6 +168,7 @@ async fn spawn_pair() -> (Vec<(Address, String)>, Vec<Arc<Clob>>) {
         .map(|(k, u)| (Signer::from_hex(k).unwrap().address(), u.clone()))
         .collect();
     let cfg = ClobConfig {
+        book_id: B256::ZERO,
         epoch_secs: 3600,
         threshold: 2,
         operators: operators.clone(),
@@ -306,6 +309,7 @@ async fn forged_and_impersonated_proposals_rejected() {
 
     let proposal = WireProposal {
         epoch,
+        book_id: B256::ZERO,
         batch_nonce: 0,
         instrument_id: INSTRUMENT.into(),
         proposer: operators[leader].0,
@@ -330,6 +334,7 @@ async fn forged_and_impersonated_proposals_rejected() {
             .fills_hash;
     let impostor = WireProposal {
         epoch,
+        book_id: B256::ZERO,
         batch_nonce: 0,
         instrument_id: INSTRUMENT.into(),
         proposer: operators[1 - leader].0,
@@ -350,6 +355,7 @@ async fn forged_and_impersonated_proposals_rejected() {
     // verification work, and the peer's pool must be untouched.
     let unauthenticated = WireProposal {
         epoch,
+        book_id: B256::ZERO,
         batch_nonce: 0,
         instrument_id: INSTRUMENT.into(),
         proposer: operators[leader].0,
@@ -389,6 +395,7 @@ async fn tampered_fills_hash_rejected() {
     // recomputation catches the lie.
     let proposal = WireProposal {
         epoch,
+        book_id: B256::ZERO,
         batch_nonce: 0,
         instrument_id: INSTRUMENT.into(),
         proposer: operators[leader].0,

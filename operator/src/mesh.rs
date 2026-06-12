@@ -210,7 +210,8 @@ pub fn spawn_mesh_loop(clob: SharedClob, net: Arc<MeshNet>, mut reader: MeshHand
                     else {
                         continue;
                     };
-                    let digest = batch_digest(a.batch_nonce, a.fills_hash, clob.domain());
+                    let digest =
+                        batch_digest(clob.book_id(), a.batch_nonce, a.fills_hash, clob.domain());
                     if let Some(tx) = net.pending.lock().unwrap().get(&digest) {
                         let _ = tx.send(Attestation {
                             attester: a.attester,

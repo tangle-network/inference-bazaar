@@ -20,7 +20,7 @@ const settlementAbi = parseAbi([
   'function deposit(uint256 amount)',
   'function depositCollateral(uint256 amount)',
   'function balances(address) view returns (uint256)',
-  'function batchNonce() view returns (uint64)',
+  'function bookNonce(bytes32 bookId) view returns (uint64)',
   'function lots(bytes32) view returns (address holder, address issuer, bytes32 instrument, uint64 qtyTokens, uint64 lockedTokens, uint64 expiry, uint128 notionalMicro)',
 ])
 const usdAbi = parseAbi([
@@ -84,7 +84,7 @@ const status = async (node) => (await fetch(`${node}/clob/status`)).json()
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // The crossing pair enters the market at DIFFERENT operators.
-const nonce0 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'batchNonce' })
+const nonce0 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'bookNonce', args: ['0x0000000000000000000000000000000000000000000000000000000000000000'] })
 console.log('sell -> node A:', JSON.stringify(await post(`${NODE_A}/clob/order`, await signedOrder(seller, 1, 'clob-e2e-sell'))))
 console.log('buy  -> node B:', JSON.stringify(await post(`${NODE_B}/clob/order`, await signedOrder(buyer, 0, 'clob-e2e-buy'))))
 
@@ -92,7 +92,7 @@ console.log('buy  -> node B:', JSON.stringify(await post(`${NODE_B}/clob/order`,
 let nonce = nonce0
 for (let i = 0; i < 60 && nonce === nonce0; i++) {
   await sleep(1000)
-  nonce = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'batchNonce' })
+  nonce = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'bookNonce', args: ['0x0000000000000000000000000000000000000000000000000000000000000000'] })
 }
 if (nonce === nonce0) {
   console.error('A:', JSON.stringify(await status(NODE_A)))
@@ -103,7 +103,7 @@ if (nonce === nonce0) {
 // On-chain proof: the batch event, the moved balances, the minted lot.
 const [batchLog] = await pub.getLogs({
   address: SETTLEMENT,
-  event: parseAbiItem('event BatchSettled(uint64 indexed batchNonce, bytes32 fillsHash, uint256 fillCount, bool proven)'),
+  event: parseAbiItem('event BatchSettled(bytes32 indexed bookId, uint64 indexed batchNonce, bytes32 fillsHash, uint256 fillCount, bool proven)'),
   fromBlock: 0n,
 })
 const [fillLog] = await pub.getLogs({

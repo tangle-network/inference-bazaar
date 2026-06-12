@@ -138,6 +138,7 @@ async fn three_nodes_gossip_cosign_over_pki_mesh() {
         .map(|k| (Signer::from_hex(k).unwrap().address(), "mesh".to_string()))
         .collect();
     let cfg = ClobConfig {
+        book_id: B256::ZERO,
         epoch_secs: 3600,
         threshold: 2,
         operators: operators.clone(),

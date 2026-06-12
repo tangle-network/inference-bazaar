@@ -51,6 +51,9 @@ pub fn elect_proposer(operators: &[Address], epoch: u64) -> Option<Address> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BatchProposal {
     pub epoch: u64,
+    /// The matching domain (the contract's registered `Book`) this batch
+    /// settles through. Binds the co-signature to one book's nonce sequence.
+    pub book_id: B256,
     pub batch_nonce: u64,
     pub instrument_id: String,
     pub proposer: Address,
@@ -71,8 +74,10 @@ pub struct Attestation {
 /// The outcome of a peer independently checking a proposal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
-    /// Honest and complete — co-sign this batch digest.
-    Sign(B256),
+    /// Honest and complete — co-sign this batch digest. Carries the verified
+    /// batch so the caller can act on the fills (prune its pool) without
+    /// re-running the matcher it just ran.
+    Sign { digest: B256, batch: EpochBatch },
     /// Orders whose signature does not recover to `order.trader` (digests
     /// returned for a fraud claim). Fabrication; do not sign. This is THE check
     /// the contract delegates to the quorum on the attested path.
@@ -117,6 +122,7 @@ pub fn verify_proposal(
     if recomputed.fills_hash != proposal.fills_hash {
         return Verdict::FillsHashMismatch;
     }
+    let recomputed_batch = recomputed;
 
     let want_instrument = instrument_hash(&proposal.instrument_id);
     let included: HashSet<B256> = proposal
@@ -134,11 +140,15 @@ pub fn verify_proposal(
         return Verdict::Censored(censored);
     }
 
-    Verdict::Sign(batch_digest(
-        proposal.batch_nonce,
-        proposal.fills_hash,
-        domain,
-    ))
+    Verdict::Sign {
+        digest: batch_digest(
+            proposal.book_id,
+            proposal.batch_nonce,
+            proposal.fills_hash,
+            domain,
+        ),
+        batch: recomputed_batch,
+    }
 }
 
 /// Aggregate the attestations a proposer has collected. Keeps only signatures
@@ -209,12 +219,17 @@ mod tests {
         who.sign_order(&o, &dom())
     }
 
+    fn book() -> B256 {
+        B256::repeat_byte(0xb0)
+    }
+
     fn proposal_over(orders: Vec<SignedOrder>, batch_nonce: u64) -> BatchProposal {
         let d = dom();
         let inner: Vec<Order> = orders.iter().map(|so| so.order.clone()).collect();
         let batch = match_epoch("m", 1, 1, &d, &inner);
         BatchProposal {
             epoch: 7,
+            book_id: book(),
             batch_nonce,
             instrument_id: "m".into(),
             proposer: Address::with_last_byte(9),
@@ -247,11 +262,21 @@ mod tests {
             signed(SIDE_BUY, 100, 10, &trader(0), 1),
         ];
         let p = proposal_over(orders.clone(), 42);
-        // A peer with the same set signs the expected digest.
-        let want = batch_digest(42, p.fills_hash, &dom());
-        assert_eq!(
-            verify_proposal(&p, &orders, 1, 1, &dom()),
-            Verdict::Sign(want)
+        // A peer with the same set signs the expected digest — and gets the
+        // verified batch back so it never re-runs the matcher to prune.
+        let want = batch_digest(book(), 42, p.fills_hash, &dom());
+        match verify_proposal(&p, &orders, 1, 1, &dom()) {
+            Verdict::Sign { digest, batch } => {
+                assert_eq!(digest, want);
+                assert_eq!(batch.fills_hash, p.fills_hash);
+                assert_eq!(batch.fills.len(), 1);
+            }
+            v => panic!("expected Sign, got {v:?}"),
+        }
+        // The digest binds the book: another book's digest differs.
+        assert_ne!(
+            want,
+            batch_digest(B256::repeat_byte(0xb1), 42, p.fills_hash, &dom())
         );
     }
 
@@ -357,7 +382,10 @@ mod tests {
             .collect();
         let mut want = bonded.clone();
         want.sort_unstable();
-        assert_eq!(recovered, want, "sigs must recover in ascending signer order");
+        assert_eq!(
+            recovered, want,
+            "sigs must recover in ascending signer order"
+        );
     }
 
     #[test]

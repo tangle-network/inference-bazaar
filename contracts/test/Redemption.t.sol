@@ -40,7 +40,7 @@ contract RedemptionTest is SettlementTestBase {
 
         // debit = 750_000 * 20k / 50k = 300_000
         assertEq(settlement.liability(seller), 450_000);
-        (, , , uint64 qty, uint64 locked, , uint128 notional) = lotFieldsFull();
+        (,,, uint64 qty, uint64 locked,, uint128 notional) = lotFieldsFull();
         assertEq(qty, 30_000, "unserved tokens back in the lot");
         assertEq(locked, 0);
         assertEq(notional, 450_000);
@@ -54,7 +54,7 @@ contract RedemptionTest is SettlementTestBase {
         vm.prank(buyer);
         bytes32 id = settlement.requestRedemption(lotId, 50_000);
         bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000));
-        settlement.settleRedemptionAttested(id, 50_000, sigs);
+        settlement.settleRedemptionAttested(BOOK, id, 50_000, sigs);
         assertEq(settlement.liability(seller), 0);
     }
 
@@ -153,7 +153,7 @@ contract RedemptionTest is SettlementTestBase {
             qtyTokens: 10_000,
             execPriceMicroPerM: 15_000_000
         });
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.LotQtyUnavailable.selector, 5_000, 10_000));
+        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.LotQtyUnavailable.selector, 5000, 10_000));
         settlement.settleFills(fills);
     }
 
@@ -192,7 +192,15 @@ contract RedemptionTest is SettlementTestBase {
     function lotFields()
         internal
         view
-        returns (address holder, address issuer, uint64 qty, uint64 locked, uint64 expiry, uint128 notional, bytes32 inst)
+        returns (
+            address holder,
+            address issuer,
+            uint64 qty,
+            uint64 locked,
+            uint64 expiry,
+            uint128 notional,
+            bytes32 inst
+        )
     {
         (address h, address i, bytes32 ins, uint64 q, uint64 l, uint64 e, uint128 n) = settlement.lots(lotId);
         return (h, i, q, l, e, n, ins);

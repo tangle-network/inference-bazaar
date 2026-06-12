@@ -42,17 +42,19 @@ sol! {
         }
 
         function settleFills(FillInput[] calldata fills) external;
-        function settleBatchAttested(BatchFill[] calldata fills, bytes[] calldata sigs) external;
-        function settleBatchProven(BatchFill[] calldata fills, bytes calldata proof) external;
+        function settleBatchAttested(bytes32 bookId, BatchFill[] calldata fills, bytes[] calldata sigs) external;
+        function settleBatchProven(bytes32 bookId, BatchFill[] calldata fills, bytes calldata proof) external;
         function deposit(uint256 amount) external;
         function depositFor(address account, uint256 amount) external;
         function depositCollateral(uint256 amount) external;
         function requestRedemption(bytes32 lotId, uint64 qty) external returns (bytes32);
         function settleRedemption(bytes32 redemptionId, uint64 servedTokens, bytes calldata holderSig) external;
         function claimDefault(bytes32 redemptionId) external returns (uint256);
-        function setAttesters(address[] calldata signers, uint16 threshold) external;
+        function registerBook(bytes32 bookId, address[] calldata signers, uint16 threshold, uint16 bookFeeBps, address bookFeeRecipient) external;
+        function bookAttesters(bytes32 bookId) external view returns (address[] memory);
+        function bookThreshold(bytes32 bookId) external view returns (uint16);
         function setSp1Verifier(address verifier, bytes32 vkey) external;
-        function batchNonce() external view returns (uint64);
+        function bookNonce(bytes32 bookId) external view returns (uint64);
         function domainSeparator() external view returns (bytes32);
         function balances(address account) external view returns (uint256);
         function collateral(address issuer) external view returns (uint256);
@@ -307,16 +309,37 @@ impl SettlementClient {
         Ok(payout)
     }
 
-    pub async fn set_attesters(&self, signers: Vec<Address>, threshold: u16) -> anyhow::Result<()> {
+    pub async fn register_book(
+        &self,
+        book_id: B256,
+        signers: Vec<Address>,
+        threshold: u16,
+        book_fee_bps: u16,
+        book_fee_recipient: Address,
+    ) -> anyhow::Result<()> {
         let r = self
             .contract
-            .setAttesters(signers, threshold)
+            .registerBook(
+                book_id,
+                signers,
+                threshold,
+                book_fee_bps,
+                book_fee_recipient,
+            )
             .send()
             .await?
             .get_receipt()
             .await?;
-        anyhow::ensure!(r.status(), "setAttesters reverted");
+        anyhow::ensure!(r.status(), "registerBook reverted");
         Ok(())
+    }
+
+    pub async fn book_attesters(&self, book_id: B256) -> anyhow::Result<Vec<Address>> {
+        Ok(self.contract.bookAttesters(book_id).call().await?)
+    }
+
+    pub async fn book_threshold(&self, book_id: B256) -> anyhow::Result<u16> {
+        Ok(self.contract.bookThreshold(book_id).call().await?)
     }
 
     pub async fn set_sp1_verifier(&self, verifier: Address, vkey: B256) -> anyhow::Result<()> {
@@ -345,10 +368,11 @@ impl SettlementClient {
 
     pub async fn settle_batch_attested(
         &self,
+        book_id: B256,
         batch: &Batch,
         sigs: Vec<Vec<u8>>,
     ) -> anyhow::Result<B256> {
-        self.settle_batch_fills_attested(&batch.batch_fills(), sigs)
+        self.settle_batch_fills_attested(book_id, &batch.batch_fills(), sigs)
             .await
     }
 
@@ -357,6 +381,7 @@ impl SettlementClient {
     /// fillsHash the contract recomputes) is byte-for-byte what the quorum signed.
     pub async fn settle_batch_fills_attested(
         &self,
+        book_id: B256,
         fills: &[crate::BatchFill],
         sigs: Vec<Vec<u8>>,
     ) -> anyhow::Result<B256> {
@@ -364,7 +389,7 @@ impl SettlementClient {
         let sigs: Vec<alloy_primitives::Bytes> = sigs.into_iter().map(Into::into).collect();
         let receipt = self
             .contract
-            .settleBatchAttested(fills, sigs)
+            .settleBatchAttested(book_id, fills, sigs)
             .send()
             .await?
             .get_receipt()
@@ -373,11 +398,16 @@ impl SettlementClient {
         Ok(receipt.transaction_hash)
     }
 
-    pub async fn settle_batch_proven(&self, batch: &Batch, proof: Vec<u8>) -> anyhow::Result<B256> {
+    pub async fn settle_batch_proven(
+        &self,
+        book_id: B256,
+        batch: &Batch,
+        proof: Vec<u8>,
+    ) -> anyhow::Result<B256> {
         let fills: Vec<_> = batch.batch_fills().iter().map(to_batch_fill).collect();
         let receipt = self
             .contract
-            .settleBatchProven(fills, proof.into())
+            .settleBatchProven(book_id, fills, proof.into())
             .send()
             .await?
             .get_receipt()
@@ -386,8 +416,8 @@ impl SettlementClient {
         Ok(receipt.transaction_hash)
     }
 
-    pub async fn batch_nonce(&self) -> anyhow::Result<u64> {
-        Ok(self.contract.batchNonce().call().await?)
+    pub async fn book_nonce(&self, book_id: B256) -> anyhow::Result<u64> {
+        Ok(self.contract.bookNonce(book_id).call().await?)
     }
 
     pub async fn balance_of(&self, account: Address) -> anyhow::Result<U256> {

@@ -13,6 +13,7 @@ const USD = process.env.USD ?? '0x14Ff9231D03Fd9AD75e553004585f13Ff51db630'
 const NODE_A = process.env.NODE_A ?? 'https://surplus2.178.104.232.124.sslip.io' // service 3 :9500
 const NODE_B = process.env.NODE_B ?? 'https://surplus.178.104.232.124.sslip.io'  // service 4 :9400
 const INSTRUMENT = process.env.INSTRUMENT ?? 'claude-sonnet-4-6:output'
+const BOOK = process.env.BOOK ?? '0x0000000000000000000000000000000000000000000000000000000000000000'
 const FUNDER_KEY = process.env.FUNDER_KEY
 if (!FUNDER_KEY) throw new Error('FUNDER_KEY required (gas for the fresh traders)')
 
@@ -32,7 +33,7 @@ const settlementAbi = parseAbi([
   'function balances(address) view returns (uint256)',
   'function collateral(address) view returns (uint256)',
   'function liability(address) view returns (uint256)',
-  'function batchNonce() view returns (uint64)',
+  'function bookNonce(bytes32 bookId) view returns (uint64)',
   'function lots(bytes32) view returns (address holder, address issuer, bytes32 instrument, uint64 qtyTokens, uint64 lockedTokens, uint64 expiry, uint128 notionalMicro)',
 ])
 const usdAbi = parseAbi([
@@ -123,7 +124,7 @@ async function post(url, body) {
   return JSON.parse(text)
 }
 
-const nonce0 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'batchNonce' })
+const nonce0 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'bookNonce', args: [BOOK] })
 const startBlock = await pub.getBlockNumber()
 console.log('sell -> node A:', JSON.stringify(await post(`${NODE_A}/clob/order`, await signedOrder(seller, 1, 'live-sell'))))
 console.log('buy  -> node B:', JSON.stringify(await post(`${NODE_B}/clob/order`, await signedOrder(buyer, 0, 'live-buy'))))
@@ -131,7 +132,7 @@ console.log('buy  -> node B:', JSON.stringify(await post(`${NODE_B}/clob/order`,
 let nonce = nonce0
 for (let i = 0; i < 90 && nonce === nonce0; i++) {
   await sleep(2000)
-  nonce = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'batchNonce' })
+  nonce = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'bookNonce', args: [BOOK] })
 }
 if (nonce === nonce0) {
   for (const n of [NODE_A, NODE_B]) console.error(n, JSON.stringify(await (await fetch(`${n}/clob/status`)).json()))
@@ -140,7 +141,7 @@ if (nonce === nonce0) {
 
 const [batchLog] = await pub.getLogs({
   address: SETTLEMENT,
-  event: parseAbiItem('event BatchSettled(uint64 indexed batchNonce, bytes32 fillsHash, uint256 fillCount, bool proven)'),
+  event: parseAbiItem('event BatchSettled(bytes32 indexed bookId, uint64 indexed batchNonce, bytes32 fillsHash, uint256 fillCount, bool proven)'),
   fromBlock: startBlock,
 })
 const [fillLog] = await pub.getLogs({
@@ -158,23 +159,24 @@ const { decodeFunctionData, hashTypedData, recoverAddress } = await import('viem
 const settleAbi = parseAbi([
   'struct Order { bytes32 instrument; uint8 side; uint64 priceMicroPerM; uint64 qtyTokens; bytes32 lotId; address trader; uint64 expiry; bytes32 salt; }',
   'struct BatchFill { Order buy; Order sell; uint64 qtyTokens; uint64 execPriceMicroPerM; }',
-  'function settleBatchAttested(BatchFill[] fills, bytes[] sigs)',
+  'function settleBatchAttested(bytes32 bookId, BatchFill[] fills, bytes[] sigs)',
 ])
 const settleTx = await pub.getTransaction({ hash: batchLog.transactionHash })
 const decoded = decodeFunctionData({ abi: settleAbi, data: settleTx.input })
-const sigs = decoded.args[1]
+const sigs = decoded.args[2]
 const digest = hashTypedData({
   domain: { name: 'SurplusSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT },
-  types: { SettlementBatch: [{ name: 'batchNonce', type: 'uint64' }, { name: 'fillsHash', type: 'bytes32' }] },
+  types: { SettlementBatch: [{ name: 'bookId', type: 'bytes32' }, { name: 'batchNonce', type: 'uint64' }, { name: 'fillsHash', type: 'bytes32' }] },
   primaryType: 'SettlementBatch',
-  message: { batchNonce: nonce0, fillsHash: batchLog.args.fillsHash },
+  message: { bookId: BOOK, batchNonce: nonce0, fillsHash: batchLog.args.fillsHash },
 })
 const signers = []
 for (const sig of sigs) signers.push((await recoverAddress({ hash: digest, signature: sig })).toLowerCase())
 const threshold = await pub.readContract({
   address: SETTLEMENT,
-  abi: parseAbi(['function attesterThreshold() view returns (uint16)']),
-  functionName: 'attesterThreshold',
+  abi: parseAbi(['function bookThreshold(bytes32 bookId) view returns (uint16)']),
+  functionName: 'bookThreshold',
+  args: [BOOK],
 })
 if (threshold < 2) throw new Error(`attesterThreshold is ${threshold} — quorum is not a quorum`)
 if (signers.length < 2) throw new Error(`only ${signers.length} quorum signature(s) on the settle tx`)

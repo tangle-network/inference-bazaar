@@ -7,6 +7,9 @@ import { SurplusSettlement } from "../src/SurplusSettlement.sol";
 import { MockUSD, SP1MockVerifierAccept, SP1MockVerifierStrict } from "../src/dev/Mocks.sol";
 
 contract SettlementTestBase is Test {
+    /// The matching domain every base-fixture batch settles through.
+    bytes32 internal constant BOOK = keccak256("test-book");
+
     uint64 internal constant CREDIT_TTL = 30 days;
     uint64 internal constant REDEMPTION_WINDOW = 6 hours;
     uint16 internal constant PENALTY_BPS = 500; // 5%
@@ -29,8 +32,9 @@ contract SettlementTestBase is Test {
 
     function setUp() public virtual {
         usd = new MockUSD();
-        settlement =
-            new SurplusSettlement(IERC20(address(usd)), CREDIT_TTL, REDEMPTION_WINDOW, PENALTY_BPS, FEE_BPS, feeRecipient);
+        settlement = new SurplusSettlement(
+            IERC20(address(usd)), CREDIT_TTL, REDEMPTION_WINDOW, PENALTY_BPS, FEE_BPS, feeRecipient
+        );
         buyer = vm.addr(buyerKey);
         seller = vm.addr(sellerKey);
 
@@ -45,12 +49,12 @@ contract SettlementTestBase is Test {
         settlement.depositCollateral(100_000_000); // $100 bond
         vm.stopPrank();
 
-        // Attester set: 2-of-3.
+        // One matching domain ("book") with a 2-of-3 attester quorum.
         address[] memory atts = new address[](3);
         atts[0] = vm.addr(att1Key);
         atts[1] = vm.addr(att2Key);
         atts[2] = vm.addr(att3Key);
-        settlement.setAttesters(atts, 2);
+        settlement.registerBook(BOOK, atts, 2, 0, address(0));
     }
 
     // ── Order helpers ─────────────────────────────────────────────────────────
@@ -72,7 +76,11 @@ contract SettlementTestBase is Test {
         return sellFromLot(price, qty, bytes32(0));
     }
 
-    function sellFromLot(uint64 price, uint64 qty, bytes32 lotId)
+    function sellFromLot(
+        uint64 price,
+        uint64 qty,
+        bytes32 lotId
+    )
         internal
         view
         returns (SurplusSettlement.Order memory)
@@ -99,7 +107,11 @@ contract SettlementTestBase is Test {
         SurplusSettlement.Order memory s,
         uint64 qty,
         uint64 px
-    ) internal view returns (SurplusSettlement.FillInput[] memory fills) {
+    )
+        internal
+        view
+        returns (SurplusSettlement.FillInput[] memory fills)
+    {
         fills = new SurplusSettlement.FillInput[](1);
         fills[0] = SurplusSettlement.FillInput({
             buy: b,

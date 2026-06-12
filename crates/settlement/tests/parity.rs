@@ -59,7 +59,7 @@ fn print_fixture_values() {
     );
     println!(
         "batchDigest:     {}",
-        batch_digest(0, fills_hash(&fills), &dom)
+        batch_digest(B256::ZERO, 0, fills_hash(&fills), &dom)
     );
 }
 
@@ -101,8 +101,8 @@ fn pinned_digests_match() {
         "receipt digest drifted"
     );
     assert_eq!(
-        batch_digest(0, fills_hash(&fills), &dom),
-        b256!("7b3f2b76aed2378fb153dc192f874e31a06a10f5a9cadb35eea164ba1ec9b102"),
+        batch_digest(B256::ZERO, 0, fills_hash(&fills), &dom),
+        b256!("bf7f321f498636d52728a1ea71a7fac4116795252c2299103f4d989278b36dbd"),
         "batch digest drifted"
     );
 }
