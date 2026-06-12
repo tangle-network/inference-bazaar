@@ -27,7 +27,8 @@ import {
   useMyLots,
   type CreditLot,
 } from '~/lib/settlement'
-import { useVenueRegistry } from '~/lib/venues'
+import { useVenueRegistry, endpointFor } from '~/lib/venues'
+import { privacyOn } from '~/lib/privacy'
 
 const REDEEM_ABI = [
   { type: 'function', name: 'requestRedemption', inputs: [{ name: 'lotId', type: 'bytes32' }, { name: 'qty', type: 'uint64' }], outputs: [{ name: '', type: 'bytes32' }], stateMutability: 'nonpayable' },
@@ -121,9 +122,10 @@ function ApiKeyMint({ lot, venueUrl }: { lot: CreditLot; venueUrl: string }) {
 /** Key-mint is the headline action; the in-wallet chat remains as "try it". */
 function LotActions({ lot }: { lot: CreditLot }) {
   const registry = useVenueRegistry()
-  const venueUrl =
-    registry.data?.find((v) => v.healthy && v.operator.toLowerCase() === lot.issuer.toLowerCase())
-      ?.url ?? VENUE_URL
+  const issuerVenue = registry.data?.find(
+    (v) => v.healthy && v.operator.toLowerCase() === lot.issuer.toLowerCase(),
+  )
+  const venueUrl = issuerVenue ? endpointFor(issuerVenue, privacyOn()) : VENUE_URL
   return (
     <div className="flex w-full flex-col items-end gap-2 sm:w-auto">
       <ApiKeyMint lot={lot} venueUrl={venueUrl} />
@@ -144,10 +146,12 @@ function SpendLot({ lot }: { lot: CreditLot }) {
   const [served, setServed] = useState<{ text: string; servedTokens: number } | null>(null)
 
   // Serve calls go to the operator that issued the lot — its venue is the
-  // only one that can meter this credit.
-  const venueUrl =
-    registry.data?.find((v) => v.healthy && v.operator.toLowerCase() === lot.issuer.toLowerCase())
-      ?.url ?? VENUE_URL
+  // only one that can meter this credit. Under privacy mode, dial its onion so
+  // the operator never learns the seller's IP (needs a Tor-enabled browser).
+  const issuerVenue = registry.data?.find(
+    (v) => v.healthy && v.operator.toLowerCase() === lot.issuer.toLowerCase(),
+  )
+  const venueUrl = issuerVenue ? endpointFor(issuerVenue, privacyOn()) : VENUE_URL
 
   async function open() {
     setBusy('Opening redemption…')
@@ -204,19 +208,38 @@ function SpendLot({ lot }: { lot: CreditLot }) {
       })
       if (!res.ok) throw new Error(await res.text())
       const out = await res.json()
+      // Reproduce outputHash over the served content (mirrors the operator's
+      // output_hash: concatenated choice contents) and refuse to sign if the
+      // operator's work commitment doesn't match what we actually received.
+      const served = (out.completion?.choices ?? [])
+        .map((c: { message?: { content?: string } }) => c.message?.content ?? '')
+        .join('')
+      const localOutputHash = keccak256(toBytes(served))
+      if (out.outputHash && out.outputHash !== localOutputHash) {
+        throw new Error('served output does not match the operator work commitment')
+      }
       const text: string = out.completion?.choices?.[0]?.message?.content ?? ''
       setBusy('Sign the receipt…')
       const receiptSig = await signTypedDataAsync({
         domain: EIP712_DOMAIN,
         types: RECEIPT_TYPES,
         primaryType: 'RedemptionReceipt',
-        message: { redemptionId, servedTokens: BigInt(out.totalServedTokens) },
+        message: {
+          redemptionId,
+          servedTokens: BigInt(out.totalServedTokens),
+          workCommitment: out.workCommitment,
+        },
       })
       setBusy('Settling on-chain…')
       const res2 = await fetch(`${venueUrl}/redeem/receipt`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ redemptionId, servedTokens: out.totalServedTokens, signature: receiptSig }),
+        body: JSON.stringify({
+          redemptionId,
+          servedTokens: out.totalServedTokens,
+          workCommitment: out.workCommitment,
+          signature: receiptSig,
+        }),
       })
       if (!res2.ok) throw new Error(await res2.text())
       setServed({ text, servedTokens: Number(out.totalServedTokens) })

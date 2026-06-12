@@ -52,9 +52,9 @@ to the phase that delivers it.
   restarted venue quotes immediately instead of burning the next tick on
   NoReference.)*
 - [x] **G5 — Money is real.** Settlement clears on at least one rail against a
-  real chain / the live router, not a stub. *(Done on REAL money: a second
-  SurplusSettlement `0xf6A64921…` is live on Base Sepolia bound to canonical
-  Circle USDC `0x036CbD53…`. The dedicated USDC venue (Hetzner, port 9600,
+  real chain / the live router, not a stub. *(Done on REAL money: the canonical
+  `SurplusSettlement` is deployed as a real-USDC rail `0xf6A64921…` on Base
+  Sepolia bound to canonical Circle USDC `0x036CbD53…`. The dedicated USDC venue (Hetzner, port 9600,
   surplus-usdc.…sslip.io) quoted a signed firm order; e2e ran
   RFQ→sign→fill→settleFills in real USDC — tx `0x5faa5019…`, 20,000 Sonnet
   output tokens at $13.546/M = 0.27092 USDC, collateral-backed lot
@@ -275,13 +275,16 @@ to the phase that delivers it.
 | 7 Profit engine | ◕ sweep + discount-capture done; bandit deferred post-launch | — |
 | 8 Productionization | ◑ Hetzner fleet live, tcloud PR open (#41); audit/oracle/legal left | G6 |
 
-**Contract cutover 2026-06-12:** the live tsUSD rail is SurplusSettlement v2
-`0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83` (per-book matching domains).
-Tx hashes recorded before this date settled on the v1 contract
-(`0x1cD49739…`, still on-chain, retired). Tests: 58 forge + 46 Rust + the TS
-suites green. Live on Base Sepolia: on-chain
-job triggers (tick keepers), live-router credit spend (G1), cross-operator
-attested batches (shared CLOB). Still not done: contract audit (G6),
-slashing-backed redemption (G3), real SP1 proofs on-chain, and the
-multi-instance contract redesign (per-instance nonce/attesters/fees) — see
-`.evolve/critical-audit/2026-06-12T02:16:28Z/` for the full gap list.
+**Settlement contract:** `SurplusSettlement` is the one canonical contract, with
+per-book matching domains (each instance gets its own attester quorum, nonce, and
+fee). Live tsUSD rail `0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83` (+ real-USDC
+`0xf6A64921…`). Redemption attestation is bound to a lot's issuing book (no
+cross-instance confiscation); book fee/recipient are write-once; bearer spend
+keys + work-committed receipts + holder-challenge window; the proven path runs the
+match in-circuit (SP1), committing the input-set commitment + fills. Owner is a
+TimelockController (C2); BFT custody hardened (C1). Live on Base Sepolia: on-chain
+job triggers (tick keepers), credit spend (G1), cross-operator attested batches
+(shared CLOB). Still open: contract audit (G6), slashing-backed redemption (G3),
+real SP1 proofs registered on-chain, USDC-rail bonding, and the dynamic registry
+reconciler — see `.evolve/critical-audit/2026-06-12T02:16:28Z/` and the audit
+memory for the gap list.

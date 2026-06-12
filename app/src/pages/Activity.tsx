@@ -9,7 +9,7 @@ import { CHAIN, useSettlementOutbox, useVenueHealth } from '~/lib/api'
 export default function ActivityPage() {
   const outbox = useSettlementOutbox()
   const health = useVenueHealth()
-  const entries = (outbox.data ?? []) as Record<string, unknown>[]
+  const entries = Array.isArray(outbox.data?.fills) ? outbox.data.fills : []
 
   return (
     <div>

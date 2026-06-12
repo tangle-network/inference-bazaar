@@ -44,10 +44,14 @@ sol! {
         uint64 execPriceMicroPerM;
     }
 
+    /// `workCommitment = keccak256(modelIdHash, messagesHash, outputHash)` binds
+    /// the receipt to the exact model, request, and output served — proof of
+    /// WHAT was served, not just how many tokens.
     #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     struct RedemptionReceipt {
         bytes32 redemptionId;
         uint64 servedTokens;
+        bytes32 workCommitment;
     }
 
     /// What an attester quorum signs. `bookId` is the matching domain — one
@@ -78,12 +82,30 @@ pub fn order_digest(order: &Order, domain: &Eip712Domain) -> B256 {
     order.eip712_signing_hash(domain)
 }
 
-pub fn receipt_digest(redemption_id: B256, served_tokens: u64, domain: &Eip712Domain) -> B256 {
+pub fn receipt_digest(
+    redemption_id: B256,
+    served_tokens: u64,
+    work_commitment: B256,
+    domain: &Eip712Domain,
+) -> B256 {
     RedemptionReceipt {
         redemptionId: redemption_id,
         servedTokens: served_tokens,
+        workCommitment: work_commitment,
     }
     .eip712_signing_hash(domain)
+}
+
+/// `workCommitment = keccak256(modelIdHash ‖ messagesHash ‖ outputHash)` — the
+/// receipt's proof of WHAT was served. `modelIdHash = keccak256(model_id)`,
+/// `messagesHash = keccak256(exact request bytes)`, `outputHash = keccak256(the
+/// served output bytes)`. Both holder and issuer derive it identically.
+pub fn work_commitment(model_id_hash: B256, messages_hash: B256, output_hash: B256) -> B256 {
+    let mut buf = [0u8; 96];
+    buf[..32].copy_from_slice(model_id_hash.as_slice());
+    buf[32..64].copy_from_slice(messages_hash.as_slice());
+    buf[64..].copy_from_slice(output_hash.as_slice());
+    keccak256(buf)
 }
 
 pub fn batch_digest(
@@ -107,20 +129,65 @@ pub fn fills_hash(fills: &[BatchFill]) -> B256 {
 }
 
 /// The public values the SP1 batch program commits:
-/// `abi.encode(domainSeparator, bookId, batchNonce, fillsHash)`.
+/// `abi.encode(domainSeparator, bookId, batchNonce, ordersCommitment, fillsHash)`.
 ///
-/// `bookId` + `batchNonce` bind a proof to exactly one book at exactly one nonce,
-/// so a proof cannot be (a) replayed under a different — e.g. higher-fee — book,
-/// nor (b) re-submitted after the book's nonce advances (a partial-fill proof is
-/// otherwise replayable until the orders are exhausted). `settleBatchProven`
-/// re-derives the same tuple from `(bookId, book.nonce)` and reverts on mismatch.
+/// - `bookId` + `batchNonce` bind a proof to exactly one book at exactly one
+///   nonce, so a proof cannot be replayed under a different (e.g. higher-fee)
+///   book, nor re-submitted after the book's nonce advances (a partial-fill proof
+///   is otherwise replayable until the orders are exhausted).
+/// - `ordersCommitment` is the hash of the input order set the guest *matched*
+///   (see `surplus_matcher::orders_commitment`). Because the guest runs the match
+///   in-circuit, the proof attests `fillsHash` is the canonical match of exactly
+///   that set — the prover cannot mis-pair, pick an exec price within the spread,
+///   or drop a crossing order from the set. The contract emits it for off-chain
+///   completeness/censorship auditing against the gossiped set.
+///
+/// `settleBatchProven` re-derives the tuple from `(bookId, book.nonce,
+/// ordersCommitment, fillsHash)` and reverts on mismatch.
 pub fn batch_public_values(
     domain_separator: B256,
     book_id: B256,
     batch_nonce: u64,
+    orders_commitment: B256,
     fills_hash: B256,
 ) -> Vec<u8> {
-    (domain_separator, book_id, batch_nonce, fills_hash).abi_encode()
+    (
+        domain_separator,
+        book_id,
+        batch_nonce,
+        orders_commitment,
+        fills_hash,
+    )
+        .abi_encode()
+}
+
+/// A commitment to the exact input order SET a match ran over — the inclusion
+/// commitment for the proven path.
+///
+/// `keccak256(sorted unique order digests)`. Order-independent and dedup-stable,
+/// exactly like the matcher, so any party holding the same set derives the
+/// identical commitment. The SP1 guest commits this alongside `fillsHash`, so a
+/// proof says not just "these fills are signed" but "these fills are the
+/// canonical match of *this* committed set" — a lone prover can no longer
+/// mis-pair, pick an exec price within the spread, or omit a crossing order
+/// *within the set* without breaking the proof.
+///
+/// What this does NOT prove by itself: that the committed set is the *complete*
+/// gossiped set (a prover can still leave an order out of the input). That last
+/// gap — censorship/completeness — is closed off-chain by checking this
+/// commitment against the gossiped set (the attested path's peers do the
+/// equivalent in `verify_proposal`); the commitment is emitted on-chain
+/// (`BatchSettled.ordersCommitment`) so any watcher can perform that check, and
+/// an inclusion-receipt / DA layer is the eventual on-chain enforcement.
+pub fn orders_commitment(orders: &[Order], domain: &Eip712Domain) -> B256 {
+    let mut digests: Vec<B256> = orders.iter().map(|o| order_digest(o, domain)).collect();
+    digests.sort_unstable();
+    digests.dedup();
+    let mut buf: Vec<u8> = Vec::with_capacity(digests.len() * 32);
+    for d in &digests {
+        buf.extend_from_slice(d.as_slice());
+    }
+    keccak256(&buf)
 }
 
 pub fn instrument_hash(instrument_id: &str) -> B256 {

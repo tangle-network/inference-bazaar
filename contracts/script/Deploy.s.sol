@@ -15,6 +15,7 @@ import { MockUSD, SP1MockVerifierStrict } from "../src/dev/Mocks.sol";
 ///   FEE_RECIPIENT   — default: deployer
 ///   CREDIT_TTL      — default 30 days
 ///   REDEMPTION_WINDOW — default 6 hours
+///   CHALLENGE_WINDOW  — default 1 hour (holder window to contest an attestation)
 ///   PENALTY_BPS     — default 500 (5%)
 ///   FEE_BPS         — default 200 (2%)
 ///   OWNER           — if set and != deployer, ownership is transferred to it
@@ -48,6 +49,7 @@ contract Deploy is Script {
             IERC20(token),
             uint64(vm.envOr("CREDIT_TTL", uint256(30 days))),
             uint64(vm.envOr("REDEMPTION_WINDOW", uint256(6 hours))),
+            uint64(vm.envOr("CHALLENGE_WINDOW", uint256(1 hours))),
             uint16(vm.envOr("PENALTY_BPS", uint256(500))),
             uint16(vm.envOr("FEE_BPS", uint256(200))),
             vm.envOr("FEE_RECIPIENT", deployer)

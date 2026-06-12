@@ -9,7 +9,8 @@ import { useCallback } from 'react'
 import { zeroHash, type Hex } from 'viem'
 import { useAccount, usePublicClient, useSignTypedData, useWriteContract } from 'wagmi'
 import { CHAIN } from './api'
-import type { Venue } from './venues'
+import { endpointFor, type Venue } from './venues'
+import { pickAntiSticky, privacyOn, rememberOperator } from './privacy'
 import {
   EIP712_DOMAIN,
   fillRfq,
@@ -46,16 +47,23 @@ export interface TradeReceipt {
 }
 
 /** Fan an RFQ to every healthy venue; best price wins (ties → lower latency). */
+// Privacy never overpays: anti-stickiness only chooses AMONG quotes within this
+// fraction of the best price (the "competitive tier").
+const ANTI_STICKY_PRICE_TOLERANCE = 0.005 // 0.5%
+
 async function bestQuote(
   venues: Venue[],
   params: { instrumentId: string; side: 'buy' | 'sell'; qtyTokens: number },
+  /** Buyer identity for anti-sticky acquisition (only used under privacy mode). */
+  antiStickyIdentity?: string,
 ): Promise<{ rfq: Awaited<ReturnType<typeof requestRfq>>; venue: Venue }> {
   const live = venues.filter((v) => v.healthy)
   if (live.length === 0) throw new Error('no live venues')
   const quotes = await Promise.all(
     live.map(async (venue) => {
       try {
-        const rfq = await requestRfq({ ...params, venueUrl: venue.url })
+        // Under privacy mode, reach the operator at its onion (Tor browser).
+        const rfq = await requestRfq({ ...params, venueUrl: endpointFor(venue, privacyOn()) })
         return rfq.quoting && rfq.order ? { rfq, venue } : null
       } catch {
         return null
@@ -71,6 +79,23 @@ async function bestQuote(
       : b.rfq.order.priceMicroPerM - a.rfq.order.priceMicroPerM ||
         (a.venue.latencyMs ?? 1e9) - (b.venue.latencyMs ?? 1e9),
   )
+
+  // Anti-stickiness (privacy): spread acquisitions across operators so a consumer's
+  // eventual redemption footprint isn't concentrated where one operator can
+  // correlate it. Only among quotes within tolerance of the best price.
+  if (antiStickyIdentity && privacyOn() && valid.length > 1) {
+    const best = valid[0]!.rfq.order.priceMicroPerM
+    const tier = valid.filter(
+      (q) => Math.abs(q.rfq.order.priceMicroPerM - best) / best <= ANTI_STICKY_PRICE_TOLERANCE,
+    )
+    if (tier.length > 1) {
+      const ids = tier.map((q) => q.venue.operator.toLowerCase())
+      const pickedId = pickAntiSticky(ids, antiStickyIdentity)
+      const picked = tier.find((q) => q.venue.operator.toLowerCase() === pickedId)!
+      rememberOperator(antiStickyIdentity, pickedId)
+      return picked
+    }
+  }
   return valid[0]!
 }
 
@@ -157,7 +182,7 @@ export function useFirmTrade() {
       if (!address) throw new Error('wallet not connected')
 
       onProgress({ step: 'quoting', detail: `auctioning across ${venues.filter((v) => v.healthy).length} venues` })
-      const { rfq, venue } = await bestQuote(venues, { instrumentId, side: 'buy', qtyTokens })
+      const { rfq, venue } = await bestQuote(venues, { instrumentId, side: 'buy', qtyTokens }, address)
       const qty = Math.min(qtyTokens, rfq.order.qtyTokens)
       const costMicro = BigInt(Math.round((rfq.order.priceMicroPerM * qty) / 1e6))
 
@@ -191,17 +216,18 @@ export function useFirmTrade() {
       })
 
       onProgress({ step: 'pairing' })
+      const venueUrl = endpointFor(venue, privacyOn())
       await fillRfq({
         makerInstrumentId: instrumentId,
         maker: rfq.order,
         makerSignature: rfq.signature,
         taker,
         takerSignature: signature as Hex,
-        venueUrl: venue.url,
+        venueUrl,
       })
 
       onProgress({ step: 'settling', detail: 'submitting settleFills' })
-      const flush = await flushSettlement(venue.url)
+      const flush = await flushSettlement(venueUrl)
       const settleTx = (flush.tx as Hex | undefined) ?? null
 
       return {
@@ -260,17 +286,18 @@ export function useFirmTrade() {
       })
 
       onProgress({ step: 'pairing' })
+      const venueUrl = endpointFor(venue, privacyOn())
       await fillRfq({
         makerInstrumentId: instrumentId,
         maker: rfq.order,
         makerSignature: rfq.signature,
         taker,
         takerSignature: signature as Hex,
-        venueUrl: venue.url,
+        venueUrl,
       })
 
       onProgress({ step: 'settling', detail: 'submitting settleFills' })
-      const flush = await flushSettlement(venue.url)
+      const flush = await flushSettlement(venueUrl)
 
       return {
         instrumentId,

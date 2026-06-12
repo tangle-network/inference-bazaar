@@ -43,12 +43,15 @@ sol! {
 
         function settleFills(FillInput[] calldata fills) external;
         function settleBatchAttested(bytes32 bookId, BatchFill[] calldata fills, bytes[] calldata sigs) external;
-        function settleBatchProven(bytes32 bookId, BatchFill[] calldata fills, bytes calldata proof) external;
+        function settleBatchProven(bytes32 bookId, bytes32 ordersCommitment, BatchFill[] calldata fills, bytes calldata proof) external;
         function deposit(uint256 amount) external;
         function depositFor(address account, uint256 amount) external;
         function depositCollateral(uint256 amount) external;
         function requestRedemption(bytes32 lotId, uint64 qty) external returns (bytes32);
-        function settleRedemption(bytes32 redemptionId, uint64 servedTokens, bytes calldata holderSig) external;
+        function settleRedemption(bytes32 redemptionId, uint64 servedTokens, bytes32 workCommitment, bytes calldata holderSig) external;
+        function settleRedemptionAttested(bytes32 bookId, bytes32 redemptionId, uint64 servedTokens, bytes32 workCommitment, bytes[] calldata sigs) external;
+        function finalizeAttested(bytes32 redemptionId) external;
+        function challengeAttested(bytes32 redemptionId) external;
         struct SpendKeyAuth {
             bytes32 lotId;
             bytes32 keyHash;
@@ -76,9 +79,10 @@ sol! {
             uint64 qtyTokens, uint64 lockedTokens, uint64 expiry, uint128 notionalMicro
         );
         function redemptions(bytes32 redemptionId) external view returns (
-            bytes32 lotId, address holder, uint64 qtyTokens, uint64 deadline, uint8 state
+            bytes32 lotId, address holder, uint64 qtyTokens, uint64 deadline, uint8 state,
+            uint64 challengeDeadline, uint64 attestedServed, bytes32 attestedWork
         );
-        function receiptDigest(bytes32 redemptionId, uint64 servedTokens) external view returns (bytes32);
+        function receiptDigest(bytes32 redemptionId, uint64 servedTokens, bytes32 workCommitment) external view returns (bytes32);
         function freeCollateral(address issuer) external view returns (uint256);
         function defaultPenaltyBps() external view returns (uint16);
 
@@ -303,10 +307,15 @@ impl SettlementClient {
         Ok(self.contract.lots(lot_id).call().await?)
     }
 
-    pub async fn receipt_digest(&self, redemption_id: B256, served: u64) -> anyhow::Result<B256> {
+    pub async fn receipt_digest(
+        &self,
+        redemption_id: B256,
+        served: u64,
+        work_commitment: B256,
+    ) -> anyhow::Result<B256> {
         Ok(self
             .contract
-            .receiptDigest(redemption_id, served)
+            .receiptDigest(redemption_id, served, work_commitment)
             .call()
             .await?)
     }
@@ -315,11 +324,12 @@ impl SettlementClient {
         &self,
         redemption_id: B256,
         served: u64,
+        work_commitment: B256,
         holder_sig: Vec<u8>,
     ) -> anyhow::Result<()> {
         let r = self
             .contract
-            .settleRedemption(redemption_id, served, holder_sig.into())
+            .settleRedemption(redemption_id, served, work_commitment, holder_sig.into())
             .send()
             .await?
             .get_receipt()
@@ -460,13 +470,14 @@ impl SettlementClient {
     pub async fn settle_batch_proven(
         &self,
         book_id: B256,
+        orders_commitment: B256,
         batch: &Batch,
         proof: Vec<u8>,
     ) -> anyhow::Result<B256> {
         let fills: Vec<_> = batch.batch_fills().iter().map(to_batch_fill).collect();
         let receipt = self
             .contract
-            .settleBatchProven(book_id, fills, proof.into())
+            .settleBatchProven(book_id, orders_commitment, fills, proof.into())
             .send()
             .await?
             .get_receipt()

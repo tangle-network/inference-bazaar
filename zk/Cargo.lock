@@ -5279,6 +5279,7 @@ dependencies = [
  "sp1-helper",
  "sp1-sdk",
  "surplus-batch-types",
+ "surplus-matcher",
  "surplus-settlement",
  "surplus-settlement-core",
 ]
@@ -5288,6 +5289,15 @@ name = "surplus-batch-types"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "surplus-settlement-core",
+]
+
+[[package]]
+name = "surplus-matcher"
+version = "0.1.0"
+dependencies = [
+ "surplus-orderbook",
+ "surplus-settlement",
  "surplus-settlement-core",
 ]
 

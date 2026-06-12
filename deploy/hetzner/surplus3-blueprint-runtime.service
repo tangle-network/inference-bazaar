@@ -18,13 +18,22 @@ Environment=PROTOCOL=tangle
 Environment=TEST_MODE=true
 Environment=SURPLUS_SIDECAR_URL=http://127.0.0.1:9310
 Environment=SURPLUS_ROUTER_URL=https://router.tangle.tools
+# Bonded issuer: set a real backend (router-proxy mode is refused at boot).
+Environment=SURPLUS_INFERENCE_URL=<issuer-openai-compatible-backend>
 Environment=SURPLUS_OPERATOR_ADDR=127.0.0.1:9500
 Environment=SURPLUS_MM_SIZE=1500000
 Environment=SURPLUS_MM_LEVELS=3
 Environment=SURPLUS_CHAIN_ID=84532
 Environment=SURPLUS_SETTLEMENT_ADDR=0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83
-Environment=SURPLUS_OPERATOR_KEY=<issuer-key>
+# Attester / co-sign identity (address must be in the book's on-chain attesters).
+Environment=SURPLUS_OPERATOR_KEY=<issuer-attester-key>
+# Separate gas/submitter key (key separation; falls back to operator key if unset).
+Environment=SURPLUS_SUBMITTER_KEY=<gas-submitter-key>
 Environment=SURPLUS_RPC_URL=https://sepolia.base.org
+# Optional Tor onion endpoint (run Arti + expose /redeem as an onion service);
+# published via /health so privacy-mode clients dial it. Leave unset if no onion.
+# Environment=SURPLUS_ONION_URL=http://<your-onion>.onion
+# Environment=PRIVACY_MODE=tor   # route the operator's OWN outbound calls via Arti
 ExecStart=/opt/surplus/surplus-operator run
 Restart=always
 RestartSec=5

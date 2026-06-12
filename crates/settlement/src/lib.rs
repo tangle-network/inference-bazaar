@@ -10,8 +10,8 @@
 pub use surplus_settlement_core as core;
 pub use surplus_settlement_core::{
     batch_digest, batch_public_values, cost_micro, domain, fills_hash, instrument_hash,
-    order_digest, receipt_digest, recover_signer, validate_pair, verify_order, BatchFill,
-    Eip712Domain, Order, PairError, SIDE_BUY, SIDE_SELL,
+    order_digest, orders_commitment, receipt_digest, recover_signer, validate_pair, verify_order,
+    work_commitment, BatchFill, Eip712Domain, Order, PairError, SIDE_BUY, SIDE_SELL,
 };
 
 use alloy_primitives::{keccak256, Address, B256};
@@ -154,9 +154,15 @@ impl Signer {
         &self,
         redemption_id: B256,
         served: u64,
+        work_commitment: B256,
         domain: &Eip712Domain,
     ) -> [u8; 65] {
-        self.sign_digest(receipt_digest(redemption_id, served, domain))
+        self.sign_digest(receipt_digest(
+            redemption_id,
+            served,
+            work_commitment,
+            domain,
+        ))
     }
 }
 
@@ -327,7 +333,7 @@ mod tests {
         );
         assert!(verify_quorum(digest, &sigs, &addrs, 2));
         assert!(
-            !verify_quorum(digest, &sigs[..1].to_vec(), &addrs, 2),
+            !verify_quorum(digest, &sigs[..1], &addrs, 2),
             "below threshold"
         );
 

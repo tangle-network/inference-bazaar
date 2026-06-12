@@ -37,15 +37,35 @@ pub struct InferenceBackend {
     _managed: Option<tokio::process::Child>,
 }
 
+/// Build the shared HTTP client, tunneling through Tor when `PRIVACY_MODE=tor`.
+///
+/// Network anonymity for the SELLER is a client-side concern: the leaking leg is
+/// the seller dialing an operator's `/redeem` (the operator is the server there
+/// and cannot anonymize its own inbound peers). This proxy therefore protects
+/// the OPERATOR's OWN outbound calls — to a remote OpenAI-compatible backend, or
+/// when this process acts as a redemption client to another operator — by
+/// routing them through Arti's SOCKS5 listener. `socks5h` (not `socks5`) sends
+/// the hostname to the proxy so `.onion` names resolve inside Tor.
+/// `SURPLUS_TOR_SOCKS` overrides the default Arti listener (127.0.0.1:9150).
+fn http_client() -> reqwest::Client {
+    let mut b = reqwest::Client::builder().timeout(Duration::from_secs(300));
+    if std::env::var("PRIVACY_MODE").as_deref() == Ok("tor") {
+        let socks = std::env::var("SURPLUS_TOR_SOCKS")
+            .unwrap_or_else(|_| "socks5h://127.0.0.1:9150".to_string());
+        let proxy = reqwest::Proxy::all(&socks)
+            .unwrap_or_else(|e| panic!("PRIVACY_MODE=tor but SOCKS proxy {socks} is invalid: {e}"));
+        b = b.proxy(proxy);
+        tracing::info!(%socks, "PRIVACY_MODE=tor: outbound inference tunneled through Arti SOCKS5");
+    }
+    b.build().expect("reqwest client")
+}
+
 impl InferenceBackend {
     pub fn new(base_url: impl Into<String>, api_key: Option<String>) -> Self {
         InferenceBackend {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             api_key,
-            client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(300))
-                .build()
-                .expect("reqwest client"),
+            client: http_client(),
             mode: "external",
             _managed: None,
         }
@@ -98,6 +118,13 @@ impl InferenceBackend {
     /// Where completions come from, for status/log surfaces.
     pub fn target(&self) -> Value {
         json!({ "mode": self.mode, "url": self.base_url })
+    }
+
+    /// "managed-vllm" | "external" | "router". A bonded issuer must NOT be in
+    /// "router" mode — it would resell a third party's inference rather than
+    /// serve what it sold (enforced fail-closed at venue boot).
+    pub fn mode(&self) -> &str {
+        self.mode
     }
 
     /// One OpenAI-compatible chat completion. Returns the upstream status and

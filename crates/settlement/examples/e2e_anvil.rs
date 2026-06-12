@@ -142,11 +142,18 @@ async fn main() -> anyhow::Result<()> {
     );
     println!("fill settled atomically: lot {lot1:#x}, buyer debited $0.70, liability $0.70");
 
-    // ── 2. Redemption happy path: holder receipt frees liability ─────────────
+    // ── 2. Redemption happy path: holder receipt (with work commitment) ──────
     let redemption = buyer_client.request_redemption(lot1, 50_000).await?;
-    let receipt_sig = buyer.sign_receipt(redemption, 50_000, &dom).to_vec();
+    let work = surplus_settlement::work_commitment(
+        surplus_settlement::core::alloy_primitives::keccak256(b"anthropic/claude-opus-4-8:output"),
+        surplus_settlement::core::alloy_primitives::keccak256(
+            br#"[{"role":"user","content":"hi"}]"#,
+        ),
+        surplus_settlement::core::alloy_primitives::keccak256(b"served output"),
+    );
+    let receipt_sig = buyer.sign_receipt(redemption, 50_000, work, &dom).to_vec();
     seller_client
-        .settle_redemption(redemption, 50_000, receipt_sig)
+        .settle_redemption(redemption, 50_000, work, receipt_sig)
         .await?;
     assert_eq!(operator.liability_of(seller.address()).await?, U256::ZERO);
     println!("redemption served + receipted: liability back to $0");
@@ -224,28 +231,27 @@ async fn main() -> anyhow::Result<()> {
         nonce + 1
     );
 
-    // ── 5. Proven batch: strict mock pins (domainSeparator, bookId, nonce, fillsHash) ──
+    // ── 5. Proven batch: strict mock pins the match-in-circuit public values
+    //       (domainSeparator, bookId, nonce, ordersCommitment, fillsHash) ──
     let vkey = B256::with_last_byte(0x42);
     operator.set_sp1_verifier(verifier_addr, vkey).await?;
+    let sell_o = order(SIDE_SELL, 14_000_000, 30_000, seller.address(), 7);
+    let buy_o = order(SIDE_BUY, 15_000_000, 30_000, buyer.address(), 8);
     let mut batch2 = Batch::default();
     batch2.push(SignedFill::pair(
-        seller.sign_order(
-            &order(SIDE_SELL, 14_000_000, 30_000, seller.address(), 7),
-            &dom,
-        ),
-        buyer.sign_order(
-            &order(SIDE_BUY, 15_000_000, 30_000, buyer.address(), 8),
-            &dom,
-        ),
+        seller.sign_order(&sell_o, &dom),
+        buyer.sign_order(&buy_o, &dom),
         30_000,
         4_000_000_000 - 1,
         &dom,
     )?);
+    let orders_commitment = surplus_settlement::orders_commitment(&[sell_o, buy_o], &dom);
     let proven_nonce = operator.book_nonce(book_id).await?;
     let public_values = surplus_settlement::batch_public_values(
         dom.separator(),
         book_id,
         proven_nonce,
+        orders_commitment,
         batch2.fills_hash(),
     );
     // expect() is permissionless; use a key no other provider here shares so
@@ -263,9 +269,9 @@ async fn main() -> anyhow::Result<()> {
         .get_receipt()
         .await?;
     operator
-        .settle_batch_proven(book_id, &batch2, vec![0xde, 0xad])
+        .settle_batch_proven(book_id, orders_commitment, &batch2, vec![0xde, 0xad])
         .await?;
-    println!("proven batch settled against strict verifier (publicValues bound)");
+    println!("proven batch settled against strict verifier (match-in-circuit publicValues bound)");
 
     println!("\nE2E PASS: atomic fill, receipt redemption, collateral default, attested + proven batches");
     Ok(())

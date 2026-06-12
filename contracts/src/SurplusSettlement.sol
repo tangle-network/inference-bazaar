@@ -35,18 +35,23 @@ import { ISP1Verifier } from "./interfaces/ISP1Verifier.sol";
 /// Two settlement paths share one fill-application core:
 ///  - `settleFills`: full orders + signatures, contract verifies everything.
 ///    Trustless; the default path.
-///  - `settleBatch*`: signature-free fills, signature validity vouched by an
-///    attester quorum (`Attested`) or an SP1 proof of the same statement
-///    (`Proven`, public values `(domainSeparator, bookId, batchNonce,
-///    fillsHash)`). Everything except signature validity (limits, crossing,
+///  - `settleBatchAttested`: signature-free fills, signature validity vouched by
+///    an attester quorum. Everything except signature validity (limits, crossing,
 ///    cumulative fill caps, balance/collateral invariants) is still enforced
 ///    here, so the quorum cannot invent balances. But be precise about what it
 ///    CAN do: "vouch for signatures that were never made" IS the power to forge
 ///    any order from any funded trader (drain their cash into a lot, or round-
 ///    trip a rival issuer's collateral via claimDefault). The attested path's
-///    entire authenticity rests on quorum honesty; the proven path replaces that
-///    trust with a proof. Redemption attestation is bound to the lot's own
-///    issuing book (`lotBook`) so no foreign quorum can confiscate a credit.
+///    authenticity rests on quorum honesty; peers re-run the match and refuse to
+///    co-sign a censored/wrong batch (off-chain completeness).
+///  - `settleBatchProven`: the SP1 proof runs the match IN-CIRCUIT, committing
+///    `(domainSeparator, bookId, batchNonce, ordersCommitment, fillsHash)`. So it
+///    replaces quorum trust with math: the fills are provably the canonical match
+///    of an authentically-signed order set — no forgery, no pairing/exec-price
+///    discretion. `ordersCommitment` is emitted for off-chain completeness audit.
+///
+/// Redemption attestation is bound to the lot's own issuing book (`lotBook`) so
+/// no foreign quorum can confiscate a credit.
 contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -97,6 +102,9 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
     enum RedemptionState {
         None,
         Open,
+        /// An attester quorum posted a service attestation; awaiting the holder's
+        /// challenge window before it can finalize.
+        Contested,
         Settled,
         Defaulted
     }
@@ -107,6 +115,12 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         uint64 qtyTokens;
         uint64 deadline;
         RedemptionState state;
+        /// Set when an attestation is posted (state Contested): the served qty and
+        /// the work commitment the quorum vouched, and the holder's challenge
+        /// deadline. Zero on the holder-receipt path (which finalizes instantly).
+        uint64 challengeDeadline;
+        uint64 attestedServed;
+        bytes32 attestedWork;
     }
 
     /// One wallet signature that turns a lot into an API key: the holder
@@ -133,7 +147,15 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
     bytes32 public constant ORDER_TYPEHASH = keccak256(
         "Order(bytes32 instrument,uint8 side,uint64 priceMicroPerM,uint64 qtyTokens,bytes32 lotId,address trader,uint64 expiry,bytes32 salt)"
     );
-    bytes32 public constant RECEIPT_TYPEHASH = keccak256("RedemptionReceipt(bytes32 redemptionId,uint64 servedTokens)");
+    /// The receipt commits the served WORK, not just the token count: a holder
+    /// (or quorum) signs over `workCommitment = keccak256(modelIdHash,
+    /// messagesHash, outputHash)`, binding the settlement to the exact model,
+    /// request, and output served. "tokens served" with no proof of what was
+    /// served is the authenticity gap this closes.
+    bytes32 public constant RECEIPT_TYPEHASH =
+        keccak256("RedemptionReceipt(bytes32 redemptionId,uint64 servedTokens,bytes32 workCommitment)");
+    /// One signature turns a lot into a bearer API key (the spend rail): the
+    /// holder authorizes cumulative metered spend up to `maxTokens` until `expiry`.
     bytes32 public constant SPEND_TYPEHASH =
         keccak256("SpendKeyAuth(bytes32 lotId,bytes32 keyHash,uint64 maxTokens,uint64 expiry)");
     bytes32 public constant BATCH_TYPEHASH =
@@ -144,6 +166,7 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
     IERC20 public immutable paymentToken; // tsUSD, 6 decimals (micro = base unit)
     uint64 public immutable creditTtl; // seconds a minted lot stays redeemable
     uint64 public immutable redemptionWindow; // seconds an issuer has to serve
+    uint64 public immutable challengeWindow; // seconds a holder can contest an attested service claim
     uint16 public immutable defaultPenaltyBps; // holder bonus on issuer default
     uint16 public immutable feeBps; // platform take on fill notional
     address public immutable feeRecipient;
@@ -217,7 +240,12 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         bytes32 lotId
     );
     event BatchSettled(
-        bytes32 indexed bookId, uint64 indexed batchNonce, bytes32 fillsHash, uint256 fillCount, bool proven
+        bytes32 indexed bookId,
+        uint64 indexed batchNonce,
+        bytes32 fillsHash,
+        uint256 fillCount,
+        bool proven,
+        bytes32 ordersCommitment
     );
     event RedemptionRequested(
         bytes32 indexed redemptionId,
@@ -227,11 +255,25 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         uint64 qtyTokens,
         uint64 deadline
     );
+    event RedemptionSettled(
+        bytes32 indexed redemptionId, uint64 servedTokens, uint256 notionalDebitMicro, bytes32 workCommitment
+    );
+    event AttestationPosted(
+        bytes32 indexed redemptionId,
+        bytes32 indexed bookId,
+        uint64 servedTokens,
+        bytes32 workCommitment,
+        uint64 challengeDeadline
+    );
+    event AttestationChallenged(bytes32 indexed redemptionId, address indexed holder);
     event SpendSettled(
-        bytes32 indexed authDigest, bytes32 indexed lotId, uint64 deltaTokens, uint64 cumulativeTokens, uint256 debitMicro
+        bytes32 indexed authDigest,
+        bytes32 indexed lotId,
+        uint64 deltaTokens,
+        uint64 cumulativeTokens,
+        uint256 debitMicro
     );
     event SpendKeyRevoked(bytes32 indexed authDigest, bytes32 indexed lotId);
-    event RedemptionSettled(bytes32 indexed redemptionId, uint64 servedTokens, uint256 notionalDebitMicro);
     event RedemptionDefaulted(
         uint256 indexed defaultId,
         bytes32 indexed redemptionId,
@@ -284,11 +326,15 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
     error BookAlreadyRegistered(bytes32 bookId);
     error ReservedBookId();
     error RedemptionBookMismatch(bytes32 lotBookId, bytes32 attestedBookId);
+    error RedemptionNotContested(bytes32 redemptionId);
+    error ChallengeWindowOpen(bytes32 redemptionId);
+    error ChallengeWindowClosed(bytes32 redemptionId);
 
     constructor(
         IERC20 _paymentToken,
         uint64 _creditTtl,
         uint64 _redemptionWindow,
+        uint64 _challengeWindow,
         uint16 _defaultPenaltyBps,
         uint16 _feeBps,
         address _feeRecipient
@@ -300,6 +346,7 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         paymentToken = _paymentToken;
         creditTtl = _creditTtl;
         redemptionWindow = _redemptionWindow;
+        challengeWindow = _challengeWindow;
         defaultPenaltyBps = _defaultPenaltyBps;
         feeBps = _feeBps;
         feeRecipient = _feeRecipient;
@@ -401,25 +448,38 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         bytes32 fillsHash = keccak256(abi.encode(fills));
         bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(BATCH_TYPEHASH, bookId, book.nonce, fillsHash)));
         _verifyQuorum(book, digest, sigs);
-        _applyBatch(bookId, book, fills, fillsHash, false);
+        // Attested completeness is enforced off-chain: peers recompute the match
+        // and refuse to co-sign a censored/wrong batch (verify_proposal). No
+        // input-set commitment is recorded on-chain for this path.
+        _applyBatch(bookId, book, fills, fillsHash, false, bytes32(0));
     }
 
-    /// Compressed path, proof-vouched signatures. The SP1 program re-derives every
-    /// order digest under this domain separator, recovers each signer, and commits
-    /// (domainSeparator, bookId, batchNonce, fillsHash) as public values — so a
-    /// proof binds to exactly this contract on exactly this chain, this book, at
-    /// this nonce, for these fills. The book+nonce binding stops a proof from
-    /// being replayed under another (e.g. higher-fee) book or re-submitted after
-    /// the book's nonce advances (a partial-fill proof would otherwise replay).
-    function settleBatchProven(bytes32 bookId, BatchFill[] calldata fills, bytes calldata proof) external {
+    /// Compressed path, proof-vouched MATCH. The SP1 program verifies every order
+    /// in the gossiped set is signed, runs `match_epoch` in-circuit, and commits
+    /// (domainSeparator, bookId, batchNonce, ordersCommitment, fillsHash) — so the
+    /// proof attests these fills are the CANONICAL MATCH of exactly that
+    /// authentically-signed set, not merely that some chosen fills were signed.
+    /// The prover therefore has no pairing/exec-price/within-set-omission
+    /// discretion. The book+nonce binding stops a proof from being replayed under
+    /// another (e.g. higher-fee) book or re-submitted after the nonce advances.
+    /// `ordersCommitment` is recorded on-chain so any watcher can check the
+    /// matched set against the gossiped set (completeness/censorship audit).
+    function settleBatchProven(
+        bytes32 bookId,
+        bytes32 ordersCommitment,
+        BatchFill[] calldata fills,
+        bytes calldata proof
+    )
+        external
+    {
         if (address(sp1Verifier) == address(0)) revert ProvenPathDisabled();
         Book storage book = _books[bookId];
         if (book.threshold == 0) revert UnknownBook(bookId);
         bytes32 fillsHash = keccak256(abi.encode(fills));
         sp1Verifier.verifyProof(
-            batchProgramVKey, abi.encode(_domainSeparatorV4(), bookId, book.nonce, fillsHash), proof
+            batchProgramVKey, abi.encode(_domainSeparatorV4(), bookId, book.nonce, ordersCommitment, fillsHash), proof
         );
-        _applyBatch(bookId, book, fills, fillsHash, true);
+        _applyBatch(bookId, book, fills, fillsHash, true, ordersCommitment);
     }
 
     function _applyBatch(
@@ -427,7 +487,8 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         Book storage book,
         BatchFill[] calldata fills,
         bytes32 fillsHash,
-        bool proven
+        bool proven,
+        bytes32 ordersCommitment
     )
         internal
     {
@@ -445,7 +506,7 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
                 bookId
             );
         }
-        emit BatchSettled(bookId, book.nonce, fillsHash, fills.length, proven);
+        emit BatchSettled(bookId, book.nonce, fillsHash, fills.length, proven, ordersCommitment);
         book.nonce++;
     }
 
@@ -596,7 +657,10 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
             holder: msg.sender,
             qtyTokens: qty,
             deadline: uint64(block.timestamp) + redemptionWindow,
-            state: RedemptionState.Open
+            state: RedemptionState.Open,
+            challengeDeadline: 0,
+            attestedServed: 0,
+            attestedWork: bytes32(0)
         });
         openRedemptionOf[lotId] = redemptionId;
         emit RedemptionRequested(
@@ -604,26 +668,47 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         );
     }
 
-    function receiptDigest(bytes32 redemptionId, uint64 servedTokens) public view returns (bytes32) {
-        return _hashTypedDataV4(keccak256(abi.encode(RECEIPT_TYPEHASH, redemptionId, servedTokens)));
+    function receiptDigest(
+        bytes32 redemptionId,
+        uint64 servedTokens,
+        bytes32 workCommitment
+    )
+        public
+        view
+        returns (bytes32)
+    {
+        return _hashTypedDataV4(keccak256(abi.encode(RECEIPT_TYPEHASH, redemptionId, servedTokens, workCommitment)));
     }
 
-    /// Happy path: the holder's signed receipt acknowledges service. Unserved
-    /// quantity returns to the lot, still redeemable.
-    function settleRedemption(bytes32 redemptionId, uint64 servedTokens, bytes calldata holderSig) external {
+    /// Happy path: the holder's signed receipt acknowledges service AND the exact
+    /// work served (`workCommitment`). Unserved quantity returns to the lot. The
+    /// holder authorized it directly, so this finalizes instantly (no challenge).
+    function settleRedemption(
+        bytes32 redemptionId,
+        uint64 servedTokens,
+        bytes32 workCommitment,
+        bytes calldata holderSig
+    )
+        external
+    {
         Redemption storage r = _openRedemption(redemptionId);
-        if (ECDSA.recover(receiptDigest(redemptionId, servedTokens), holderSig) != r.holder) {
+        if (ECDSA.recover(receiptDigest(redemptionId, servedTokens, workCommitment), holderSig) != r.holder) {
             revert BadReceipt(redemptionId);
         }
-        _settleRedemption(r, redemptionId, servedTokens);
+        _settleRedemption(r, redemptionId, servedTokens, workCommitment);
     }
 
-    /// Dispute path: an attester quorum vouches the service happened (validators
-    /// check the router's usage records). Same digest, m-of-n instead of holder.
+    /// Dispute path: the lot's OWN issuing-book quorum vouches the service + work.
+    /// It does NOT finalize — it posts an attestation and opens a holder-challenge
+    /// window. If the holder does not contest within `challengeWindow`, anyone may
+    /// `finalizeAttested`. This stops a quorum from silently confiscating a credit:
+    /// the holder always gets a window to force the holder-receipt path or a
+    /// default. Bound to `lotBook` so no foreign quorum can attest a lot.
     function settleRedemptionAttested(
         bytes32 bookId,
         bytes32 redemptionId,
         uint64 servedTokens,
+        bytes32 workCommitment,
         bytes[] calldata sigs
     )
         external
@@ -631,15 +716,40 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         Book storage book = _books[bookId];
         if (book.threshold == 0) revert UnknownBook(bookId);
         Redemption storage r = _openRedemption(redemptionId);
-        // Only the lot's OWN issuing book may attest its service. Without this,
-        // any registered book's quorum — another instance, or an owner-minted
-        // 1-of-1 book — could mark the redemption Settled with servedTokens=qty
-        // and confiscate the holder's prepaid credit (and block claimDefault).
-        // A `settleFills`-minted lot records NO_BOOK and so has no attested path.
         bytes32 issuingBook = lotBook[r.lotId];
         if (issuingBook != bookId) revert RedemptionBookMismatch(issuingBook, bookId);
-        _verifyQuorum(book, receiptDigest(redemptionId, servedTokens), sigs);
-        _settleRedemption(r, redemptionId, servedTokens);
+        if (servedTokens > r.qtyTokens) revert ServedExceedsRequested(servedTokens, r.qtyTokens);
+        _verifyQuorum(book, receiptDigest(redemptionId, servedTokens, workCommitment), sigs);
+        uint64 cd = uint64(block.timestamp) + challengeWindow;
+        r.state = RedemptionState.Contested;
+        r.challengeDeadline = cd;
+        r.attestedServed = servedTokens;
+        r.attestedWork = workCommitment;
+        emit AttestationPosted(redemptionId, bookId, servedTokens, workCommitment, cd);
+    }
+
+    /// Finalize an unchallenged attestation once its window has passed. Anyone may
+    /// call (keeper-friendly); the settlement is exactly what the quorum vouched.
+    function finalizeAttested(bytes32 redemptionId) external {
+        Redemption storage r = redemptions[redemptionId];
+        if (r.state != RedemptionState.Contested) revert RedemptionNotContested(redemptionId);
+        if (block.timestamp <= r.challengeDeadline) revert ChallengeWindowOpen(redemptionId);
+        _settleRedemption(r, redemptionId, r.attestedServed, r.attestedWork);
+    }
+
+    /// The holder contests an attested service claim within the window, voiding it
+    /// and returning the redemption to Open — forcing the issuer back to the
+    /// holder-receipt path or to a default (`claimDefault` if the deadline passed).
+    function challengeAttested(bytes32 redemptionId) external {
+        Redemption storage r = redemptions[redemptionId];
+        if (r.state != RedemptionState.Contested) revert RedemptionNotContested(redemptionId);
+        if (msg.sender != r.holder) revert NotLotHolder(r.lotId);
+        if (block.timestamp > r.challengeDeadline) revert ChallengeWindowClosed(redemptionId);
+        r.state = RedemptionState.Open;
+        r.challengeDeadline = 0;
+        r.attestedServed = 0;
+        r.attestedWork = bytes32(0);
+        emit AttestationChallenged(redemptionId, r.holder);
     }
 
     function _openRedemption(bytes32 redemptionId) internal view returns (Redemption storage r) {
@@ -648,7 +758,14 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         if (block.timestamp > r.deadline) revert RedemptionDeadlinePassed(redemptionId);
     }
 
-    function _settleRedemption(Redemption storage r, bytes32 redemptionId, uint64 servedTokens) internal {
+    function _settleRedemption(
+        Redemption storage r,
+        bytes32 redemptionId,
+        uint64 servedTokens,
+        bytes32 workCommitment
+    )
+        internal
+    {
         if (servedTokens > r.qtyTokens) revert ServedExceedsRequested(servedTokens, r.qtyTokens);
         Lot storage lot = lots[r.lotId];
         uint256 debit = (uint256(lot.notionalMicro) * servedTokens) / lot.qtyTokens;
@@ -659,7 +776,7 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         r.state = RedemptionState.Settled;
         openRedemptionOf[r.lotId] = bytes32(0);
         if (lot.qtyTokens == 0) delete lots[r.lotId];
-        emit RedemptionSettled(redemptionId, servedTokens, debit);
+        emit RedemptionSettled(redemptionId, servedTokens, debit, workCommitment);
     }
 
     function spendAuthDigest(SpendKeyAuth calldata a) public view returns (bytes32) {

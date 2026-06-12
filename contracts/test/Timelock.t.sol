@@ -21,7 +21,7 @@ contract TimelockTest is Test {
 
     function setUp() public {
         vm.warp(1_000_000); // forge default block.timestamp is 1 == OZ _DONE_TIMESTAMP
-        settlement = new SurplusSettlement(new MockUSD(), 30 days, 6 hours, 500, 200, deployer);
+        settlement = new SurplusSettlement(new MockUSD(), 30 days, 6 hours, 1 hours, 500, 200, deployer);
         // A book must exist before ownership moves (registerBook is owner-only).
         address[] memory atts = new address[](1);
         atts[0] = address(0xA11CE);

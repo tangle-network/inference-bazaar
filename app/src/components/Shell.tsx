@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { cn } from '~/lib/cn'
 import { toggleTheme, useTheme } from '~/lib/theme'
+import { privacyOn, setPrivacy } from '~/lib/privacy'
 import { WalletButton } from '~/components/WalletButton'
 import { SurplusBrand } from '~/components/TangleLogo'
 import { CHAIN, useVenueHealth } from '~/lib/api'
@@ -50,6 +51,34 @@ function ThemeButton() {
       title="Toggle theme"
     >
       <span className={cn(theme === 'dark' ? 'i-ph:sun' : 'i-ph:moon', 'text-[16px]')} />
+    </button>
+  )
+}
+
+/** Toggle Tor privacy: dial operators at their .onion and spread acquisitions
+ * anti-stickily. Effective network anonymity needs a Tor-enabled browser. */
+function PrivacyButton() {
+  const [on, setOn] = useState(privacyOn)
+  return (
+    <button
+      onClick={() => {
+        const next = !on
+        setPrivacy(next)
+        setOn(next)
+      }}
+      className={cn(
+        'flex h-9 w-9 items-center justify-center rounded-[6px] border transition-colors',
+        on
+          ? 'border-[var(--s-accent)]/40 bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
+          : 'border-[var(--s-border)] bg-[var(--s-panel)] text-[var(--s-text-muted)] hover:border-[var(--s-border-hover)] hover:text-[var(--s-text)]',
+      )}
+      title={
+        on
+          ? 'Privacy ON: dialing operator .onions + anti-sticky acquisition (use a Tor browser for real anonymity)'
+          : 'Privacy OFF: clearnet'
+      }
+    >
+      <span className={cn(on ? 'i-ph:shield-check-fill' : 'i-ph:shield', 'text-[16px]')} />
     </button>
   )
 }
@@ -137,6 +166,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
           <VenueStatus />
           <div className="flex items-center gap-2">
+            <PrivacyButton />
             <ThemeButton />
             <WalletButton />
           </div>

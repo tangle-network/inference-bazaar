@@ -74,8 +74,21 @@ const SERVICE_SCAN_MAX = 48
 export interface Venue {
   operator: Address
   url: string
+  /** The operator's Tor onion endpoint, self-reported via /health, if it runs
+   * one. Privacy-mode clients dial this so the operator never sees the consumer's
+   * IP (requires the browser/SDK to route .onion through Tor — see endpointFor). */
+  onion: string | null
   healthy: boolean
   latencyMs: number | null
+}
+
+/** Where to reach a venue. Under privacy mode, prefer the operator's onion so a
+ * Tor-enabled client reaches it anonymously; falls back to clearnet when the
+ * operator publishes no onion. NOTE: a plain browser cannot SOCKS-proxy fetch —
+ * effective anonymity requires Tor Browser / a system Tor proxy (or the Node
+ * SDK's TorRedemptionClient). This only ensures the right destination is dialed. */
+export function endpointFor(v: Pick<Venue, 'url' | 'onion'>, privacy: boolean): string {
+  return privacy && v.onion ? v.onion : v.url
 }
 
 export function useVenueRegistry() {
@@ -128,18 +141,22 @@ export function useVenueRegistry() {
             args: [BigInt(CHAIN.blueprintId), operator],
           })
           const url = prefs.rpcAddress.replace(/\/$/, '')
-          if (!url.startsWith('http')) return { operator, url, healthy: false, latencyMs: null }
+          if (!url.startsWith('http')) {
+            return { operator, url, onion: null, healthy: false, latencyMs: null }
+          }
           try {
             const t0 = performance.now()
             const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(4000) })
+            const onion = res.ok ? ((await res.json().catch(() => null))?.onion ?? null) : null
             return {
               operator,
               url,
+              onion: typeof onion === 'string' && onion ? onion : null,
               healthy: res.ok,
               latencyMs: Math.round(performance.now() - t0),
             }
           } catch {
-            return { operator, url, healthy: false, latencyMs: null }
+            return { operator, url, onion: null, healthy: false, latencyMs: null }
           }
         }),
       )

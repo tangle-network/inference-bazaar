@@ -4,17 +4,37 @@
 > surplus inference. Operators **make markets** in inference tokens; the spread
 > is the product.
 
-This repo is the blueprint that builds that system. It clones the shape of the
-**ai-trading-blueprint** (operator-run autonomous agents, an arena UI, on-chain
-settlement, a validator-gated execution envelope) but trades a different asset:
-**prepaid inference tokens**, redeemable through the **Tangle Router** against
-real LLM operators.
+This repo is the blueprint that builds that system. It trades **prepaid
+inference token credits**: collateral-backed lots that a holder redeems for real
+inference served by the operator that sold them.
 
-The deliverable in this commit is the **engine** — the market, the
-market-making loop, and the router/privacy bridge — built and tested. The
-operator service, contracts, and arena UI are migrations layered on top of
-proven inference + trading blueprints; the map for that work is in
-[Blueprint migration](#blueprint-migration).
+## The shipped shape (two-layer liquidity)
+
+This is the live architecture, not a plan:
+
+- **Within a service instance** — ONE shared order book per instrument, matched by
+  a **rotating epoch-matcher** over the instance's bonded operators. Matching is
+  set-deterministic (`crates/matcher::match_epoch`, a pure function of the order
+  SET with a digest tiebreak — no sequencing discretion), driven by
+  `operator/src/clob.rs` over a PKI-gated gossip mesh (`operator/src/mesh.rs`,
+  blueprint-networking). A batch settles either **attested** (the issuing-book
+  quorum re-runs the match and co-signs) or **proven** (an SP1 proof that runs
+  the SAME `match_epoch` in-circuit — `zk/program` — and commits the input-set
+  commitment + fills, so a lone prover has no pairing/price/omission discretion).
+- **Across instances** — there is NO global matcher. The single market is the one
+  canonical `SurplusSettlement` contract (book-scoped: per-instance attester
+  quorum, nonce, and fee), plus blueprint-wide **NBBO aggregation**, **portable
+  signed EIP-712 orders**, and a **smart-order-router** in the app.
+- **Every operator is both a market-maker AND an inference server.** A seller
+  backs the lots it issues by serving the model itself (`operator/src/inference.rs`:
+  managed vLLM or an OpenAI-compatible backend) — router-proxy reselling is
+  refused on a bonded issuer. Redemption settles against a **work-committed
+  receipt** (proof of the model + request + output served), with a holder-
+  challenge window on the quorum path.
+
+The quoting brain (where to price) is the stateless `mm-sidecar` over
+`@surplus/market-core`; execution (which crossing orders fill) is the epoch
+matcher. See [The market-making loop](#the-market-making-loop).
 
 ---
 
@@ -82,11 +102,18 @@ caller-supplied, so every test asserts exact behavior and every session replays.
 - **`SimulatedMarket`** — seeded venue: reference price on a geometric random
   walk, Poisson taker flow crossing the book. Deterministic given a seed.
 
-### `@surplus/mm-loop` — the loop you asked for
+### `@surplus/mm-loop` — OFFLINE research / agentic-quoting prototype
 
-The market-making agent built **directly on the agent-runtime loops API**
-(`@tangle-network/agent-runtime/loops`, the `./loops` subpath of v0.48.0). It
-is a `runLoop` driven loop. See [The loop](#the-loop).
+A single-operator, continuous Avellaneda–Stoikov session built on the
+agent-runtime loops API (`@tangle-network/agent-runtime/loops`). **It is NOT the
+production maker** — nothing in the operator, sidecar, or any deploy unit imports
+it. It exists for two things: offline parameter sweeps (`@surplus/mm-eval`) and
+as the worked example of *agentic* quoting (an LLM in the quote loop) that a
+future sidecar can adopt behind the same `/quote` HTTP contract. The live quoting
+brain is the stateless `mm-sidecar` (below); the live *matching* is the
+set-deterministic epoch matcher (the continuous single-operator session can't
+give peers the bit-identical re-execution the shared book's co-signing needs).
+See [The market-making loop](#the-market-making-loop).
 
 ### `@surplus/router-bridge` — payments + privacy
 
@@ -100,7 +127,14 @@ is a `runLoop` driven loop. See [The loop](#the-loop).
 
 ---
 
-## The loop
+## The market-making loop
+
+> Scope: this describes the `@surplus/mm-loop` **research/agentic-prototype**
+> session shape. In production, quoting is the stateless `mm-sidecar` (one
+> risk-gated A–S quote set per `/quote` call, driven by the seed.sh tick) and
+> matching is the epoch matcher — NOT a continuous in-process runLoop. The two
+> share the same `@surplus/market-core` math; this section documents the loop
+> kernel that the offline harness and the future agentic sidecar run on.
 
 A **market-making session is one `runLoop` run**. The mapping onto the
 agent-runtime loop kernel:
@@ -281,56 +315,77 @@ makes the batch uncommittable.
 
 ---
 
-## Privacy: Tor (via Arti) on the sell side
+## Privacy: Tor (via Arti) for the consumer
 
-> *The ask:* when people sell unused tokens, preserve their privacy so the
-> router doesn't keep routing them to the same operators, which would let those
-> operators correlate and de-anonymize the seller.
+> *The ask:* preserve the **consumer's** privacy when they spend credits on
+> inference, so the operators serving them can't keep seeing the same client and
+> correlate + de-anonymize them over time.
+>
+> Note on roles: the **operator is the seller** (it issues lots and serves the
+> model). The party who needs privacy is the **consumer** — the buyer (or resale
+> holder) who *redeems* a lot — and the privacy is *from* the operators.
 
 A shielded credit account hides *identity on-chain*. It does **not** hide the
-*fulfillment path*: when surplus inference is redeemed, some operator runs it,
-sees the seller's IP, and — if always the same operator — can correlate timing +
-volume across redemptions and re-link the seller. Two separable problems, solved
-by two layers:
+*fulfillment path*: redeeming a credit is the consumer's CLIENT dialing an
+operator's `/redeem` — the operator sees the source IP at that moment and, if
+always the same operator, can correlate timing + volume across redemptions and
+re-link the consumer. The leak is on the **inbound** leg, so the fix lives on the
+**redemption client**, not the operator (which is the server there and cannot
+anonymize its own inbound peers). Two separable problems, two layers:
 
-### 1. Network anonymity → Tor, via Arti (not hand-rolled)
+### 1. Network anonymity → Tor, via Arti (not hand-rolled), on the client
 
 We do **not** roll our own onion crypto. Network-layer anonymity is delegated to
-**Tor** through **Arti** (`arti-client`, the Tor Project's Rust Tor
-implementation). Operators are reached either as Tor **onion services**
-(`http://<...>.onion`) or as clearnet HTTPS via a Tor exit, so the operator never
-learns the seller's IP and no on-path observer links the two. Tor brings the
-things a bespoke overlay can't: a real anonymity set, relay diversity, guard
-nodes, path constraints, directory-authority consensus, and years of audit.
+**Tor** through **Arti** (`arti-client`). The consumer's redemption client reaches
+operators as Tor **onion services** (`http://<...>.onion`) or clearnet via a Tor
+exit, so the operator never learns the consumer's IP. This requires operators to
+**publish `.onion` endpoints** in the venue registry (deploy work).
 
-`@surplus/router-bridge` ships `TorTransport`: an HTTP(S) transport that tunnels
-every request through Arti's local **SOCKS5** proxy (RFC 1928 — a wire protocol,
-not cryptography; all anonymity is Tor's). The destination is sent as a hostname
-so `.onion` names resolve inside Tor, never locally. Point `socksPort` at Arti's
-listener (default 9150). Tested against a real in-process SOCKS5 conversation —
-the same bytes Arti speaks; tests do **not** contact the live Tor network.
+Wired today:
+- **Operators publish `.onion`** — the venue advertises its onion endpoint via
+  `/health` (`SURPLUS_ONION_URL`), and on-chain discovery surfaces it
+  (`app/src/lib/venues.ts` `Venue.onion`).
+- **The app dials the onion under privacy mode** — `endpointFor(venue, privacy)`
+  returns the onion when the user's privacy preference is on (`app/src/lib/privacy.ts`,
+  toggled in the header), so redemption/serve/RFQ all target the operator
+  anonymously. **Honest limit:** a plain browser cannot SOCKS-proxy `fetch`; the
+  network anonymity is real only when the user runs a **Tor Browser / system Tor**
+  (or the Node SDK below). The app guarantees the right *destination* (`.onion`);
+  the transport is the user's.
+- **Programmatic consumers (Node)** use `@surplus/router-bridge` `TorRedemptionClient`
+  — an HTTP transport tunneling through Arti's SOCKS5 (`.onion` resolves inside
+  Tor; default listener 9150), tested against a real in-process SOCKS5 exchange.
+- **Operator outbound** (`PRIVACY_MODE=tor`): when the operator is itself an
+  outbound client (remote backend, or redemption client to another operator),
+  `operator/src/inference.rs` routes through Arti's SOCKS5 (`socks5h`,
+  `SURPLUS_TOR_SOCKS`). This protects the operator's own calls; it does not (and
+  cannot) anonymize consumers dialing it.
+
+Still operator-deploy work: actually **running Arti and exposing `/redeem` as a
+Tor onion service** (so `SURPLUS_ONION_URL` is real). Until an operator does
+that, privacy mode falls back to its clearnet URL.
 
 ### 2. Operator-selection anti-stickiness → ours (Tor can't do it)
 
-Tor anonymizes the pipe; it does **not** choose *which marketplace operator*
-fulfills a redemption. That choice is ours, and left naive it re-introduces
-concentration. `selectOperators` picks fulfilling operators weighted **away**
-from the ones this seller used recently:
+Tor anonymizes the pipe; it does **not** decide *which operator* a consumer's flow
+concentrates on. A redemption must go to the lot's own issuer, so the lever is at
+**acquisition**: which operator's lots a consumer buys. Left naive, a consumer
+keeps buying from (and so later redeeming against) the same few operators, who can
+correlate volume + timing. So buy-side selection weights **away** from
+recently-used operators:
 
 ```
 weight(op) = max(ε, 1 − penalty · recencyWeight(op))
 ```
 
-`recencyWeight` decays linearly with position in the seller's recent-operator
-list (last-used penalized most); `ε > 0` keeps a fully-penalized operator
-*possible* (availability beats a perfect avoid). `OperatorMemory` persists that
-recent list per seller — keyed by the shielded commitment — so the spread holds
-**across** redemptions instead of re-rolling each time. `TorRedemptionClient`
-composes the two: select an anti-sticky operator, reach it through Tor.
-
-Tested (12 tests): the SOCKS5 handshake + HTTP tunnel round-trips through the
-proxy; redemptions spread across operators; and the memory is bounded and
-per-seller.
+`recencyWeight` decays linearly with position in the recent-operator list
+(last-used penalized most); `ε > 0` keeps a fully-penalized operator *possible*
+(availability beats a perfect avoid). Wired into `bestQuote`
+(`app/src/lib/trade.tsx`): under privacy mode, among quotes within a tight price
+tolerance of the best (so privacy never overpays), it picks anti-sticky and
+persists the recent list per buyer in `localStorage` (`app/src/lib/privacy.ts`,
+a faithful port of `@surplus/router-bridge`'s `selectOperators` + `OperatorMemory`,
+which the Node SDK uses with `TorRedemptionClient`).
 
 > **Feature-flag it.** `PRIVACY_MODE = tor | off`. `tor` routes through Arti;
 > `off` is direct (dev/trusted networks). Caveat: Tor adds real latency, so the
@@ -377,7 +432,7 @@ The operator who *sells* tokens **is** an inference operator. Reuse, don't reinv
 - Buyers spend through the router's OpenAI-compatible API (Rail 1). The
   marketplace settles the discount.
 - Privacy is Tor via Arti: operators run as onion services / behind Arti, the
-  seller reaches them through `TorTransport`. **transport + anti-stickiness
+  consumer reaches them through `TorTransport`. **transport + anti-stickiness
   selection built; running Arti + publishing operator `.onion`s is
   operator-service work.**
 

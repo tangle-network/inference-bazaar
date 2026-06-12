@@ -16,8 +16,10 @@ contract Eip712ParityTest is Test {
     bytes32 constant BUY_DIGEST_PIN = 0x42429ee1902dced9a55e9d57665f224d30760bf116a4a5fb433667bd411da720;
     bytes32 constant SELL_DIGEST_PIN = 0x68a403f61ba389d67aaeb883f03a9e441dc347b3b0ec9f47dca89cb5be0fc2aa;
     bytes32 constant FILLS_HASH_PIN = 0x54d57a43d09d15471f4f864443bc63e10a0d05a12fa203f81941d036aa5ad334;
-    bytes32 constant RECEIPT_DIGEST_PIN = 0xfdd98e90c60c3ff8de5ea5b9b3f80fb9bfaddd19c4829c2eed440e883a33b6b7;
+    bytes32 constant RECEIPT_DIGEST_PIN = 0xa6a5e6031cf2233a6c6a25b2b61a1ce8984703e76bbb577dc5812a0fef97644f;
     bytes32 constant BATCH_DIGEST_PIN = 0xbf7f321f498636d52728a1ea71a7fac4116795252c2299103f4d989278b36dbd;
+    // The work commitment fixed in the receipt parity fixture (shared with Rust).
+    bytes32 constant WORK = bytes32(uint256(0x77));
 
     uint64 constant CHAIN_ID = 3799; // Tangle testnet
     address constant VERIFYING = 0x1111111111111111111111111111111111111111;
@@ -28,7 +30,7 @@ contract Eip712ParityTest is Test {
         vm.chainId(CHAIN_ID);
         // The Rust fixture pins verifyingContract = 0x1111…; deploy there.
         SurplusSettlement impl =
-            new SurplusSettlement(IERC20(address(0xDEAD)), 30 days, 6 hours, 500, 200, address(0xFEE));
+            new SurplusSettlement(IERC20(address(0xDEAD)), 30 days, 6 hours, 1 hours, 500, 200, address(0xFEE));
         vm.etch(VERIFYING, address(impl).code);
         settlement = SurplusSettlement(VERIFYING);
         // EIP712 caches the domain separator with the ORIGINAL deploy address;
@@ -82,7 +84,7 @@ contract Eip712ParityTest is Test {
     }
 
     function test_receiptDigestMatchesRust() public view {
-        assertEq(settlement.receiptDigest(bytes32(uint256(1)), 20_000), RECEIPT_DIGEST_PIN);
+        assertEq(settlement.receiptDigest(bytes32(uint256(1)), 20_000, WORK), RECEIPT_DIGEST_PIN);
     }
 
     function test_batchDigestMatchesRust() public view {

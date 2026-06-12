@@ -13,4 +13,7 @@ license = "MIT OR Apache-2.0"
 sp1-zkvm = "6.1.0"
 serde = { version = "1", features = ["derive"] }
 surplus-settlement-core = { path = "../../crates/settlement-core" }
+# Kernel only (no consensus, no chain client): the guest runs the SAME
+# match_epoch the venue + peers run, so "proven" proves the match in-circuit.
+surplus-matcher = { path = "../../crates/matcher", default-features = false }
 surplus-batch-types = { path = "../lib" }

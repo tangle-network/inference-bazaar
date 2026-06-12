@@ -54,7 +54,7 @@ contract SpendTest is SettlementTestBase {
         vm.expectRevert(); // NothingToSettle
         settlement.settleSpend(a, 10_000, sig);
         vm.expectRevert(); // NothingToSettle (monotone)
-        settlement.settleSpend(a, 5_000, sig);
+        settlement.settleSpend(a, 5000, sig);
     }
 
     function test_capIsEnforced() public {
@@ -71,7 +71,7 @@ contract SpendTest is SettlementTestBase {
     function test_revocationKillsTheKey() public {
         SurplusSettlement.SpendKeyAuth memory a = auth(40_000, uint64(block.timestamp + 30 days));
         bytes memory sig = signAuth(buyerKey, a);
-        settlement.settleSpend(a, 5_000, sig);
+        settlement.settleSpend(a, 5000, sig);
 
         vm.prank(buyer);
         settlement.revokeSpendKey(a);
@@ -90,7 +90,7 @@ contract SpendTest is SettlementTestBase {
     function test_resaleInvalidatesOutstandingKeys() public {
         SurplusSettlement.SpendKeyAuth memory a = auth(40_000, uint64(block.timestamp + 30 days));
         bytes memory sig = signAuth(buyerKey, a);
-        settlement.settleSpend(a, 5_000, sig);
+        settlement.settleSpend(a, 5000, sig);
 
         // Holder transfers the lot; the old holder's authorization must die.
         vm.prank(buyer);
@@ -131,12 +131,12 @@ contract SpendTest is SettlementTestBase {
         SurplusSettlement.SpendKeyAuth memory a = auth(40_000, uint64(block.timestamp + 30 days));
         bytes memory sig = signAuth(buyerKey, a);
         vm.expectRevert(
-            abi.encodeWithSelector(SurplusSettlement.LotQtyUnavailable.selector, uint64(5_000), uint64(10_000))
+            abi.encodeWithSelector(SurplusSettlement.LotQtyUnavailable.selector, uint64(5000), uint64(10_000))
         );
         settlement.settleSpend(a, 10_000, sig);
 
         // Within the unlocked remainder it settles.
-        settlement.settleSpend(a, 5_000, sig);
+        settlement.settleSpend(a, 5000, sig);
     }
 
     function test_fullDrawDeletesLot() public {
@@ -155,14 +155,11 @@ contract SpendTest is SettlementTestBase {
     function test_spendDigestPin() public {
         vm.chainId(3799);
         SurplusSettlement impl =
-            new SurplusSettlement(settlement.paymentToken(), 30 days, 6 hours, 500, 200, address(0xFEE));
+            new SurplusSettlement(settlement.paymentToken(), 30 days, 6 hours, 1 hours, 500, 200, address(0xFEE));
         vm.etch(address(0x1111111111111111111111111111111111111111), address(impl).code);
         SurplusSettlement pinned = SurplusSettlement(address(0x1111111111111111111111111111111111111111));
         SurplusSettlement.SpendKeyAuth memory a = SurplusSettlement.SpendKeyAuth({
-            lotId: keccak256("pin-lot"),
-            keyHash: keccak256("pin-key"),
-            maxTokens: 1_000_000,
-            expiry: 1_800_000_000
+            lotId: keccak256("pin-lot"), keyHash: keccak256("pin-key"), maxTokens: 1_000_000, expiry: 1_800_000_000
         });
         assertEq(
             pinned.spendAuthDigest(a),

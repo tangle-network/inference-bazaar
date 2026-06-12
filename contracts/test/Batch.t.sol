@@ -98,23 +98,26 @@ contract BatchTest is SettlementTestBase {
         settlement.settleBatchAttested(BOOK, fills, sigs);
     }
 
+    // A test stand-in for the input-set commitment the guest computes + commits.
+    bytes32 internal constant OC = keccak256("orders-commitment");
+
     function test_provenPathDisabledByDefault() public {
         SurplusSettlement.BatchFill[] memory fills = batchFills();
         vm.expectRevert(SurplusSettlement.ProvenPathDisabled.selector);
-        settlement.settleBatchProven(BOOK, fills, hex"");
+        settlement.settleBatchProven(BOOK, OC, fills, hex"");
     }
 
-    function test_provenBatch_bindsDomainAndFillsHash() public {
+    function test_provenBatch_bindsMatchPublicValues() public {
         SP1MockVerifierStrict verifier = new SP1MockVerifierStrict();
         bytes32 vkey = keccak256("surplus-batch-program-vkey");
         settlement.setSp1Verifier(address(verifier), vkey);
 
         SurplusSettlement.BatchFill[] memory fills = batchFills();
         bytes32 fillsHash = keccak256(abi.encode(fills));
-        verifier.expect(vkey, abi.encode(settlement.domainSeparator(), BOOK, settlement.bookNonce(BOOK), fillsHash));
+        verifier.expect(vkey, abi.encode(settlement.domainSeparator(), BOOK, settlement.bookNonce(BOOK), OC, fillsHash));
 
         uint256 buyerBefore = settlement.balances(buyer);
-        settlement.settleBatchProven(BOOK, fills, hex"deadbeef");
+        settlement.settleBatchProven(BOOK, OC, fills, hex"deadbeef");
         assertEq(settlement.balances(buyer), buyerBefore - 740_000);
     }
 
@@ -136,10 +139,26 @@ contract BatchTest is SettlementTestBase {
         SurplusSettlement.BatchFill[] memory fills = batchFills();
         bytes32 fillsHash = keccak256(abi.encode(fills));
         // Proof was made for BOOK at nonce 0.
-        verifier.expect(vkey, abi.encode(settlement.domainSeparator(), BOOK, uint64(0), fillsHash));
+        verifier.expect(vkey, abi.encode(settlement.domainSeparator(), BOOK, uint64(0), OC, fillsHash));
         // Submitting it under OTHER recomputes publicValues with OTHER => mismatch.
         vm.expectRevert("publicValues");
-        settlement.settleBatchProven(OTHER, fills, hex"deadbeef");
+        settlement.settleBatchProven(OTHER, OC, fills, hex"deadbeef");
+    }
+
+    /// The ordersCommitment is bound into the proof: submitting a different
+    /// commitment than the one proven recomputes mismatched public values. This
+    /// is what ties the on-chain fills to the matched input set.
+    function test_provenBatch_bindsOrdersCommitment() public {
+        SP1MockVerifierStrict verifier = new SP1MockVerifierStrict();
+        bytes32 vkey = keccak256("surplus-batch-program-vkey");
+        settlement.setSp1Verifier(address(verifier), vkey);
+
+        SurplusSettlement.BatchFill[] memory fills = batchFills();
+        bytes32 fillsHash = keccak256(abi.encode(fills));
+        verifier.expect(vkey, abi.encode(settlement.domainSeparator(), BOOK, settlement.bookNonce(BOOK), OC, fillsHash));
+        // Submit a DIFFERENT ordersCommitment than the one proven => mismatch.
+        vm.expectRevert("publicValues");
+        settlement.settleBatchProven(BOOK, keccak256("different-set"), fills, hex"deadbeef");
     }
 
     function test_provenBatch_rejectsWrongPublicValues() public {
@@ -149,18 +168,29 @@ contract BatchTest is SettlementTestBase {
 
         SurplusSettlement.BatchFill[] memory fills = batchFills();
         // Verifier expects different fills => the contract-computed publicValues mismatch.
-        verifier.expect(vkey, abi.encode(settlement.domainSeparator(), BOOK, settlement.bookNonce(BOOK), keccak256("other")));
+        verifier.expect(
+            vkey, abi.encode(settlement.domainSeparator(), BOOK, settlement.bookNonce(BOOK), OC, keccak256("other"))
+        );
         vm.expectRevert("publicValues");
-        settlement.settleBatchProven(BOOK, fills, hex"deadbeef");
+        settlement.settleBatchProven(BOOK, OC, fills, hex"deadbeef");
+    }
+
+    function test_provenBatch_emitsOrdersCommitment() public {
+        settlement.setSp1Verifier(address(new SP1MockVerifierAccept()), bytes32("vk"));
+        SurplusSettlement.BatchFill[] memory fills = batchFills();
+        bytes32 fillsHash = keccak256(abi.encode(fills));
+        vm.expectEmit(true, true, false, true, address(settlement));
+        emit SurplusSettlement.BatchSettled(BOOK, settlement.bookNonce(BOOK), fillsHash, fills.length, true, OC);
+        settlement.settleBatchProven(BOOK, OC, fills, hex"");
     }
 
     function test_provenReplaySafe_fillCapsBlockDoubleApply() public {
         SurplusSettlement.BatchFill[] memory fills = batchFills();
         settlement.setSp1Verifier(address(new SP1MockVerifierAccept()), bytes32("vk"));
-        settlement.settleBatchProven(BOOK, fills, hex"");
+        settlement.settleBatchProven(BOOK, OC, fills, hex"");
         // Orders are now fully filled; re-applying the same proof/batch reverts.
         vm.expectRevert();
-        settlement.settleBatchProven(BOOK, fills, hex"");
+        settlement.settleBatchProven(BOOK, OC, fills, hex"");
     }
 
     // ── Book governance: write-once economics, rotatable membership ──────────────

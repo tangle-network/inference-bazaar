@@ -37,10 +37,15 @@ fn side_to_book(side: u8) -> Option<Side> {
 
 pub(crate) struct SettleCtx {
     pub domain: Eip712Domain,
+    /// The ATTESTER identity: signs orders / batch co-signatures. Never sends txs.
     pub signer: Option<Signer>,
     pub contract: Address,
     pub rpc_url: Option<String>,
     pub operator_key: Option<String>,
+    /// The GAS/SUBMITTER key used to send transactions — distinct from the
+    /// attester key so the co-sign identity never touches the RPC/nonce path.
+    /// Falls back to `operator_key` only when unset (dev convenience).
+    pub submitter_key: Option<String>,
     pub rfq_ttl_secs: u64,
 }
 
@@ -52,18 +57,34 @@ impl SettleCtx {
             .operator_key
             .as_deref()
             .and_then(|k| Signer::from_hex(k).ok());
+        if cfg.submitter_key.is_none() && cfg.operator_key.is_some() {
+            tracing::warn!(
+                "SURPLUS_SUBMITTER_KEY unset: the attester key will also send txs. \
+                 Set a separate submitter key in production so the co-sign key never \
+                 touches the RPC/nonce path."
+            );
+        }
         Some(SettleCtx {
             domain: domain(cfg.chain_id, contract),
             signer,
             contract,
             rpc_url: cfg.rpc_url.clone(),
             operator_key: cfg.operator_key.clone(),
+            submitter_key: cfg.submitter_key.clone(),
             rfq_ttl_secs: cfg.rfq_ttl_secs,
         })
     }
 
     pub fn operator_address_hex(&self) -> Option<String> {
         self.signer.as_ref().map(|s| format!("{:#x}", s.address()))
+    }
+
+    /// The key that SENDS transactions: the dedicated submitter key, or the
+    /// operator key as a dev fallback.
+    pub fn submitter_key(&self) -> Option<&str> {
+        self.submitter_key
+            .as_deref()
+            .or(self.operator_key.as_deref())
     }
 }
 
@@ -559,7 +580,7 @@ impl Venue {
         }
 
         #[cfg(feature = "chain")]
-        if let (Some(rpc), Some(key)) = (_ctx.rpc_url.as_deref(), _ctx.operator_key.as_deref()) {
+        if let (Some(rpc), Some(key)) = (_ctx.rpc_url.as_deref(), _ctx.submitter_key()) {
             let client =
                 match surplus_settlement::chain::SettlementClient::connect(rpc, key, _ctx.contract)
                     .await
@@ -667,7 +688,7 @@ impl Venue {
             };
             let (Some(rpc), Some(key), Some(signer)) = (
                 ctx.rpc_url.as_deref(),
-                ctx.operator_key.as_deref(),
+                ctx.submitter_key(),
                 ctx.signer.as_ref(),
             ) else {
                 return Ok(());
