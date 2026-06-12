@@ -49,6 +49,14 @@ sol! {
         function depositCollateral(uint256 amount) external;
         function requestRedemption(bytes32 lotId, uint64 qty) external returns (bytes32);
         function settleRedemption(bytes32 redemptionId, uint64 servedTokens, bytes calldata holderSig) external;
+        struct SpendKeyAuth {
+            bytes32 lotId;
+            bytes32 keyHash;
+            uint64 maxTokens;
+            uint64 expiry;
+        }
+        function settleSpend(SpendKeyAuth calldata a, uint64 servedCumulative, bytes calldata holderSig) external;
+        function spendSettled(bytes32 authDigest) external view returns (uint64);
         function claimDefault(bytes32 redemptionId) external returns (uint256);
         function registerBook(bytes32 bookId, address[] calldata signers, uint16 threshold, uint16 bookFeeBps, address bookFeeRecipient) external;
         function rotateAttesters(bytes32 bookId, address[] calldata signers, uint16 threshold) external;
@@ -229,6 +237,37 @@ impl SettlementClient {
             .await?;
         anyhow::ensure!(r.status(), "depositCollateral reverted");
         Ok(())
+    }
+
+    /// Settle the cumulative tokens served against a spend-key authorization.
+    pub async fn settle_spend(
+        &self,
+        lot_id: B256,
+        key_hash: B256,
+        max_tokens: u64,
+        expiry: u64,
+        served_cumulative: u64,
+        holder_sig: Vec<u8>,
+    ) -> anyhow::Result<B256> {
+        let auth = ISurplusSettlement::SpendKeyAuth {
+            lotId: lot_id,
+            keyHash: key_hash,
+            maxTokens: max_tokens,
+            expiry,
+        };
+        let receipt = self
+            .contract
+            .settleSpend(auth, served_cumulative, holder_sig.into())
+            .send()
+            .await?
+            .get_receipt()
+            .await?;
+        anyhow::ensure!(receipt.status(), "settleSpend reverted");
+        Ok(receipt.transaction_hash)
+    }
+
+    pub async fn spend_settled(&self, auth_digest: B256) -> anyhow::Result<u64> {
+        Ok(self.contract.spendSettled(auth_digest).call().await?)
     }
 
     /// Open a redemption; returns the redemption id from the event.
