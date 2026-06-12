@@ -118,7 +118,14 @@ fn err_status(e: &VenueError) -> StatusCode {
 }
 
 async fn health() -> impl IntoResponse {
-    Json(serde_json::json!({ "ok": true }))
+    // Publish the operator's Tor onion endpoint (if it runs one) so discovery can
+    // surface it and privacy-mode clients dial it instead of the clearnet URL.
+    // The operator runs `/redeem` as an onion service and sets SURPLUS_ONION_URL.
+    let onion = std::env::var("SURPLUS_ONION_URL")
+        .ok()
+        .filter(|s| !s.is_empty());
+    let privacy = std::env::var("PRIVACY_MODE").ok();
+    Json(serde_json::json!({ "ok": true, "onion": onion, "privacy": privacy }))
 }
 
 async fn instruments(State(v): State<Shared>) -> impl IntoResponse {

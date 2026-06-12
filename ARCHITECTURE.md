@@ -337,40 +337,51 @@ operators as Tor **onion services** (`http://<...>.onion`) or clearnet via a Tor
 exit, so the operator never learns the seller's IP. This requires operators to
 **publish `.onion` endpoints** in the venue registry (deploy work).
 
-Two integration points, both real:
-- **App / redemption client** (the leaking leg): `@surplus/router-bridge` ships
-  `TorTransport` + `TorRedemptionClient` — an HTTP(S) transport tunneling every
-  request through Arti's local **SOCKS5** proxy (`.onion` resolves inside Tor;
-  default listener 9150). Tested against a real in-process SOCKS5 conversation.
-  *(Wiring the app's redemption fetch through it is the remaining app step once
-  operators publish onions.)*
-- **Operator outbound** (`PRIVACY_MODE=tor`): when the operator itself is an
-  outbound client — a remote OpenAI-compatible backend, or acting as a redemption
-  client to another operator — `operator/src/inference.rs` routes through Arti's
-  SOCKS5 (`socks5h`, `SURPLUS_TOR_SOCKS`). This protects the operator's own calls;
-  it does not (and cannot) anonymize sellers dialing it.
+Wired today:
+- **Operators publish `.onion`** — the venue advertises its onion endpoint via
+  `/health` (`SURPLUS_ONION_URL`), and on-chain discovery surfaces it
+  (`app/src/lib/venues.ts` `Venue.onion`).
+- **The app dials the onion under privacy mode** — `endpointFor(venue, privacy)`
+  returns the onion when the user's privacy preference is on (`app/src/lib/privacy.ts`,
+  toggled in the header), so redemption/serve/RFQ all target the operator
+  anonymously. **Honest limit:** a plain browser cannot SOCKS-proxy `fetch`; the
+  network anonymity is real only when the user runs a **Tor Browser / system Tor**
+  (or the Node SDK below). The app guarantees the right *destination* (`.onion`);
+  the transport is the user's.
+- **Programmatic sellers (Node)** use `@surplus/router-bridge` `TorRedemptionClient`
+  — an HTTP transport tunneling through Arti's SOCKS5 (`.onion` resolves inside
+  Tor; default listener 9150), tested against a real in-process SOCKS5 exchange.
+- **Operator outbound** (`PRIVACY_MODE=tor`): when the operator is itself an
+  outbound client (remote backend, or redemption client to another operator),
+  `operator/src/inference.rs` routes through Arti's SOCKS5 (`socks5h`,
+  `SURPLUS_TOR_SOCKS`). This protects the operator's own calls; it does not (and
+  cannot) anonymize sellers dialing it.
+
+Still operator-deploy work: actually **running Arti and exposing `/redeem` as a
+Tor onion service** (so `SURPLUS_ONION_URL` is real). Until an operator does
+that, privacy mode falls back to its clearnet URL.
 
 ### 2. Operator-selection anti-stickiness → ours (Tor can't do it)
 
-Tor anonymizes the pipe; it does **not** choose *which marketplace operator*
-fulfills a redemption. That choice is ours, and left naive it re-introduces
-concentration. `selectOperators` picks fulfilling operators weighted **away**
-from the ones this seller used recently:
+Tor anonymizes the pipe; it does **not** decide *which operator* a seller's flow
+concentrates on. A redemption must go to the lot's own issuer, so the lever is at
+**acquisition**: which operator's lots a seller buys. Left naive, a seller keeps
+buying from (and so later redeeming against) the same few operators, who can
+correlate volume + timing. So buy-side selection weights **away** from
+recently-used operators:
 
 ```
 weight(op) = max(ε, 1 − penalty · recencyWeight(op))
 ```
 
-`recencyWeight` decays linearly with position in the seller's recent-operator
-list (last-used penalized most); `ε > 0` keeps a fully-penalized operator
-*possible* (availability beats a perfect avoid). `OperatorMemory` persists that
-recent list per seller — keyed by the shielded commitment — so the spread holds
-**across** redemptions instead of re-rolling each time. `TorRedemptionClient`
-composes the two: select an anti-sticky operator, reach it through Tor.
-
-Tested (12 tests): the SOCKS5 handshake + HTTP tunnel round-trips through the
-proxy; redemptions spread across operators; and the memory is bounded and
-per-seller.
+`recencyWeight` decays linearly with position in the recent-operator list
+(last-used penalized most); `ε > 0` keeps a fully-penalized operator *possible*
+(availability beats a perfect avoid). Wired into `bestQuote`
+(`app/src/lib/trade.tsx`): under privacy mode, among quotes within a tight price
+tolerance of the best (so privacy never overpays), it picks anti-sticky and
+persists the recent list per buyer in `localStorage` (`app/src/lib/privacy.ts`,
+a faithful port of `@surplus/router-bridge`'s `selectOperators` + `OperatorMemory`,
+which the Node SDK uses with `TorRedemptionClient`).
 
 > **Feature-flag it.** `PRIVACY_MODE = tor | off`. `tor` routes through Arti;
 > `off` is direct (dev/trusted networks). Caveat: Tor adds real latency, so the

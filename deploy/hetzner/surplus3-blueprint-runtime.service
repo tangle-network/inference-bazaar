@@ -30,6 +30,10 @@ Environment=SURPLUS_OPERATOR_KEY=<issuer-attester-key>
 # Separate gas/submitter key (key separation; falls back to operator key if unset).
 Environment=SURPLUS_SUBMITTER_KEY=<gas-submitter-key>
 Environment=SURPLUS_RPC_URL=https://sepolia.base.org
+# Optional Tor onion endpoint (run Arti + expose /redeem as an onion service);
+# published via /health so privacy-mode clients dial it. Leave unset if no onion.
+# Environment=SURPLUS_ONION_URL=http://<your-onion>.onion
+# Environment=PRIVACY_MODE=tor   # route the operator's OWN outbound calls via Arti
 ExecStart=/opt/surplus/surplus-operator run
 Restart=always
 RestartSec=5
