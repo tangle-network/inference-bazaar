@@ -134,7 +134,7 @@ impl Venue {
         use surplus_settlement::core::{hex, recover_signer};
 
         let ctx = self.settle_ctx_pub()?;
-        let (rpc, key) = match (ctx.rpc_url.as_deref(), ctx.operator_key.as_deref()) {
+        let (rpc, key) = match (ctx.rpc_url.as_deref(), ctx.submitter_key()) {
             (Some(r), Some(k)) => (r, k),
             _ => return Err(VenueError::SettlementUnconfigured("rpc + operator key")),
         };
@@ -314,7 +314,7 @@ impl Venue {
         use surplus_settlement::core::hex;
 
         let ctx = self.settle_ctx_pub()?;
-        let (rpc, key) = match (ctx.rpc_url.as_deref(), ctx.operator_key.as_deref()) {
+        let (rpc, key) = match (ctx.rpc_url.as_deref(), ctx.submitter_key()) {
             (Some(r), Some(k)) => (r, k),
             _ => return Err(VenueError::SettlementUnconfigured("rpc + operator key")),
         };

@@ -49,9 +49,17 @@ pub struct SettlementConfig {
     pub chain_id: u64,
     /// SurplusSettlement contract address, 0x-hex.
     pub contract: String,
-    /// EVM key the operator signs RFQ quotes / MM quotes with, 0x-hex. Without
-    /// it the venue still accepts third-party signed orders but quotes nothing.
+    /// EVM key the operator signs RFQ quotes / MM quotes / batch co-signatures
+    /// with, 0x-hex. This is the ATTESTER identity (its address is what
+    /// `bookAttesters` must contain) and it should NEVER send transactions —
+    /// keep it as cold as the quorum role allows. Without it the venue still
+    /// accepts third-party signed orders but quotes nothing.
     pub operator_key: Option<String>,
+    /// Separate hot key that PAYS GAS and SENDS settlement txs (settleFills /
+    /// settleBatch* / redemption settle), 0x-hex. Splitting it from
+    /// `operator_key` keeps the attester co-sign key off the RPC/submission path
+    /// and out of nonce races. Falls back to `operator_key` only when unset (dev).
+    pub submitter_key: Option<String>,
     /// RPC endpoint for direct submission (feature `chain`).
     pub rpc_url: Option<String>,
     /// Firm-quote TTL: how long an RFQ response stays settleable on-chain.
@@ -95,6 +103,7 @@ impl OperatorConfig {
                 chain_id,
                 contract,
                 operator_key: std::env::var("SURPLUS_OPERATOR_KEY").ok(),
+                submitter_key: std::env::var("SURPLUS_SUBMITTER_KEY").ok(),
                 rpc_url: std::env::var("SURPLUS_RPC_URL").ok(),
                 rfq_ttl_secs: std::env::var("SURPLUS_RFQ_TTL_SECS")
                     .ok()

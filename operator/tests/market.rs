@@ -70,6 +70,7 @@ fn venue_with(sidecar_url: String) -> Venue {
             chain_id: 31_337,
             contract: CONTRACT.into(),
             operator_key: Some(OPERATOR_KEY.into()),
+            submitter_key: None,
             rpc_url: None,
             rfq_ttl_secs: 120,
         }),

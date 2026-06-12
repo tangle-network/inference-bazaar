@@ -74,6 +74,7 @@ fn venue_with(operator_key: &str) -> Venue {
             chain_id: CHAIN_ID,
             contract: CONTRACT.into(),
             operator_key: Some(operator_key.into()),
+            submitter_key: None,
             rpc_url: None, // dry submit — the consensus round still runs fully
             rfq_ttl_secs: 120,
         }),

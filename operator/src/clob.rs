@@ -31,7 +31,7 @@
 //! quorum signature, the contract's `filled` map caps every order).
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -347,6 +347,12 @@ pub struct Clob {
     cancelled: Mutex<HashMap<B256, (Address, u64)>>,
     /// Last epoch this node ran as proposer (idempotence for the driver loop).
     last_epoch: AtomicU64,
+    /// False only after a CONFIRMED mismatch between the configured operator set/
+    /// threshold and the contract's on-chain `bookAttesters`/`bookThreshold`. The
+    /// contract is the source of truth: proposing against a quorum the contract
+    /// will reject is pure liveness grief, so a drifted node stops proposing.
+    /// Stays true if the on-chain read is merely unavailable (no false stall).
+    membership_ok: AtomicBool,
     net: Arc<dyn ClobNet>,
 }
 
@@ -400,8 +406,44 @@ impl Clob {
             settled: Mutex::new(HashMap::new()),
             cancelled: Mutex::new(HashMap::new()),
             last_epoch: AtomicU64::new(0),
+            membership_ok: AtomicBool::new(true),
             net,
         })
+    }
+
+    /// Reconcile the configured operator set/threshold against the contract's
+    /// `bookAttesters`/`bookThreshold` for this book — the contract is the source
+    /// of truth. On a CONFIRMED mismatch, mark membership not-ok (the node stops
+    /// proposing, since the quorum it would gather can't settle on-chain) and log
+    /// loudly. An unavailable RPC is NOT a mismatch — last-known config stands.
+    #[cfg(feature = "chain")]
+    pub(crate) async fn verify_membership(self: &Arc<Self>) {
+        let Ok(Some(client)) = self.chain_client().await else {
+            return; // chain not configured / unreachable: do not gate on it
+        };
+        let on_chain = match (
+            client.book_attesters(self.cfg.book_id).await,
+            client.book_threshold(self.cfg.book_id).await,
+        ) {
+            (Ok(a), Ok(t)) => (a, t),
+            _ => return, // read failed: do not flip to not-ok on a transient error
+        };
+        let (mut chain_set, chain_threshold) = on_chain;
+        chain_set.sort_unstable();
+        let mut cfg_set = self.cfg.addresses();
+        cfg_set.sort_unstable();
+        let ok = chain_set == cfg_set && usize::from(chain_threshold) == self.cfg.threshold;
+        self.membership_ok.store(ok, Ordering::Relaxed);
+        if !ok {
+            tracing::error!(
+                book = %format!("{:#x}", self.cfg.book_id),
+                configured = ?cfg_set, on_chain = ?chain_set,
+                configured_threshold = self.cfg.threshold, on_chain_threshold = chain_threshold,
+                "CLOB membership drift: configured operator set/threshold does not match the \
+                 contract's bookAttesters. This node will NOT propose until reconciled \
+                 (rotateAttesters on-chain or fix SURPLUS_CLOB_OPERATORS/THRESHOLD)."
+            );
+        }
     }
 
     /// Admit an order locally and fan it out to peers — the one entry point for
@@ -738,7 +780,7 @@ impl Clob {
         &self,
     ) -> anyhow::Result<Option<surplus_settlement::chain::SettlementClient>> {
         let ctx = self.venue.settle.as_ref().expect("checked in new()");
-        let (Some(rpc), Some(key)) = (ctx.rpc_url.as_deref(), ctx.operator_key.as_deref()) else {
+        let (Some(rpc), Some(key)) = (ctx.rpc_url.as_deref(), ctx.submitter_key()) else {
             return Ok(None);
         };
         let client =
@@ -1042,9 +1084,26 @@ pub fn start_from_env(venue: Arc<Venue>) -> anyhow::Result<Option<(SharedClob, R
         return crate::mesh::start(venue, cfg).map(Some);
     }
     let clob = Arc::new(Clob::new(venue, cfg)?);
+    spawn_membership_reconciler(clob.clone());
     spawn_epoch_loop(clob.clone());
     let r = router(clob.clone());
     Ok(Some((clob, r)))
+}
+
+/// Periodically reconcile the configured operator set against the contract's
+/// `bookAttesters` (the source of truth). Without the `chain` feature this is a
+/// no-op — the off-chain set is then trusted as-is.
+pub fn spawn_membership_reconciler(clob: SharedClob) {
+    #[cfg(feature = "chain")]
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(300));
+        loop {
+            clob.verify_membership().await;
+            tick.tick().await;
+        }
+    });
+    #[cfg(not(feature = "chain"))]
+    let _ = clob;
 }
 
 /// The epoch driver: at every epoch boundary, if this node is the elected
@@ -1060,6 +1119,9 @@ pub fn spawn_epoch_loop(clob: SharedClob) {
                 continue;
             }
             clob.last_epoch.store(epoch, Ordering::Relaxed);
+            if !clob.membership_ok.load(Ordering::Relaxed) {
+                continue; // confirmed drift from the contract's attester set
+            }
             if elect_proposer(&clob.cfg.addresses(), epoch) != Some(clob.me) {
                 continue;
             }
