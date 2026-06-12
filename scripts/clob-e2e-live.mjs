@@ -150,9 +150,40 @@ const [fillLog] = await pub.getLogs({
 })
 const lot = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'lots', args: [fillLog.args.lotId] })
 
+// "Attested 2-of-2" must be PROVEN, not asserted: decode the settle tx's
+// calldata and recover every quorum signature over the batch digest. Under a
+// misconfigured threshold (e.g. 1) the proposer self-submits and batchNonce
+// still advances — this is the check that catches it.
+const { decodeFunctionData, hashTypedData, recoverAddress } = await import('viem')
+const settleAbi = parseAbi([
+  'struct Order { bytes32 instrument; uint8 side; uint64 priceMicroPerM; uint64 qtyTokens; bytes32 lotId; address trader; uint64 expiry; bytes32 salt; }',
+  'struct BatchFill { Order buy; Order sell; uint64 qtyTokens; uint64 execPriceMicroPerM; }',
+  'function settleBatchAttested(BatchFill[] fills, bytes[] sigs)',
+])
+const settleTx = await pub.getTransaction({ hash: batchLog.transactionHash })
+const decoded = decodeFunctionData({ abi: settleAbi, data: settleTx.input })
+const sigs = decoded.args[1]
+const digest = hashTypedData({
+  domain: { name: 'SurplusSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT },
+  types: { SettlementBatch: [{ name: 'batchNonce', type: 'uint64' }, { name: 'fillsHash', type: 'bytes32' }] },
+  primaryType: 'SettlementBatch',
+  message: { batchNonce: nonce0, fillsHash: batchLog.args.fillsHash },
+})
+const signers = []
+for (const sig of sigs) signers.push((await recoverAddress({ hash: digest, signature: sig })).toLowerCase())
+const threshold = await pub.readContract({
+  address: SETTLEMENT,
+  abi: parseAbi(['function attesterThreshold() view returns (uint16)']),
+  functionName: 'attesterThreshold',
+})
+if (threshold < 2) throw new Error(`attesterThreshold is ${threshold} — quorum is not a quorum`)
+if (signers.length < 2) throw new Error(`only ${signers.length} quorum signature(s) on the settle tx`)
+if (new Set(signers).size !== signers.length) throw new Error(`duplicate quorum signers: ${signers}`)
+
 console.log('')
 console.log('=== SHARED-CLOB LIVE ON BASE SEPOLIA ===')
 console.log(`batchNonce:  ${nonce0} -> ${nonce}`)
-console.log(`fillsHash:   ${batchLog.args.fillsHash} (${batchLog.args.fillCount} fill, attested 2-of-2)`)
+console.log(`fillsHash:   ${batchLog.args.fillsHash} (${batchLog.args.fillCount} fill)`)
+console.log(`quorum:      ${signers.length}-of-threshold-${threshold}, distinct co-signers: ${signers.join(', ')}`)
 console.log(`tx:          https://sepolia.basescan.org/tx/${batchLog.transactionHash}`)
 console.log(`lot:         ${fillLog.args.lotId} — holder ${lot[0]}, issuer ${lot[1]}, ${lot[3]} tokens`)

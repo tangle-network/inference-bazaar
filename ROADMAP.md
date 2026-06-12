@@ -70,8 +70,10 @@ to the phase that delivers it.
   replay, claim/reclaim replay all revert (58 forge tests green). Venue side:
   `/redeem` is holder-gated by an EIP-712 `ServeRequest` signature binding the
   exact message bytes + token cap + expiry, with consumed-auth replay
-  rejection; per-IP token-bucket rate limiting across the HTTP surface
-  (10× cost on /redeem) — forged-signer, missing-auth, and 429 throttling all
+  rejection; per-IP token-bucket rate limiting on the merged HTTP app —
+  venue AND /clob surfaces, 10× cost on /redeem, 5× on /clob/propose —
+  enforced behind the XFF-setting proxy (Caddy); direct localhost fleet
+  gossip is exempt by design. Forged-signer, missing-auth, and 429 throttling
   verified against the live venue. Redemption-side per-owner spend caps:
   GuardedRedemptionAdapter (guard.test.ts).)*
 
@@ -273,7 +275,9 @@ to the phase that delivers it.
 | 7 Profit engine | ◕ sweep + discount-capture done; bandit deferred post-launch | — |
 | 8 Productionization | ◑ Hetzner fleet live, tcloud PR open (#41); audit/oracle/legal left | G6 |
 
-Tests today: 69 TS + 7 Rust green; operator (lite + blueprint) builds; venue
-runs inside a real `BlueprintRunner`; `@surplus/redemption` proves unit closure
-and plans the zero-router-change shielded spend rail. **Not yet live:** no
-on-chain job trigger, no live-router credit spend, no audited contracts.
+Tests: 58 forge + 46 Rust + the TS suites green. Live on Base Sepolia: on-chain
+job triggers (tick keepers), live-router credit spend (G1), cross-operator
+attested batches (shared CLOB). Still not done: contract audit (G6),
+slashing-backed redemption (G3), real SP1 proofs on-chain, and the
+multi-instance contract redesign (per-instance nonce/attesters/fees) — see
+`.evolve/critical-audit/2026-06-12T02:16:28Z/` for the full gap list.

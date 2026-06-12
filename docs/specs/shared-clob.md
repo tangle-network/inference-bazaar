@@ -7,7 +7,8 @@ one global settlement contract. This spec defines the three phases that take
 the product from "one operator's shop" to a top-tier aggregated market with a
 shared, verifiable order book.
 
-Status: Phase A in build. Phases B/C specified, not started.
+Status: Phase A live (registry + NBBO + SOR in the app). Phase C live on the
+attested path — see §3 for exactly what is proven vs open.
 
 ---
 

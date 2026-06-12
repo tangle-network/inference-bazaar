@@ -19,10 +19,10 @@
 //!
 //! Trust model: peers never trust the proposer (set-determinism lets them
 //! recompute the batch bit-for-bit), and the proposer never trusts peers (the
-//! contract re-verifies the quorum). Proposal requests are unauthenticated by
-//! design for now: an impersonated "proposal" still has to carry honestly signed
-//! orders and a reproducible match to collect signatures, so impersonation can
-//! only produce an honest batch (griefing is bounded by the rate limiter).
+//! contract re-verifies the quorum). Proposals are authenticated: each carries
+//! the elected proposer's signature over the claimed batch digest, verified
+//! with one ecrecover before any expensive work — co-sign side effects (pool
+//! prune, settled marking) are only reachable by the epoch's real proposer.
 //!
 //! Failure mode is liveness, never safety: orders touched by a co-signed batch
 //! leave the pool (re-matching a filled order would overfill and revert the next
