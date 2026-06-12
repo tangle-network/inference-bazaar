@@ -107,9 +107,20 @@ pub fn fills_hash(fills: &[BatchFill]) -> B256 {
 }
 
 /// The public values the SP1 batch program commits:
-/// `abi.encode(domainSeparator, fillsHash)`.
-pub fn batch_public_values(domain_separator: B256, fills_hash: B256) -> Vec<u8> {
-    (domain_separator, fills_hash).abi_encode()
+/// `abi.encode(domainSeparator, bookId, batchNonce, fillsHash)`.
+///
+/// `bookId` + `batchNonce` bind a proof to exactly one book at exactly one nonce,
+/// so a proof cannot be (a) replayed under a different — e.g. higher-fee — book,
+/// nor (b) re-submitted after the book's nonce advances (a partial-fill proof is
+/// otherwise replayable until the orders are exhausted). `settleBatchProven`
+/// re-derives the same tuple from `(bookId, book.nonce)` and reverts on mismatch.
+pub fn batch_public_values(
+    domain_separator: B256,
+    book_id: B256,
+    batch_nonce: u64,
+    fills_hash: B256,
+) -> Vec<u8> {
+    (domain_separator, book_id, batch_nonce, fills_hash).abi_encode()
 }
 
 pub fn instrument_hash(instrument_id: &str) -> B256 {

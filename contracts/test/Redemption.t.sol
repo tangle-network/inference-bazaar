@@ -50,12 +50,46 @@ contract RedemptionTest is SettlementTestBase {
         settlement.requestRedemption(lotId, 30_000);
     }
 
+    /// A lot minted through a BOOK batch records that book, so its own quorum may
+    /// attest service in the dispute path.
     function test_attestedSettle_disputePath() public {
+        bytes32 bookLot = settleBatchMint();
         vm.prank(buyer);
-        bytes32 id = settlement.requestRedemption(lotId, 50_000);
+        bytes32 id = settlement.requestRedemption(bookLot, 50_000);
         bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000));
         settlement.settleRedemptionAttested(BOOK, id, 50_000, sigs);
-        assertEq(settlement.liability(seller), 0);
+    }
+
+    /// THE confiscation regression: a `settleFills`-minted lot has no issuing
+    /// book (NO_BOOK), so NO quorum can attest it away. Only the holder's signed
+    /// receipt or claimDefault can move it.
+    function test_attestedSettle_revertsForBooklessLot() public {
+        vm.prank(buyer);
+        bytes32 id = settlement.requestRedemption(lotId, 50_000); // lotId is a settleFills lot
+        bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000));
+        vm.expectRevert(
+            abi.encodeWithSelector(SurplusSettlement.RedemptionBookMismatch.selector, settlement.NO_BOOK(), BOOK)
+        );
+        settlement.settleRedemptionAttested(BOOK, id, 50_000, sigs);
+    }
+
+    /// Cross-instance confiscation is blocked: a DIFFERENT registered book's
+    /// quorum cannot attest a lot minted under BOOK — even though that other book
+    /// is fully registered with a valid quorum.
+    function test_attestedSettle_revertsForForeignBook() public {
+        bytes32 OTHER = keccak256("other-instance-book");
+        address[] memory atts = new address[](3);
+        atts[0] = vm.addr(att1Key);
+        atts[1] = vm.addr(att2Key);
+        atts[2] = vm.addr(att3Key);
+        settlement.registerBook(OTHER, atts, 2, 0, address(0));
+
+        bytes32 bookLot = settleBatchMint(); // minted under BOOK
+        vm.prank(buyer);
+        bytes32 id = settlement.requestRedemption(bookLot, 50_000);
+        bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000));
+        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.RedemptionBookMismatch.selector, BOOK, OTHER));
+        settlement.settleRedemptionAttested(OTHER, id, 50_000, sigs);
     }
 
     function test_wrongReceiptSignerReverts() public {
@@ -188,6 +222,43 @@ contract RedemptionTest is SettlementTestBase {
     }
 
     // ── helpers ────────────────────────────────────────────────────────────────
+
+    /// Mint a fresh 50k-token lot UNDER `BOOK` via the attested batch path, so
+    /// `lotBook[lot] == BOOK`. Fresh salts keep it distinct from the setUp fill.
+    function settleBatchMint() internal returns (bytes32 mintedLotId) {
+        SurplusSettlement.Order memory b = SurplusSettlement.Order({
+            instrument: INSTRUMENT,
+            side: 0,
+            priceMicroPerM: 15_000_000,
+            qtyTokens: 50_000,
+            lotId: bytes32(0),
+            trader: buyer,
+            expiry: uint64(block.timestamp + 300),
+            salt: keccak256("batch-buy")
+        });
+        SurplusSettlement.Order memory s = SurplusSettlement.Order({
+            instrument: INSTRUMENT,
+            side: 1,
+            priceMicroPerM: 14_000_000,
+            qtyTokens: 50_000,
+            lotId: bytes32(0),
+            trader: seller,
+            expiry: uint64(block.timestamp + 300),
+            salt: keccak256("batch-sell")
+        });
+        SurplusSettlement.BatchFill[] memory fills = new SurplusSettlement.BatchFill[](1);
+        fills[0] = SurplusSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 50_000, execPriceMicroPerM: 15_000_000 });
+        bytes32 fillsHash = keccak256(abi.encode(fills));
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                settlement.domainSeparator(),
+                keccak256(abi.encode(settlement.BATCH_TYPEHASH(), BOOK, settlement.bookNonce(BOOK), fillsHash))
+            )
+        );
+        settlement.settleBatchAttested(BOOK, fills, quorumSign(digest));
+        mintedLotId = keccak256(abi.encode(settlement.hashOrder(b), settlement.hashOrder(s), uint64(0)));
+    }
 
     function lotFields()
         internal

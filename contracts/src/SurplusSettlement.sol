@@ -5,6 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { ECDSA } from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import { EIP712 } from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
@@ -36,11 +37,17 @@ import { ISP1Verifier } from "./interfaces/ISP1Verifier.sol";
 ///    Trustless; the default path.
 ///  - `settleBatch*`: signature-free fills, signature validity vouched by an
 ///    attester quorum (`Attested`) or an SP1 proof of the same statement
-///    (`Proven`). Everything except signature validity (limits, crossing,
+///    (`Proven`, public values `(domainSeparator, bookId, batchNonce,
+///    fillsHash)`). Everything except signature validity (limits, crossing,
 ///    cumulative fill caps, balance/collateral invariants) is still enforced
-///    here, so a malicious quorum cannot move funds without a matching order
-///    constraint — it can only vouch for signatures that were never made.
-contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
+///    here, so the quorum cannot invent balances. But be precise about what it
+///    CAN do: "vouch for signatures that were never made" IS the power to forge
+///    any order from any funded trader (drain their cash into a lot, or round-
+///    trip a rival issuer's collateral via claimDefault). The attested path's
+///    entire authenticity rests on quorum honesty; the proven path replaces that
+///    trust with a proof. Redemption attestation is bound to the lot's own
+///    issuing book (`lotBook`) so no foreign quorum can confiscate a credit.
+contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -154,8 +161,21 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
     mapping(bytes32 => bool) public cancelled;
 
     mapping(bytes32 => Lot) public lots;
+    /// lotId => the book whose attester quorum may attest service for this lot.
+    /// A lot minted through a book batch records that book; a lot minted on the
+    /// trustless `settleFills` path has no instance quorum and records `NO_BOOK`,
+    /// which is never a registrable book — so its only redemption paths are the
+    /// holder's own signed receipt and `claimDefault`. This binding is what stops
+    /// an UNRELATED book's quorum (another instance, or an owner-minted 1-of-1
+    /// book) from attesting away a holder's credit: `settleRedemptionAttested`
+    /// requires the passed book to equal the lot's issuing book.
+    mapping(bytes32 => bytes32) public lotBook;
     mapping(bytes32 => Redemption) public redemptions;
     mapping(bytes32 => bytes32) public openRedemptionOf; // lotId => open redemption id
+
+    /// Sentinel issuing-book for lots minted outside any book (the `settleFills`
+    /// path). `registerBook` rejects it, so no quorum can ever match it.
+    bytes32 public constant NO_BOOK = bytes32(type(uint256).max);
 
     DefaultRecord[] private _defaults;
     uint64 private _redemptionNonce;
@@ -200,6 +220,7 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
     event BookRegistered(
         bytes32 indexed bookId, address[] attesters, uint16 threshold, uint16 feeBps, address feeRecipient
     );
+    event AttestersRotated(bytes32 indexed bookId, address[] attesters, uint16 threshold);
     event Sp1VerifierSet(address verifier, bytes32 vkey);
 
     // ═══════════════════════════════════ Errors ══════════════════════════════════
@@ -231,6 +252,9 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
     error InvalidFee();
     error ProvenPathDisabled();
     error ZeroAmount();
+    error BookAlreadyRegistered(bytes32 bookId);
+    error ReservedBookId();
+    error RedemptionBookMismatch(bytes32 lotBookId, bytes32 attestedBookId);
 
     constructor(
         IERC20 _paymentToken,
@@ -332,7 +356,9 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
             FillInput calldata f = fills[i];
             bytes32 buyHash = _verifySig(f.buy, f.buySig);
             bytes32 sellHash = _verifySig(f.sell, f.sellSig);
-            _applyFill(f.buy, buyHash, f.sell, sellHash, f.qtyTokens, f.execPriceMicroPerM, 0, address(0));
+            // Trustless path: no book context, so any minted lot is `NO_BOOK`
+            // and not attestable by any quorum.
+            _applyFill(f.buy, buyHash, f.sell, sellHash, f.qtyTokens, f.execPriceMicroPerM, 0, address(0), NO_BOOK);
         }
     }
 
@@ -351,14 +377,19 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
 
     /// Compressed path, proof-vouched signatures. The SP1 program re-derives every
     /// order digest under this domain separator, recovers each signer, and commits
-    /// (domainSeparator, fillsHash) as public values — so a proof binds to exactly
-    /// this contract on exactly this chain and exactly these fills.
+    /// (domainSeparator, bookId, batchNonce, fillsHash) as public values — so a
+    /// proof binds to exactly this contract on exactly this chain, this book, at
+    /// this nonce, for these fills. The book+nonce binding stops a proof from
+    /// being replayed under another (e.g. higher-fee) book or re-submitted after
+    /// the book's nonce advances (a partial-fill proof would otherwise replay).
     function settleBatchProven(bytes32 bookId, BatchFill[] calldata fills, bytes calldata proof) external {
         if (address(sp1Verifier) == address(0)) revert ProvenPathDisabled();
         Book storage book = _books[bookId];
         if (book.threshold == 0) revert UnknownBook(bookId);
         bytes32 fillsHash = keccak256(abi.encode(fills));
-        sp1Verifier.verifyProof(batchProgramVKey, abi.encode(_domainSeparatorV4(), fillsHash), proof);
+        sp1Verifier.verifyProof(
+            batchProgramVKey, abi.encode(_domainSeparatorV4(), bookId, book.nonce, fillsHash), proof
+        );
         _applyBatch(bookId, book, fills, fillsHash, true);
     }
 
@@ -381,7 +412,8 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
                 f.qtyTokens,
                 f.execPriceMicroPerM,
                 book.feeBps,
-                book.feeRecipient
+                book.feeRecipient,
+                bookId
             );
         }
         emit BatchSettled(bookId, book.nonce, fillsHash, fills.length, proven);
@@ -411,7 +443,8 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
         uint64 qty,
         uint64 execPrice,
         uint16 bookFeeBps,
-        address bookFeeRecipient
+        address bookFeeRecipient,
+        bytes32 bookId
     )
         internal
     {
@@ -461,6 +494,8 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
                 expiry: uint64(block.timestamp) + creditTtl,
                 notionalMicro: uint128(cost)
             });
+            // Only this book's quorum may later attest service for the lot.
+            lotBook[newLotId] = bookId;
         } else {
             // Resale: carve qty out of the seller's lot. The buyer's refund value
             // is what they paid, capped at the carved pro-rata value, so issuer
@@ -491,7 +526,13 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
                 expiry: src.expiry,
                 notionalMicro: uint128(newNotional)
             });
-            if (src.qtyTokens == 0) delete lots[sell.lotId];
+            // Resale inherits the source lot's issuing book — the issuer's
+            // instance does not change, so its quorum's attestation rights carry.
+            lotBook[newLotId] = lotBook[sell.lotId];
+            if (src.qtyTokens == 0) {
+                delete lots[sell.lotId];
+                delete lotBook[sell.lotId];
+            }
         }
         emit FillSettled(buyHash, sellHash, buy.instrument, qty, execPrice, cost, newLotId);
     }
@@ -561,6 +602,13 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
         Book storage book = _books[bookId];
         if (book.threshold == 0) revert UnknownBook(bookId);
         Redemption storage r = _openRedemption(redemptionId);
+        // Only the lot's OWN issuing book may attest its service. Without this,
+        // any registered book's quorum — another instance, or an owner-minted
+        // 1-of-1 book — could mark the redemption Settled with servedTokens=qty
+        // and confiscate the holder's prepaid credit (and block claimDefault).
+        // A `settleFills`-minted lot records NO_BOOK and so has no attested path.
+        bytes32 issuingBook = lotBook[r.lotId];
+        if (issuingBook != bookId) revert RedemptionBookMismatch(issuingBook, bookId);
         _verifyQuorum(book, receiptDigest(redemptionId, servedTokens), sigs);
         _settleRedemption(r, redemptionId, servedTokens);
     }
@@ -628,12 +676,19 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
 
     // ═══════════════════════════════ Attesters + SP1 ═════════════════════════════
 
-    /// Register (or rotate) a matching domain: its attester quorum, threshold,
-    /// and the fee cut routed to whoever funds/operates the instance behind it.
-    /// Owner-gated for the same reason the old global set was: an attester
-    /// quorum can vouch for order signatures the contract never sees, so book
-    /// membership is exactly as trust-critical as the old `setAttesters`. The
-    /// proven (SP1) path is what eventually makes this permissionless.
+    /// Register a matching domain ONCE: its attester quorum, threshold, and the
+    /// fee cut routed to whoever funds/operates the instance behind it. Owner-
+    /// gated for the same reason the old global set was: an attester quorum can
+    /// vouch for order signatures the contract never sees, so book membership is
+    /// exactly as trust-critical as the old `setAttesters`. The proven (SP1) path
+    /// is what eventually makes this permissionless.
+    ///
+    /// First-registration-only: a book's fee/recipient are write-once. Re-pricing
+    /// an already-registered book would skim a fee a seller never signed for off
+    /// already-resting orders (the order carries no fee commitment and the fee is
+    /// outside the attested digest), so it is forbidden — change economics by
+    /// registering a NEW bookId and migrating the matcher to it. Operator churn
+    /// goes through `rotateAttesters`, which never touches fee/recipient.
     function registerBook(
         bytes32 bookId,
         address[] calldata signers,
@@ -644,8 +699,28 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
         external
         onlyOwner
     {
-        if (bookFeeBps > 1000 || (bookFeeBps > 0 && bookFeeRecipient == address(0))) revert InvalidFee();
+        if (bookId == NO_BOOK) revert ReservedBookId();
         Book storage book = _books[bookId];
+        if (book.threshold != 0) revert BookAlreadyRegistered(bookId);
+        if (bookFeeBps > 1000 || (bookFeeBps > 0 && bookFeeRecipient == address(0))) revert InvalidFee();
+        for (uint256 i = 0; i < signers.length; i++) {
+            book.attesters.add(signers[i]);
+        }
+        if (threshold < 1 || threshold > book.attesters.length()) revert InvalidThreshold();
+        book.threshold = threshold;
+        book.feeBps = bookFeeBps;
+        book.feeRecipient = bookFeeRecipient;
+        emit BookRegistered(bookId, signers, threshold, bookFeeBps, bookFeeRecipient);
+    }
+
+    /// Rotate a registered book's attester set + threshold for operator churn.
+    /// Deliberately CANNOT change the book's fee/recipient (those are write-once
+    /// in `registerBook`). Still owner-gated; the durable answer is registry-
+    /// driven membership projected from the bonded operator set, with the owner
+    /// behind a timelock + multisig (see deploy).
+    function rotateAttesters(bytes32 bookId, address[] calldata signers, uint16 threshold) external onlyOwner {
+        Book storage book = _books[bookId];
+        if (book.threshold == 0) revert UnknownBook(bookId);
         uint256 n = book.attesters.length();
         for (uint256 i = n; i > 0; i--) {
             book.attesters.remove(book.attesters.at(i - 1));
@@ -655,9 +730,7 @@ contract SurplusSettlement is EIP712, Ownable, ReentrancyGuard {
         }
         if (threshold < 1 || threshold > book.attesters.length()) revert InvalidThreshold();
         book.threshold = threshold;
-        book.feeBps = bookFeeBps;
-        book.feeRecipient = bookFeeRecipient;
-        emit BookRegistered(bookId, signers, threshold, bookFeeBps, bookFeeRecipient);
+        emit AttestersRotated(bookId, signers, threshold);
     }
 
     function setSp1Verifier(address verifier, bytes32 vkey) external onlyOwner {

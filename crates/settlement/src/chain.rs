@@ -51,6 +51,7 @@ sol! {
         function settleRedemption(bytes32 redemptionId, uint64 servedTokens, bytes calldata holderSig) external;
         function claimDefault(bytes32 redemptionId) external returns (uint256);
         function registerBook(bytes32 bookId, address[] calldata signers, uint16 threshold, uint16 bookFeeBps, address bookFeeRecipient) external;
+        function rotateAttesters(bytes32 bookId, address[] calldata signers, uint16 threshold) external;
         function bookAttesters(bytes32 bookId) external view returns (address[] memory);
         function bookThreshold(bytes32 bookId) external view returns (uint16);
         function setSp1Verifier(address verifier, bytes32 vkey) external;
@@ -331,6 +332,25 @@ impl SettlementClient {
             .get_receipt()
             .await?;
         anyhow::ensure!(r.status(), "registerBook reverted");
+        Ok(())
+    }
+
+    /// Rotate a book's attester set + threshold for operator churn. Cannot touch
+    /// the book's fee/recipient (write-once in `registerBook`).
+    pub async fn rotate_attesters(
+        &self,
+        book_id: B256,
+        signers: Vec<Address>,
+        threshold: u16,
+    ) -> anyhow::Result<()> {
+        let r = self
+            .contract
+            .rotateAttesters(book_id, signers, threshold)
+            .send()
+            .await?
+            .get_receipt()
+            .await?;
+        anyhow::ensure!(r.status(), "rotateAttesters reverted");
         Ok(())
     }
 

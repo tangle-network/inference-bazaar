@@ -15,7 +15,7 @@ use sp1_sdk::blocking::{ProveRequest, Prover, ProverClient};
 use sp1_sdk::{include_elf, HashableKey, ProvingKey, SP1Stdin};
 use surplus_batch_types::{ProgramInput, ProvenFill};
 use surplus_settlement::SignedFill;
-use surplus_settlement_core::alloy_primitives::{hex, Address};
+use surplus_settlement_core::alloy_primitives::{hex, Address, B256};
 use surplus_settlement_core::{batch_public_values, domain, fills_hash};
 
 const ELF: sp1_sdk::Elf = include_elf!("surplus-batch-program");
@@ -24,6 +24,8 @@ struct Args {
     fills: String,
     chain_id: u64,
     contract: Address,
+    book_id: B256,
+    batch_nonce: u64,
     mode: String,
     out: String,
 }
@@ -33,9 +35,12 @@ fn parse_args() -> Result<Args> {
         fills: String::new(),
         chain_id: 0,
         contract: Address::ZERO,
+        book_id: B256::ZERO,
+        batch_nonce: 0,
         mode: "execute".into(),
         out: "proof.json".into(),
     };
+    let mut book_id_set = false;
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut value = || it.next().context(format!("missing value for {flag}"));
@@ -43,13 +48,18 @@ fn parse_args() -> Result<Args> {
             "--fills" => args.fills = value()?,
             "--chain-id" => args.chain_id = value()?.parse()?,
             "--contract" => args.contract = value()?.parse()?,
+            "--book-id" => {
+                args.book_id = value()?.parse()?;
+                book_id_set = true;
+            }
+            "--batch-nonce" => args.batch_nonce = value()?.parse()?,
             "--mode" => args.mode = value()?,
             "--out" => args.out = value()?,
             other => bail!("unknown flag {other}"),
         }
     }
-    if args.fills.is_empty() || args.chain_id == 0 || args.contract == Address::ZERO {
-        bail!("required: --fills <json> --chain-id <id> --contract <address>");
+    if args.fills.is_empty() || args.chain_id == 0 || args.contract == Address::ZERO || !book_id_set {
+        bail!("required: --fills <json> --chain-id <id> --contract <address> --book-id <bytes32> [--batch-nonce <n>]");
     }
     Ok(args)
 }
@@ -71,6 +81,8 @@ fn main() -> Result<()> {
     let input = ProgramInput {
         chain_id: args.chain_id,
         verifying_contract: args.contract,
+        book_id: args.book_id,
+        batch_nonce: args.batch_nonce,
         fills: signed
             .iter()
             .map(|f| ProvenFill {
@@ -87,7 +99,8 @@ fn main() -> Result<()> {
     // What the program MUST commit, computed independently on the host.
     let dom = domain(args.chain_id, args.contract);
     let batch_fills: Vec<_> = signed.iter().map(SignedFill::batch_fill).collect();
-    let expected = batch_public_values(dom.separator(), fills_hash(&batch_fills));
+    let expected =
+        batch_public_values(dom.separator(), args.book_id, args.batch_nonce, fills_hash(&batch_fills));
 
     let mut stdin = SP1Stdin::new();
     stdin.write(&input);

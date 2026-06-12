@@ -182,14 +182,17 @@ async fn main() -> anyhow::Result<()> {
     assert_eq!(operator.defaults_count().await?, U256::from(1u64));
     println!("default claimed: holder repaid $0.735 (incl. 5% penalty) from issuer collateral");
 
-    // ── 4. Attested batch: 2-of-3 quorum vouches signatures ──────────────────
+    // ── 4. Attested batch: 2-of-3 quorum vouches signatures for one book ─────
+    let book_id = B256::with_last_byte(0xb0);
     let attesters: Vec<Signer> = [0xA1u8, 0xA2, 0xA3]
         .iter()
         .map(|b| Signer::from_hex(&format!("{:02x}", b).repeat(32)).unwrap())
         .collect();
     let mut addrs: Vec<Address> = attesters.iter().map(Signer::address).collect();
     addrs.sort();
-    operator.set_attesters(addrs.clone(), 2).await?;
+    operator
+        .register_book(book_id, addrs.clone(), 2, 0, Address::ZERO)
+        .await?;
     let mut batch = Batch::default();
     batch.push(SignedFill::pair(
         seller.sign_order(
@@ -204,8 +207,8 @@ async fn main() -> anyhow::Result<()> {
         4_000_000_000 - 1,
         &dom,
     )?);
-    let nonce = operator.batch_nonce().await?;
-    let digest = batch.attestation_digest(nonce, &dom);
+    let nonce = operator.book_nonce(book_id).await?;
+    let digest = batch.attestation_digest(book_id, nonce, &dom);
     let sigs = surplus_settlement::sort_quorum_sigs(
         digest,
         attesters
@@ -214,14 +217,14 @@ async fn main() -> anyhow::Result<()> {
             .collect(),
     );
     operator
-        .settle_batch_attested(&batch, sigs[..2].to_vec())
+        .settle_batch_attested(book_id, &batch, sigs[..2].to_vec())
         .await?;
     println!(
-        "attested batch settled (2-of-3 quorum), batchNonce -> {}",
+        "attested batch settled (2-of-3 quorum), book nonce -> {}",
         nonce + 1
     );
 
-    // ── 5. Proven batch: strict mock pins (domainSeparator, fillsHash) ───────
+    // ── 5. Proven batch: strict mock pins (domainSeparator, bookId, nonce, fillsHash) ──
     let vkey = B256::with_last_byte(0x42);
     operator.set_sp1_verifier(verifier_addr, vkey).await?;
     let mut batch2 = Batch::default();
@@ -238,8 +241,13 @@ async fn main() -> anyhow::Result<()> {
         4_000_000_000 - 1,
         &dom,
     )?);
-    let public_values =
-        surplus_settlement::batch_public_values(dom.separator(), batch2.fills_hash());
+    let proven_nonce = operator.book_nonce(book_id).await?;
+    let public_values = surplus_settlement::batch_public_values(
+        dom.separator(),
+        book_id,
+        proven_nonce,
+        batch2.fills_hash(),
+    );
     // expect() is permissionless; use a key no other provider here shares so
     // cached nonce managers never fight (anvil funded key #1).
     let primer_wallet = ProviderBuilder::new()
@@ -255,7 +263,7 @@ async fn main() -> anyhow::Result<()> {
         .get_receipt()
         .await?;
     operator
-        .settle_batch_proven(&batch2, vec![0xde, 0xad])
+        .settle_batch_proven(book_id, &batch2, vec![0xde, 0xad])
         .await?;
     println!("proven batch settled against strict verifier (publicValues bound)");
 

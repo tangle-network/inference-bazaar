@@ -6,7 +6,8 @@
 //! collateral invariants) the contract re-enforces on-chain from the calldata
 //! fills, so the trusted computing base of the proven path is exactly:
 //! "these orders were really signed". Public values bind the proof to one
-//! deployment and one fill set: `abi.encode(domainSeparator, fillsHash)`.
+//! deployment, one book, and one nonce:
+//! `abi.encode(domainSeparator, bookId, batchNonce, fillsHash)`.
 
 #![no_main]
 sp1_zkvm::entrypoint!(main);
@@ -32,6 +33,11 @@ fn main() {
         });
     }
 
-    let public = batch_public_values(dom.separator(), fills_hash(&fills));
+    let public = batch_public_values(
+        dom.separator(),
+        input.book_id,
+        input.batch_nonce,
+        fills_hash(&fills),
+    );
     sp1_zkvm::io::commit_slice(&public);
 }
