@@ -52,7 +52,10 @@ pub fn inc(name: &'static str) {
 
 pub fn inc_by(name: &'static str, n: u64) {
     let mut map = metrics().counters.lock().unwrap();
-    map.entry(name).or_default().total.fetch_add(n, Ordering::Relaxed);
+    map.entry(name)
+        .or_default()
+        .total
+        .fetch_add(n, Ordering::Relaxed);
 }
 
 /// `metrics::inc_labeled("surplus_clob_attestations_refused_total", "forged")`.
@@ -61,7 +64,11 @@ pub fn inc_labeled(name: &'static str, label: &str) {
     let mut map = m.counters.lock().unwrap();
     let c = map.entry(name).or_default();
     c.total.fetch_add(1, Ordering::Relaxed);
-    *c.labeled.lock().unwrap().entry(label.to_string()).or_insert(0) += 1;
+    *c.labeled
+        .lock()
+        .unwrap()
+        .entry(label.to_string())
+        .or_insert(0) += 1;
 }
 
 /// Absolute value (pool depth, outbox depth). Last writer wins.
@@ -77,9 +84,19 @@ pub fn set_gauge(name: &'static str, value: i64) {
 pub fn init() {
     use names::*;
     for c in [
-        EPOCHS_RUN, QUORUM_REACHED, QUORUM_FAILED, ATTEST_SIGNED, ATTEST_REFUSED,
-        BATCHES_SUBMITTED, SUBMIT_REVERTS, GOSSIP_SEND_FAILURES, FILLS, SPEND_KEYS,
-        SPEND_SERVED_TOKENS, SPEND_SETTLED_TOKENS, REDEEM_SERVED_TOKENS,
+        EPOCHS_RUN,
+        QUORUM_REACHED,
+        QUORUM_FAILED,
+        ATTEST_SIGNED,
+        ATTEST_REFUSED,
+        BATCHES_SUBMITTED,
+        SUBMIT_REVERTS,
+        GOSSIP_SEND_FAILURES,
+        FILLS,
+        SPEND_KEYS,
+        SPEND_SERVED_TOKENS,
+        SPEND_SETTLED_TOKENS,
+        REDEEM_SERVED_TOKENS,
     ] {
         inc_by(c, 0);
     }
@@ -123,7 +140,8 @@ impl Metrics {
         REPUTABLE
             .iter()
             .filter_map(|&name| {
-                map.get(name).map(|c| (name.to_string(), c.total.load(Ordering::Relaxed)))
+                map.get(name)
+                    .map(|c| (name.to_string(), c.total.load(Ordering::Relaxed)))
             })
             .collect()
     }
@@ -211,6 +229,8 @@ mod tests {
         let served = pairs.iter().find(|(k, _)| k == names::SPEND_SERVED_TOKENS);
         assert_eq!(served.map(|(_, v)| *v), Some(137).map(|v| v as u64));
         // Adversarial / gauge series never appear in the on-chain reputation set.
-        assert!(!pairs.iter().any(|(k, _)| k == names::ATTEST_REFUSED || k == names::POOL_SIZE));
+        assert!(!pairs
+            .iter()
+            .any(|(k, _)| k == names::ATTEST_REFUSED || k == names::POOL_SIZE));
     }
 }

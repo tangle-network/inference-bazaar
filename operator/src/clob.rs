@@ -767,6 +767,61 @@ impl Clob {
         self.persist_finality();
     }
 
+    /// Evict orders from the pool by EIP-712 digest (the pool key). Used to drop
+    /// orders the pre-match simulation proved unsettleable, so they neither
+    /// re-match this epoch nor recur next epoch.
+    #[cfg(feature = "chain")]
+    fn evict(&self, doomed: &std::collections::HashSet<B256>) {
+        let mut pool = self.pool.lock().unwrap();
+        pool.retain(|d, _| !doomed.contains(d));
+        crate::metrics::set_gauge(crate::metrics::names::POOL_SIZE, pool.len() as i64);
+    }
+
+    /// Replicate `_applyFill`'s preconditions against LIVE chain state and return
+    /// the EIP-712 digests of orders that would make the batch revert. Every
+    /// check is CONSERVATIVE — it flags only orders that are DEFINITELY
+    /// unsettleable (cancelled, expired, overfilled, buyer can't pay, seller
+    /// can't back a mint), never a marginal one — so a good order is never
+    /// wrongly evicted; the contract stays the final arbiter for the edge.
+    #[cfg(feature = "chain")]
+    async fn simulate_doomed(
+        &self,
+        fills: &[BatchFill],
+        domain: &surplus_settlement::Eip712Domain,
+    ) -> anyhow::Result<std::collections::HashSet<B256>> {
+        use surplus_settlement::core::{order_struct_hash, SIDE_BUY};
+        let Some(client) = self.chain_client().await? else {
+            return Ok(Default::default()); // no chain configured: cannot simulate
+        };
+        let now = now_unix();
+        let mut doomed = std::collections::HashSet::new();
+        for f in fills {
+            let qty = f.qtyTokens;
+            // exec-price * qty / 1e6, half-up — mirrors the contract's `cost`.
+            let cost = U256::from(f.execPriceMicroPerM) * U256::from(qty);
+            let cost = (cost + U256::from(500_000u64)) / U256::from(1_000_000u64);
+            for (o, is_buy) in [(&f.buy, true), (&f.sell, false)] {
+                let h = order_struct_hash(o);
+                if now > o.expiry
+                    || client.cancelled(h).await?
+                    || client.filled(h).await?.saturating_add(qty) > o.qtyTokens
+                {
+                    doomed.insert(order_digest(o, domain));
+                    continue;
+                }
+                if is_buy {
+                    if client.balance_of(o.trader).await? < cost {
+                        doomed.insert(order_digest(o, domain)); // buyer withdrew (the H3 grief)
+                    }
+                } else if o.lotId == B256::ZERO && client.free_collateral(o.trader).await? < cost {
+                    doomed.insert(order_digest(o, domain)); // issuer can't back the mint
+                }
+            }
+            let _ = SIDE_BUY;
+        }
+        Ok(doomed)
+    }
+
     // ───────────────────────────── Proposer side ─────────────────────────────
 
     /// Run one epoch as proposer: match, broadcast, collect quorum, submit.
@@ -796,13 +851,49 @@ impl Clob {
         self: &Arc<Self>,
         epoch: u64,
         inst: &Instrument,
-        snapshot: Vec<SignedOrder>,
+        mut snapshot: Vec<SignedOrder>,
     ) -> anyhow::Result<Option<Value>> {
         let domain = self.domain().clone();
-        let inner: Vec<Order> = snapshot.iter().map(|s| s.order.clone()).collect();
-        let batch = match_epoch(&inst.id, inst.tick_size, inst.min_qty, &domain, &inner);
+
+        // Pre-match simulation (audit H3). `match_epoch` is chain-state-free, so
+        // a crossed batch can still contain a fill that reverts on-chain — a
+        // buyer who withdrew their balance, a cancelled/overfilled order — and
+        // because `_applyBatch` is all-or-nothing that one fill would lose the
+        // whole epoch's batch, stranding the GOOD orders in it. So before we
+        // ask peers to co-sign, replicate `_applyFill`'s preconditions against
+        // live chain state, evict the doomed orders, and re-match the clean set.
+        // Peers then only ever co-sign a batch that will actually settle. A
+        // bounded loop converges; without the chain feature this is a no-op.
+        let mut batch = match_epoch(
+            &inst.id,
+            inst.tick_size,
+            inst.min_qty,
+            &domain,
+            &orders_of(&snapshot),
+        );
+        #[cfg(feature = "chain")]
+        for _ in 0..3 {
+            if batch.fills.is_empty() {
+                break;
+            }
+            let doomed = self.simulate_doomed(&batch.fills, &domain).await?;
+            if doomed.is_empty() {
+                break;
+            }
+            self.evict(&doomed);
+            snapshot.retain(|s| !doomed.contains(&order_digest(&s.order, &domain)));
+            batch = match_epoch(
+                &inst.id,
+                inst.tick_size,
+                inst.min_qty,
+                &domain,
+                &orders_of(&snapshot),
+            );
+        }
+        let _ = &mut snapshot;
+
         if batch.fills.is_empty() {
-            return Ok(None); // nothing crossed; pool carries to the next epoch
+            return Ok(None); // nothing crossed (or all doomed); pool carries on
         }
 
         let batch_nonce = self.read_batch_nonce().await?;
@@ -852,9 +943,10 @@ impl Clob {
         };
         crate::metrics::inc(crate::metrics::names::QUORUM_REACHED);
 
-        // Quorum reached: the batch is final for the network. Prune before
-        // submitting — co-signers already pruned, and re-matching filled orders
-        // would poison the next epoch.
+        // Quorum reached on a pre-simulated batch (every fill checked against
+        // live chain state above), so it is expected to settle. Prune — peers
+        // co-signed the same clean set; re-matching filled orders would poison
+        // the next epoch.
         self.prune_filled(&batch.fills);
         let submitted = match self.submit(&batch.fills, sigs).await {
             Ok(tx) => {
@@ -1343,4 +1435,9 @@ mod finality_tests {
         assert_eq!(attest_deadline(5), Duration::from_millis(4000)); // 80%
         assert_eq!(attest_deadline(1), Duration::from_millis(1000)); // floor
     }
+}
+
+/// Extract the inner orders from a set of signed orders for matching.
+fn orders_of(signed: &[SignedOrder]) -> Vec<Order> {
+    signed.iter().map(|s| s.order.clone()).collect()
 }

@@ -103,7 +103,7 @@ if (nonce === nonce0) {
 // On-chain proof: the batch event, the moved balances, the minted lot.
 const [batchLog] = await pub.getLogs({
   address: SETTLEMENT,
-  event: parseAbiItem('event BatchSettled(bytes32 indexed bookId, uint64 indexed batchNonce, bytes32 fillsHash, uint256 fillCount, bool proven)'),
+  event: parseAbiItem('event BatchSettled(bytes32 indexed bookId, uint64 indexed batchNonce, bytes32 fillsHash, uint256 fillCount, bool proven, bytes32 ordersCommitment)'),
   fromBlock: 0n,
 })
 const [fillLog] = await pub.getLogs({

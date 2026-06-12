@@ -12,9 +12,9 @@ pub mod config;
 pub mod http;
 pub mod inference;
 pub mod market;
-pub mod metrics;
 #[cfg(feature = "mesh")]
 pub mod mesh;
+pub mod metrics;
 pub mod ratelimit;
 pub mod redeem;
 pub mod sidecar;
