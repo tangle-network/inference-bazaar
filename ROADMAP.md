@@ -60,7 +60,7 @@ to the phase that delivers it.
   output tokens at $13.546/M = 0.27092 USDC, collateral-backed lot
   `0xa9c85825…` minted — then spent it on a real router completion: 32 metered
   tokens debited 20,000→19,968 releasing exactly 433 micro-USDC at the locked
-  strike, redemption `0xbbf7c74e…` settled. The tsUSD rail (`0x1cD49739…`,
+  strike, redemption `0xbbf7c74e…` settled. The tsUSD rail (`0x3fa62248…`,
   tx `0x15a70fa6…`) remains the app's demo rail.)*
 - [ ] **G6 — Contracts audited.** Every contract on the value path has a review
   sign-off. *(Phase 8)*
@@ -167,7 +167,7 @@ to the phase that delivers it.
   epoch proposer runs the set-deterministic matcher kernel, the peer
   independently re-verifies (trader sigs + exact match recompute + censorship)
   and co-signs, 2-of-2 quorum settles `settleBatchAttested`. **Done live
-  2026-06-11:** batchNonce 0→1 on `0x1cD49739…`, sell entered at service 3
+  2026-06-11:** batchNonce 0→1 on `0x3fa62248…`, sell entered at service 3
   and buy at service 4,
   <https://sepolia.basescan.org/tx/0x388f4408a4cd25de682facf15826e2c170397dc8ed5c93446a930d60435eed96>.
   Rehearsable e2e: `scripts/clob-e2e.sh` (anvil) and `scripts/clob-e2e-live.mjs`.
@@ -275,7 +275,11 @@ to the phase that delivers it.
 | 7 Profit engine | ◕ sweep + discount-capture done; bandit deferred post-launch | — |
 | 8 Productionization | ◑ Hetzner fleet live, tcloud PR open (#41); audit/oracle/legal left | G6 |
 
-Tests: 58 forge + 46 Rust + the TS suites green. Live on Base Sepolia: on-chain
+**Contract cutover 2026-06-12:** the live tsUSD rail is SurplusSettlement v2
+`0x3fa622488fD970ECdE23b8384a98de6fFa5A1763` (per-book matching domains).
+Tx hashes recorded before this date settled on the v1 contract
+(`0x1cD49739…`, still on-chain, retired). Tests: 58 forge + 46 Rust + the TS
+suites green. Live on Base Sepolia: on-chain
 job triggers (tick keepers), live-router credit spend (G1), cross-operator
 attested batches (shared CLOB). Still not done: contract audit (G6),
 slashing-backed redemption (G3), real SP1 proofs on-chain, and the

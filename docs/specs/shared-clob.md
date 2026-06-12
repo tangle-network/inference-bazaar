@@ -157,7 +157,7 @@ that's fixed upstream. BSM fraud-claim wiring remains open.
 **Acceptance (Phase C):**
 - [x] Two operators run the matcher rotation; a third-party wallet's limit
   order fills against flow entered at a DIFFERENT operator in an epoch batch
-  (live 2026-06-11: batchNonce 0→1 on `0x1cD49739…`, tx
+  (live 2026-06-11: batchNonce 0→1 on `0x3fa62248…`, tx
   `0x388f4408a4cd25de682facf15826e2c170397dc8ed5c93446a930d60435eed96`).
 - [x] A batch settles via quorum attestation on Base Sepolia (same tx);
   tampered batches are rejected — on-chain by `_verifyQuorum` (Batch.t.sol),

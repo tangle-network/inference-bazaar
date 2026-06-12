@@ -12,7 +12,7 @@ import { baseSepolia } from 'viem/chains'
 
 const RPC = process.env.RPC ?? 'https://sepolia.base.org'
 const VENUE = process.env.VENUE ?? 'https://surplus.178.104.232.124.sslip.io'
-const SETTLEMENT = process.env.SETTLEMENT ?? '0x1cD49739e9CF48C4906aDb44021dd8cE0d8aBa64'
+const SETTLEMENT = process.env.SETTLEMENT ?? '0x3fa622488fD970ECdE23b8384a98de6fFa5A1763'
 const LOT_ID = process.env.LOT_ID ?? '0xd66a364788d3e21840916446be91040a0a746db9f255e8a9243688a7b7f6d5ac'
 const REDEEM_QTY = BigInt(process.env.REDEEM_QTY ?? 50_000)
 

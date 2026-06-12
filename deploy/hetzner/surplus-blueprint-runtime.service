@@ -22,7 +22,7 @@ Environment=SURPLUS_OPERATOR_ADDR=127.0.0.1:9400
 Environment=SURPLUS_MM_SIZE=2000000
 Environment=SURPLUS_MM_LEVELS=4
 Environment=SURPLUS_CHAIN_ID=84532
-Environment=SURPLUS_SETTLEMENT_ADDR=0x1cD49739e9CF48C4906aDb44021dd8cE0d8aBa64
+Environment=SURPLUS_SETTLEMENT_ADDR=0x3fa622488fD970ECdE23b8384a98de6fFa5A1763
 Environment=SURPLUS_OPERATOR_KEY=<issuer-key>
 Environment=SURPLUS_RPC_URL=https://sepolia.base.org
 ExecStart=/opt/surplus/surplus-operator run
