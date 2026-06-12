@@ -2,9 +2,10 @@
 //! `surplus_matcher`'s pure consensus.
 //!
 //! Per epoch (a fixed wall-clock window, `SURPLUS_CLOB_EPOCH_SECS`):
-//!   1. Signed orders arrive at any operator (`POST /clob/order`) and are
-//!      relayed once to every peer (`POST /clob/gossip`) — all operators
-//!      accumulate the same order pool.
+//!   1. Signed orders arrive at any operator (`POST /clob/order`) and fan out
+//!      to every peer over the [`ClobNet`] transport — the HTTP peer list, or
+//!      (feature `mesh`) blueprint-networking's PKI-gated gossip — so all
+//!      operators accumulate the same order pool.
 //!   2. At the epoch boundary the elected proposer (`elect_proposer`: round-robin
 //!      over the configured bonded set) snapshots its pool per instrument, runs
 //!      `match_epoch`, and broadcasts the proposal — the order SET it matched,
@@ -34,6 +35,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -111,6 +113,120 @@ impl ClobConfig {
     }
 }
 
+// ─────────────────────────────── Transport seam ──────────────────────────────
+
+/// How the epoch service reaches its peers: order fanout and the proposer's
+/// co-signature round. Two transports implement it — [`HttpNet`] (static peer
+/// URL list, plain HTTP) and `mesh::MeshNet` (feature `mesh`):
+/// blueprint-networking's PKI-gated gossip, where only the whitelisted bonded
+/// operator set can complete a handshake, let alone speak. Consensus safety
+/// never rests on the transport (signatures authenticate everything end to
+/// end); the transport decides who can spam you.
+#[async_trait]
+pub trait ClobNet: Send + Sync {
+    /// Best-effort one-hop fanout of an admitted order. Loss surfaces as a
+    /// censorship verdict at verification time, never as silent divergence.
+    fn gossip_order(&self, w: &WireOrder);
+
+    /// Broadcast a proposal and collect peer co-signatures over `digest` until
+    /// `want` arrive or the transport's deadline passes. Self-attestation is
+    /// the caller's job; returned signatures are validated by
+    /// `aggregate_attestation`, so the transport may return garbage safely.
+    async fn collect_attestations(
+        &self,
+        wire: &WireProposal,
+        digest: B256,
+        want: usize,
+    ) -> Vec<Attestation>;
+}
+
+/// The static peer-list HTTP transport (`SURPLUS_CLOB_OPERATORS`).
+pub struct HttpNet {
+    me: Address,
+    operators: Vec<(Address, String)>,
+    http: reqwest::Client,
+}
+
+impl HttpNet {
+    pub fn new(cfg: &ClobConfig, me: Address) -> Self {
+        HttpNet {
+            me,
+            operators: cfg.operators.clone(),
+            http: reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .expect("reqwest client"),
+        }
+    }
+
+    async fn request_attestation(
+        &self,
+        peer_url: &str,
+        wire: &WireProposal,
+    ) -> anyhow::Result<Attestation> {
+        let resp = self
+            .http
+            .post(format!("{peer_url}/clob/propose"))
+            .json(wire)
+            .send()
+            .await?;
+        anyhow::ensure!(
+            resp.status().is_success(),
+            "{}: {}",
+            resp.status(),
+            resp.text().await.unwrap_or_default()
+        );
+        let att: WireAttestation = resp.json().await?;
+        Ok(Attestation {
+            attester: att.attester,
+            signature: surplus_settlement::core::hex::decode(
+                att.signature.trim_start_matches("0x"),
+            )?,
+        })
+    }
+}
+
+#[async_trait]
+impl ClobNet for HttpNet {
+    fn gossip_order(&self, w: &WireOrder) {
+        for (addr, url) in &self.operators {
+            if *addr == self.me {
+                continue;
+            }
+            let http = self.http.clone();
+            let url = format!("{url}/clob/gossip");
+            let body = w.clone();
+            tokio::spawn(async move {
+                if let Err(e) = http.post(&url).json(&body).send().await {
+                    tracing::warn!(%url, "gossip relay failed: {e}");
+                }
+            });
+        }
+    }
+
+    async fn collect_attestations(
+        &self,
+        wire: &WireProposal,
+        _digest: B256,
+        want: usize,
+    ) -> Vec<Attestation> {
+        let mut out = Vec::new();
+        for (addr, url) in &self.operators {
+            if *addr == self.me {
+                continue;
+            }
+            match self.request_attestation(url, wire).await {
+                Ok(att) => out.push(att),
+                Err(e) => tracing::warn!(peer = %url, "attestation refused: {e}"),
+            }
+            if out.len() >= want {
+                break;
+            }
+        }
+        out
+    }
+}
+
 // ─────────────────────────────── Service state ───────────────────────────────
 
 struct PoolEntry {
@@ -126,26 +242,49 @@ pub struct Clob {
     /// Gossiped order pool, keyed by order digest. Orders persist across epochs
     /// until matched, expired, or evicted.
     pool: Mutex<HashMap<B256, PoolEntry>>,
+    /// Digest → expiry of every order a co-signed batch ever touched. A settled
+    /// order is a signed public object — replaying it (late gossip, or an
+    /// attacker) would re-admit it, re-match it next epoch, and revert that
+    /// whole batch on the contract's `filled` cap: a liveness grief. This set
+    /// makes settlement final at admission; it self-bounds by order expiry.
+    settled: Mutex<HashMap<B256, u64>>,
     /// Last epoch this node ran as proposer (idempotence for the driver loop).
     last_epoch: AtomicU64,
-    http: reqwest::Client,
+    net: Arc<dyn ClobNet>,
 }
 
 pub type SharedClob = Arc<Clob>;
 
 impl Clob {
-    /// Requires a settlement-configured venue with an operator key — the key is
-    /// the attester identity that co-signs batches.
-    pub fn new(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<Self> {
+    /// The attester identity a settlement-configured venue signs with.
+    fn attester_of(venue: &Venue) -> anyhow::Result<Address> {
         let ctx = venue
             .settle
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("shared CLOB requires settlement config"))?;
-        let me = ctx
+        Ok(ctx
             .signer
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("shared CLOB requires SURPLUS_OPERATOR_KEY"))?
-            .address();
+            .address())
+    }
+
+    /// HTTP-transport service (the `SURPLUS_CLOB_OPERATORS` peer list).
+    pub fn new(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<Self> {
+        let me = Self::attester_of(&venue)?;
+        let net = Arc::new(HttpNet::new(&cfg, me));
+        Self::with_net(venue, cfg, net)
+    }
+
+    /// Service over an explicit transport (the mesh path constructs `MeshNet`
+    /// and passes it here). Requires a settlement-configured venue with an
+    /// operator key — the key is the attester identity that co-signs batches.
+    pub fn with_net(
+        venue: Arc<Venue>,
+        cfg: ClobConfig,
+        net: Arc<dyn ClobNet>,
+    ) -> anyhow::Result<Self> {
+        let me = Self::attester_of(&venue)?;
         anyhow::ensure!(
             cfg.operators.iter().any(|(a, _)| *a == me),
             "this operator ({me:#x}) is not in SURPLUS_CLOB_OPERATORS"
@@ -161,19 +300,25 @@ impl Clob {
             cfg,
             me,
             pool: Mutex::new(HashMap::new()),
+            settled: Mutex::new(HashMap::new()),
             last_epoch: AtomicU64::new(0),
-            http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(5))
-                .build()
-                .expect("reqwest client"),
+            net,
         })
+    }
+
+    /// Admit an order locally and fan it out to peers — the one entry point for
+    /// client order flow, used by the HTTP handler and the mesh alike.
+    pub fn submit_order(&self, w: WireOrder) -> Result<Value, (StatusCode, String)> {
+        let out = self.admit(w.clone().into())?;
+        self.net.gossip_order(&w);
+        Ok(out)
     }
 
     pub fn current_epoch(&self) -> u64 {
         now_unix() / self.cfg.epoch_secs
     }
 
-    fn domain(&self) -> &surplus_settlement::Eip712Domain {
+    pub(crate) fn domain(&self) -> &surplus_settlement::Eip712Domain {
         &self.venue.settle.as_ref().expect("checked in new()").domain
     }
 
@@ -190,7 +335,7 @@ impl Clob {
     }
 
     /// Validate and admit a gossiped order into the pool. Idempotent by digest.
-    fn admit(&self, body: SignedOrderBody) -> Result<Value, (StatusCode, String)> {
+    pub(crate) fn admit(&self, body: SignedOrderBody) -> Result<Value, (StatusCode, String)> {
         let (instrument_id, signed) = body
             .into_signed()
             .map_err(|e| (StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
@@ -213,6 +358,19 @@ impl Clob {
             ));
         }
         let digest = signed.digest(self.domain());
+        // Settlement is final: an order a co-signed batch touched can never
+        // re-enter the pool, however many times its bytes are replayed.
+        {
+            let now = now_unix();
+            let mut settled = self.settled.lock().unwrap();
+            settled.retain(|_, expiry| *expiry >= now);
+            if settled.contains_key(&digest) {
+                return Err((
+                    StatusCode::CONFLICT,
+                    "order was settled in a prior batch".into(),
+                ));
+            }
+        }
         let mut pool = self.pool.lock().unwrap();
         if pool.len() >= MAX_POOL && !pool.contains_key(&digest) {
             return Err((StatusCode::TOO_MANY_REQUESTS, "order pool full".into()));
@@ -232,24 +390,6 @@ impl Clob {
         }))
     }
 
-    /// One-hop relay to every peer. Best-effort: gossip loss surfaces as a
-    /// censorship verdict at verification time, not as silent divergence.
-    fn relay(self: &Arc<Self>, body: WireOrder) {
-        for (addr, url) in &self.cfg.operators {
-            if *addr == self.me {
-                continue;
-            }
-            let http = self.http.clone();
-            let url = format!("{url}/clob/gossip");
-            let body = body.clone();
-            tokio::spawn(async move {
-                if let Err(e) = http.post(&url).json(&body).send().await {
-                    tracing::warn!(%url, "gossip relay failed: {e}");
-                }
-            });
-        }
-    }
-
     /// Snapshot the pool for one instrument, dropping orders that expire too
     /// soon to settle (the contract rejects the whole batch on one expired order).
     fn snapshot(&self, instrument_id: &str) -> Vec<SignedOrder> {
@@ -262,15 +402,20 @@ impl Clob {
             .collect()
     }
 
-    /// Remove every order touched by a fill. Mandatory after co-signing or
-    /// submitting a batch: an order that filled (even partially) would overfill
-    /// on re-match and revert the next batch.
+    /// Remove every order touched by a fill AND remember it as settled, so a
+    /// replay can never re-admit it. Mandatory after co-signing or submitting a
+    /// batch: an order that filled (even partially) would overfill on re-match
+    /// and revert the next batch.
     fn prune_filled(&self, fills: &[BatchFill]) {
         let domain = self.domain().clone();
         let mut pool = self.pool.lock().unwrap();
+        let mut settled = self.settled.lock().unwrap();
         for f in fills {
-            pool.remove(&order_digest(&f.buy, &domain));
-            pool.remove(&order_digest(&f.sell, &domain));
+            for o in [&f.buy, &f.sell] {
+                let digest = order_digest(o, &domain);
+                pool.remove(&digest);
+                settled.insert(digest, o.expiry);
+            }
         }
     }
 
@@ -314,7 +459,7 @@ impl Clob {
         let batch_nonce = self.read_batch_nonce().await?;
         let digest = batch_digest(batch_nonce, batch.fills_hash, &domain);
 
-        // Self-attest, then collect peer co-signatures.
+        // Self-attest, then collect peer co-signatures over the transport.
         let mut attestations = vec![Attestation {
             attester: self.me,
             signature: self.signer().sign_digest(digest).to_vec(),
@@ -327,15 +472,8 @@ impl Clob {
             orders: snapshot,
             fills_hash: batch.fills_hash,
         };
-        for (addr, url) in &self.cfg.operators {
-            if *addr == self.me {
-                continue;
-            }
-            match self.request_attestation(url, &wire).await {
-                Ok(att) => attestations.push(att),
-                Err(e) => tracing::warn!(peer = %url, "attestation refused: {e}"),
-            }
-        }
+        let want = self.cfg.threshold.saturating_sub(1);
+        attestations.extend(self.net.collect_attestations(&wire, digest, want).await);
 
         let quorum = aggregate_attestation(
             digest,
@@ -377,32 +515,6 @@ impl Clob {
             "batchNonce": batch_nonce,
             "tx": submitted,
         })))
-    }
-
-    async fn request_attestation(
-        &self,
-        peer_url: &str,
-        wire: &WireProposal,
-    ) -> anyhow::Result<Attestation> {
-        let resp = self
-            .http
-            .post(format!("{peer_url}/clob/propose"))
-            .json(wire)
-            .send()
-            .await?;
-        anyhow::ensure!(
-            resp.status().is_success(),
-            "{}: {}",
-            resp.status(),
-            resp.text().await.unwrap_or_default()
-        );
-        let att: WireAttestation = resp.json().await?;
-        Ok(Attestation {
-            attester: att.attester,
-            signature: surplus_settlement::core::hex::decode(
-                att.signature.trim_start_matches("0x"),
-            )?,
-        })
     }
 
     /// Dry without the `chain` feature OR without RPC config — same rule as
@@ -448,7 +560,10 @@ impl Clob {
     /// Verify a proposal and, if honest, co-sign it. The peer enforces election
     /// (only the epoch's elected proposer gets signatures) and epoch freshness,
     /// then delegates every trust decision to `verify_proposal`.
-    fn attest(&self, wire: WireProposal) -> Result<WireAttestation, (StatusCode, Value)> {
+    pub(crate) fn attest(
+        &self,
+        wire: WireProposal,
+    ) -> Result<WireAttestation, (StatusCode, Value)> {
         let current = self.current_epoch();
         if wire.epoch.abs_diff(current) > 1 {
             return Err((
@@ -519,7 +634,7 @@ impl Clob {
         }
     }
 
-    fn status(&self) -> Value {
+    pub fn status(&self) -> Value {
         let pool = self.pool.lock().unwrap();
         let mut per_instrument: HashMap<&str, usize> = HashMap::new();
         for e in pool.values() {
@@ -568,7 +683,7 @@ impl From<WireOrder> for SignedOrderBody {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WireProposal {
     pub epoch: u64,
@@ -581,7 +696,7 @@ pub struct WireProposal {
     pub fills_hash: B256,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WireAttestation {
     pub attester: Address,
@@ -602,11 +717,8 @@ pub fn router(clob: SharedClob) -> Router {
 }
 
 async fn clob_order(State(c): State<SharedClob>, Json(b): Json<WireOrder>) -> impl IntoResponse {
-    match c.admit(b.clone().into()) {
-        Ok(val) => {
-            c.relay(b);
-            Json(val).into_response()
-        }
+    match c.submit_order(b) {
+        Ok(val) => Json(val).into_response(),
         Err((status, msg)) => (status, msg).into_response(),
     }
 }
@@ -650,6 +762,25 @@ async fn clob_run_epoch(State(c): State<SharedClob>) -> impl IntoResponse {
 
 async fn clob_status(State(c): State<SharedClob>) -> impl IntoResponse {
     Json(c.status())
+}
+
+/// Boot the shared CLOB from env, picking the transport: blueprint-networking's
+/// PKI mesh when compiled with `mesh` and `SURPLUS_MESH_ADDR` is set, else the
+/// HTTP peer list. Returns the service plus its HTTP surface (order entry +
+/// ops endpoints — mounted in both transports; in mesh mode the fanout simply
+/// rides the mesh instead of peer URLs).
+pub fn start_from_env(venue: Arc<Venue>) -> anyhow::Result<Option<(SharedClob, Router)>> {
+    let Some(cfg) = ClobConfig::from_env() else {
+        return Ok(None);
+    };
+    #[cfg(feature = "mesh")]
+    if std::env::var("SURPLUS_MESH_ADDR").is_ok() {
+        return crate::mesh::start(venue, cfg).map(Some);
+    }
+    let clob = Arc::new(Clob::new(venue, cfg)?);
+    spawn_epoch_loop(clob.clone());
+    let r = router(clob.clone());
+    Ok(Some((clob, r)))
 }
 
 /// The epoch driver: at every epoch boundary, if this node is the elected

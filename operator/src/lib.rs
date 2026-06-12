@@ -10,7 +10,10 @@
 pub mod clob;
 pub mod config;
 pub mod http;
+pub mod inference;
 pub mod market;
+#[cfg(feature = "mesh")]
+pub mod mesh;
 pub mod ratelimit;
 pub mod redeem;
 pub mod sidecar;

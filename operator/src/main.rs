@@ -18,10 +18,9 @@ async fn main() -> anyhow::Result<()> {
     let mut app = http::router(venue.clone());
 
     // Shared CLOB (opt-in via SURPLUS_CLOB_OPERATORS): gossip + epoch consensus.
-    if let Some(cfg) = surplus_operator::clob::ClobConfig::from_env() {
-        let clob = Arc::new(surplus_operator::clob::Clob::new(venue, cfg)?);
-        surplus_operator::clob::spawn_epoch_loop(clob.clone());
-        app = app.merge(surplus_operator::clob::router(clob));
+    // Transport: PKI mesh when built with `mesh` + SURPLUS_MESH_ADDR, else HTTP.
+    if let Some((_clob, clob_router)) = surplus_operator::clob::start_from_env(venue)? {
+        app = app.merge(clob_router);
         tracing::info!("shared CLOB epoch service enabled");
     }
 

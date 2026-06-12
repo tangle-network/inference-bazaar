@@ -141,8 +141,17 @@ deployed on services 3 + 4. One refinement over the spec sketch: matching is
 **set-deterministic, not price-time** — intra-epoch priority is price then
 order-digest, never arrival order, so the proposer has zero sequencing
 discretion and "peers re-execute" is exact rather than trust-the-claimed-order.
-Transport is HTTP between configured peers (`SURPLUS_CLOB_OPERATORS`);
-blueprint-networking gossip + BSM fraud-claim wiring remain open.
+Transport is a seam (`ClobNet`): the HTTP peer list (`SURPLUS_CLOB_OPERATORS`,
+what the live fleet runs), or — built with `--features mesh` and
+`SURPLUS_MESH_ADDR` — blueprint-networking's PKI-gated gossip, where the
+handshake whitelist IS the bonded attester set (`AllowedKeys::EvmAddresses`,
+EVM-recovery handshakes, topic scoped per chain+contract), proven by a 3-node
+in-process e2e (`operator/tests/mesh_clob.rs`). Settled orders are final at
+admission: replaying a settled order can no longer re-enter pools and grief the
+next batch. Upstream caveat: blueprint-networking 0.2.0-alpha.7's
+`handle.send()` encodes fixint while its receivers decode varint — broken both
+ways; `mesh.rs` encodes the envelope itself with matching varint options until
+that's fixed upstream. BSM fraud-claim wiring remains open.
 
 **Acceptance (Phase C):**
 - [x] Two operators run the matcher rotation; a third-party wallet's limit

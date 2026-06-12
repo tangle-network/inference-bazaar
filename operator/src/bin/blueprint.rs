@@ -204,17 +204,16 @@ impl BackgroundService for MarketVenueService {
         let _ = VENUE.set(self.venue.clone());
         http::spawn_auto_flush(self.venue.clone());
         let mut app = http::router(self.venue.clone());
-        // Shared CLOB (opt-in via SURPLUS_CLOB_OPERATORS): gossip + epoch consensus.
-        if let Some(cfg) = surplus_operator::clob::ClobConfig::from_env() {
-            match surplus_operator::clob::Clob::new(self.venue.clone(), cfg) {
-                Ok(clob) => {
-                    let clob = Arc::new(clob);
-                    surplus_operator::clob::spawn_epoch_loop(clob.clone());
-                    app = app.merge(surplus_operator::clob::router(clob));
-                    tracing::info!("shared CLOB epoch service enabled");
-                }
-                Err(e) => tracing::error!("shared CLOB disabled: {e}"),
+        // Shared CLOB (opt-in via SURPLUS_CLOB_OPERATORS): gossip + epoch
+        // consensus. Transport: PKI mesh when built with `mesh` and
+        // SURPLUS_MESH_ADDR is set, else the HTTP peer list.
+        match surplus_operator::clob::start_from_env(self.venue.clone()) {
+            Ok(Some((_clob, clob_router))) => {
+                app = app.merge(clob_router);
+                tracing::info!("shared CLOB epoch service enabled");
             }
+            Ok(None) => {}
+            Err(e) => tracing::error!("shared CLOB disabled: {e}"),
         }
         let addr = self.addr.clone();
         tokio::spawn(async move {
