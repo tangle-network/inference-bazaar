@@ -101,6 +101,11 @@ async fn redeem_receipt(
     }
 }
 
+/// Status mapping for sibling routers (the spend rail reuses venue errors).
+pub(crate) fn err_status_pub(e: &VenueError) -> StatusCode {
+    err_status(e)
+}
+
 fn err_status(e: &VenueError) -> StatusCode {
     match e {
         VenueError::NotFound(_) => StatusCode::NOT_FOUND,

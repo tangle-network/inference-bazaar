@@ -17,6 +17,7 @@ pub mod mesh;
 pub mod ratelimit;
 pub mod redeem;
 pub mod sidecar;
+pub mod spend;
 pub mod venue;
 
 pub use venue::{Venue, VenueError};

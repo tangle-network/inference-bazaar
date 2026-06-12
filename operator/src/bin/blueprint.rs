@@ -222,6 +222,10 @@ impl BackgroundService for MarketVenueService {
                 ));
             }
         }
+        // Spend-key rail: lots consumed as plain bearer API keys (OpenAI surface).
+        let spend = Arc::new(surplus_operator::spend::SpendSvc::new(self.venue.clone()));
+        surplus_operator::spend::spawn_spend_flush(spend.clone());
+        app = app.merge(surplus_operator::spend::router(spend));
         // Rate limiting wraps the MERGED app — `merge` does not propagate layers.
         let app = http::rate_limited(app);
         let addr = self.addr.clone();

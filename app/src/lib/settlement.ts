@@ -43,6 +43,16 @@ export const SERVE_TYPES = {
   ],
 } as const
 
+/** One signature turns a lot into a bearer API key (see operator spend rail). */
+export const SPEND_TYPES = {
+  SpendKeyAuth: [
+    { name: 'lotId', type: 'bytes32' },
+    { name: 'keyHash', type: 'bytes32' },
+    { name: 'maxTokens', type: 'uint64' },
+    { name: 'expiry', type: 'uint64' },
+  ],
+} as const
+
 export const RECEIPT_TYPES = {
   RedemptionReceipt: [
     { name: 'redemptionId', type: 'bytes32' },

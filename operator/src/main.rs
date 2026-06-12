@@ -19,10 +19,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Shared CLOB (opt-in via SURPLUS_CLOB_OPERATORS): gossip + epoch consensus.
     // Transport: PKI mesh when built with `mesh` + SURPLUS_MESH_ADDR, else HTTP.
-    if let Some((_clob, clob_router)) = surplus_operator::clob::start_from_env(venue)? {
+    if let Some((_clob, clob_router)) = surplus_operator::clob::start_from_env(venue.clone())? {
         app = app.merge(clob_router);
         tracing::info!("shared CLOB epoch service enabled");
     }
+    // Spend-key rail: lots consumed as plain bearer API keys (OpenAI surface).
+    let spend = std::sync::Arc::new(surplus_operator::spend::SpendSvc::new(venue));
+    surplus_operator::spend::spawn_spend_flush(spend.clone());
+    let app = app.merge(surplus_operator::spend::router(spend));
+
     // Rate limiting wraps the MERGED app — `merge` does not propagate layers.
     let app = http::rate_limited(app);
 

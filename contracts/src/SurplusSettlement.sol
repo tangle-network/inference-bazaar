@@ -123,6 +123,21 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         bytes32 attestedWork;
     }
 
+    /// One wallet signature that turns a lot into an API key: the holder
+    /// authorizes the key whose keccak256 is `keyHash` to draw down `lotId`,
+    /// up to `maxTokens` cumulative, until `expiry`. The issuer serves plain
+    /// bearer-authenticated requests off-chain and presents this authorization
+    /// to settle what it served — no per-request signatures, no receipts. The
+    /// holder's protections are the cap, on-chain revocation, the issuer's
+    /// collateral + slashable bond, and that the signature binds to the
+    /// CURRENT holder (reselling the lot invalidates every outstanding key).
+    struct SpendKeyAuth {
+        bytes32 lotId;
+        bytes32 keyHash;
+        uint64 maxTokens;
+        uint64 expiry;
+    }
+
     struct DefaultRecord {
         address issuer;
         uint128 amountMicro;
@@ -139,6 +154,10 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
     /// served is the authenticity gap this closes.
     bytes32 public constant RECEIPT_TYPEHASH =
         keccak256("RedemptionReceipt(bytes32 redemptionId,uint64 servedTokens,bytes32 workCommitment)");
+    /// One signature turns a lot into a bearer API key (the spend rail): the
+    /// holder authorizes cumulative metered spend up to `maxTokens` until `expiry`.
+    bytes32 public constant SPEND_TYPEHASH =
+        keccak256("SpendKeyAuth(bytes32 lotId,bytes32 keyHash,uint64 maxTokens,uint64 expiry)");
     bytes32 public constant BATCH_TYPEHASH =
         keccak256("SettlementBatch(bytes32 bookId,uint64 batchNonce,bytes32 fillsHash)");
 
@@ -194,6 +213,9 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
     mapping(bytes32 => Redemption) public redemptions;
     mapping(bytes32 => bytes32) public openRedemptionOf; // lotId => open redemption id
 
+    mapping(bytes32 => uint64) public spendSettled; // spend-auth digest => cumulative tokens settled
+    mapping(bytes32 => bool) public spendRevoked; // spend-auth digest => holder killed the key
+
     /// Sentinel issuing-book for lots minted outside any book (the `settleFills`
     /// path). `registerBook` rejects it, so no quorum can ever match it.
     bytes32 public constant NO_BOOK = bytes32(type(uint256).max);
@@ -244,6 +266,14 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         uint64 challengeDeadline
     );
     event AttestationChallenged(bytes32 indexed redemptionId, address indexed holder);
+    event SpendSettled(
+        bytes32 indexed authDigest,
+        bytes32 indexed lotId,
+        uint64 deltaTokens,
+        uint64 cumulativeTokens,
+        uint256 debitMicro
+    );
+    event SpendKeyRevoked(bytes32 indexed authDigest, bytes32 indexed lotId);
     event RedemptionDefaulted(
         uint256 indexed defaultId,
         bytes32 indexed redemptionId,
@@ -282,6 +312,11 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
     error RedemptionDeadlinePassed(bytes32 redemptionId);
     error ServedExceedsRequested(uint64 served, uint64 requested);
     error BadReceipt(bytes32 redemptionId);
+    error BadSpendAuth(bytes32 authDigest);
+    error SpendAuthExpired(bytes32 authDigest);
+    error SpendKeyIsRevoked(bytes32 authDigest);
+    error SpendCapExceeded(uint64 cap, uint64 requested);
+    error NothingToSettle(bytes32 authDigest);
     error BadQuorum();
     error UnknownBook(bytes32 bookId);
     error InvalidThreshold();
@@ -742,6 +777,52 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         openRedemptionOf[r.lotId] = bytes32(0);
         if (lot.qtyTokens == 0) delete lots[r.lotId];
         emit RedemptionSettled(redemptionId, servedTokens, debit, workCommitment);
+    }
+
+    function spendAuthDigest(SpendKeyAuth calldata a) public view returns (bytes32) {
+        return _hashTypedDataV4(keccak256(abi.encode(SPEND_TYPEHASH, a.lotId, a.keyHash, a.maxTokens, a.expiry)));
+    }
+
+    /// Settle the cumulative tokens served against a spend-key authorization.
+    /// Cumulative semantics make this idempotent and monotone: replaying an old
+    /// total is a no-op revert, and the issuer can flush at any cadence. The
+    /// signature must recover to the lot's CURRENT holder, so a resold lot's
+    /// outstanding keys die at the transfer. Settlement must land before the
+    /// lot (and the auth) expire — after expiry the remaining value is the
+    /// holder's to reclaim, so an issuer that serves without flushing eats it.
+    function settleSpend(SpendKeyAuth calldata a, uint64 servedCumulative, bytes calldata holderSig) external {
+        Lot storage lot = lots[a.lotId];
+        if (lot.holder == address(0)) revert LotNotFound(a.lotId);
+        if (block.timestamp > lot.expiry) revert LotIsExpired(a.lotId);
+        bytes32 digest = spendAuthDigest(a);
+        if (spendRevoked[digest]) revert SpendKeyIsRevoked(digest);
+        if (block.timestamp > a.expiry) revert SpendAuthExpired(digest);
+        if (ECDSA.recover(digest, holderSig) != lot.holder) revert BadSpendAuth(digest);
+        if (servedCumulative > a.maxTokens) revert SpendCapExceeded(a.maxTokens, servedCumulative);
+        uint64 settled = spendSettled[digest];
+        if (servedCumulative <= settled) revert NothingToSettle(digest);
+        uint64 delta = servedCumulative - settled;
+        uint64 avail = lot.qtyTokens - lot.lockedTokens;
+        if (delta > avail) revert LotQtyUnavailable(avail, delta);
+        spendSettled[digest] = servedCumulative;
+        uint256 debit = (uint256(lot.notionalMicro) * delta) / lot.qtyTokens;
+        lot.qtyTokens -= delta;
+        lot.notionalMicro -= uint128(debit);
+        liability[lot.issuer] -= debit;
+        if (lot.qtyTokens == 0) delete lots[a.lotId];
+        emit SpendSettled(digest, a.lotId, delta, servedCumulative, debit);
+    }
+
+    /// Emergency brake for a leaked key: the holder kills the authorization
+    /// on-chain. Anything the issuer already served but has not yet settled is
+    /// the issuer's loss — revocation is immediate and total.
+    function revokeSpendKey(SpendKeyAuth calldata a) external {
+        Lot storage lot = lots[a.lotId];
+        if (lot.holder == address(0)) revert LotNotFound(a.lotId);
+        if (lot.holder != msg.sender) revert NotLotHolder(a.lotId);
+        bytes32 digest = spendAuthDigest(a);
+        spendRevoked[digest] = true;
+        emit SpendKeyRevoked(digest, a.lotId);
     }
 
     /// The "definitely": deadline missed → the holder is made whole in cash from

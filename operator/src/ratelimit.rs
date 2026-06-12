@@ -81,7 +81,8 @@ impl RateLimiter {
 /// Route cost: expensive surfaces pay more from the same bucket.
 fn route_cost(path: &str) -> f64 {
     match path {
-        "/redeem" => 10.0,
+        "/redeem" | "/v1/chat/completions" => 10.0,
+        "/v1/spend-keys" => 3.0,
         // A proposal triggers a full match_epoch re-execution plus a signature
         // recovery per order — the costliest thing a request can buy.
         "/clob/propose" => 5.0,
