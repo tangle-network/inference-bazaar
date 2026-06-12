@@ -151,10 +151,18 @@ export function useVenueHealth() {
 }
 
 
+/** The venue returns an OBJECT — { count, fillsHash, fills: [...] } — not a
+ * bare array; mapping it directly was a live crash on /activity. */
+export interface SettlementOutbox {
+  count: number
+  fillsHash: string
+  fills: Record<string, unknown>[]
+}
+
 export function useSettlementOutbox() {
   return useQuery({
     queryKey: ['outbox'],
-    queryFn: () => getJson<unknown[]>(`${VENUE_URL}/settlement/outbox`),
+    queryFn: () => getJson<SettlementOutbox>(`${VENUE_URL}/settlement/outbox`),
     refetchInterval: 20_000,
   })
 }
