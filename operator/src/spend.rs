@@ -245,6 +245,7 @@ impl SpendSvc {
         };
         let mut j = self.state.lock().unwrap();
         j.auths.insert(body.key_hash, stored);
+        crate::metrics::inc(crate::metrics::names::SPEND_KEYS);
         self.persist(&j);
         Ok(json!({
             "keyHash": format!("{:#x}", body.key_hash),
@@ -355,6 +356,7 @@ impl SpendSvc {
         {
             let mut j = self.state.lock().unwrap();
             *j.served.entry(key_hash).or_insert(0) += used;
+            crate::metrics::inc_by(crate::metrics::names::SPEND_SERVED_TOKENS, used);
             self.persist(&j);
         }
         Ok(completion)
@@ -425,7 +427,9 @@ impl SpendSvc {
             {
                 Ok(tx) => {
                     let mut j = self.state.lock().unwrap();
+                    let delta = served - j.settled.get(&key_hash).copied().unwrap_or(0);
                     j.settled.insert(key_hash, served);
+                    crate::metrics::inc_by(crate::metrics::names::SPEND_SETTLED_TOKENS, delta);
                     self.persist(&j);
                     settled_count += 1;
                     tracing::info!(lot = %format!("{:#x}", auth.lot_id), served, tx = %format!("{tx:#x}"), "spend settled");

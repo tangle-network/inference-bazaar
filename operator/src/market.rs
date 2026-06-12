@@ -107,6 +107,7 @@ impl SignedState {
                     *self.filled.entry(f.maker_order_id.clone()).or_insert(0) += f.qty as u64;
                     *self.filled.entry(f.taker_order_id.clone()).or_insert(0) += f.qty as u64;
                     self.outbox.push(fill);
+                    crate::metrics::inc(crate::metrics::names::FILLS);
                     paired += 1;
                 }
                 Err(e) => {
