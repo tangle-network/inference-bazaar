@@ -301,20 +301,34 @@ impl ClobNet for HttpNet {
         _digest: B256,
         want: usize,
     ) -> Vec<Attestation> {
-        let mut out = Vec::new();
-        for (addr, url) in &self.operators {
-            if *addr == self.me {
-                continue;
-            }
-            match self.request_attestation(url, wire).await {
-                Ok(att) => out.push(att),
-                Err(e) => tracing::warn!(peer = %url, "attestation refused: {e}"),
-            }
-            if out.len() >= want {
-                break;
-            }
-        }
-        out
+        // EVERY peer gets the proposal, concurrently — never stop at threshold.
+        // Co-signing has a side effect (the peer prunes the batch's orders from
+        // its pool), so a peer that never sees a settling proposal keeps the
+        // settled orders and, when it is next elected, re-proposes them into an
+        // on-chain Overfill revert. Observed live the moment the quorum grew to
+        // 3: the third attester's first elected epoch re-proposed an
+        // already-settled batch. Quorum still only NEEDS `want` signatures; the
+        // rest arrive (and prune) regardless. Parallel fan-out also bounds the
+        // round at one peer-timeout instead of peers × timeout.
+        let _ = want;
+        let requests = self
+            .operators
+            .iter()
+            .filter(|(addr, _)| *addr != self.me)
+            .map(|(_, url)| async move {
+                match self.request_attestation(url, wire).await {
+                    Ok(att) => Some(att),
+                    Err(e) => {
+                        tracing::warn!(peer = %url, "attestation refused: {e}");
+                        None
+                    }
+                }
+            });
+        futures::future::join_all(requests)
+            .await
+            .into_iter()
+            .flatten()
+            .collect()
     }
 }
 

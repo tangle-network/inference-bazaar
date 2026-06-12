@@ -8,7 +8,7 @@ import { baseSepolia } from 'viem/chains'
 import fs from 'node:fs'
 
 const RPC = process.env.RPC ?? 'https://base-sepolia-rpc.publicnode.com'
-const SETTLEMENT = process.env.SETTLEMENT ?? '0x3fa622488fD970ECdE23b8384a98de6fFa5A1763'
+const SETTLEMENT = process.env.SETTLEMENT ?? '0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83'
 const USD = process.env.USD ?? '0x14Ff9231D03Fd9AD75e553004585f13Ff51db630'
 const NODE_A = process.env.NODE_A ?? 'https://surplus2.178.104.232.124.sslip.io' // service 3 :9500
 const NODE_B = process.env.NODE_B ?? 'https://surplus.178.104.232.124.sslip.io'  // service 4 :9400
