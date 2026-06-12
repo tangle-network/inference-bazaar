@@ -35,7 +35,7 @@ use surplus_settlement::core::batch_digest;
 use tokio::sync::mpsc;
 
 use crate::clob::{
-    spawn_epoch_loop, Clob, ClobConfig, ClobNet, SharedClob, WireOrder, WireProposal,
+    spawn_epoch_loop, Clob, ClobConfig, ClobNet, SharedClob, WireCancel, WireOrder, WireProposal,
 };
 use crate::venue::Venue;
 
@@ -50,6 +50,7 @@ const ATTEST_TIMEOUT: Duration = Duration::from_secs(8);
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum MeshWire {
     Order(WireOrder),
+    Cancel(WireCancel),
     Proposal(WireProposal),
     Attestation(WireAttestationMsg),
 }
@@ -131,6 +132,10 @@ impl ClobNet for MeshNet {
         self.broadcast(&MeshWire::Order(w.clone()));
     }
 
+    fn gossip_cancel(&self, c: &WireCancel) {
+        self.broadcast(&MeshWire::Cancel(c.clone()));
+    }
+
     async fn collect_attestations(
         &self,
         wire: &WireProposal,
@@ -178,6 +183,11 @@ pub fn spawn_mesh_loop(clob: SharedClob, net: Arc<MeshNet>, mut reader: MeshHand
                 MeshWire::Order(w) => {
                     if let Err((_, e)) = clob.admit(w.into()) {
                         tracing::debug!("mesh order refused: {e}");
+                    }
+                }
+                MeshWire::Cancel(c) => {
+                    if let Err((_, e)) = clob.admit_cancel(c) {
+                        tracing::debug!("mesh cancel refused: {e}");
                     }
                 }
                 MeshWire::Proposal(p) => {

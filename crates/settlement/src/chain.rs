@@ -58,6 +58,7 @@ sol! {
         function collateral(address issuer) external view returns (uint256);
         function liability(address issuer) external view returns (uint256);
         function filled(bytes32 orderHash) external view returns (uint64);
+        function cancelled(bytes32 orderHash) external view returns (bool);
         function defaultsCount() external view returns (uint256);
         function lots(bytes32 lotId) external view returns (
             address holder, address issuer, bytes32 instrument,
@@ -395,6 +396,10 @@ impl SettlementClient {
 
     pub async fn filled(&self, order_hash: B256) -> anyhow::Result<u64> {
         Ok(self.contract.filled(order_hash).call().await?)
+    }
+
+    pub async fn cancelled(&self, order_hash: B256) -> anyhow::Result<bool> {
+        Ok(self.contract.cancelled(order_hash).call().await?)
     }
 
     pub async fn free_collateral(&self, issuer: Address) -> anyhow::Result<U256> {

@@ -8,13 +8,15 @@
 
 use std::sync::Arc;
 
-use surplus_operator::clob::{Clob, ClobConfig, WireOrder, WireProposal};
+use surplus_operator::clob::{
+    cancel_digest, Clob, ClobConfig, WireCancel, WireOrder, WireProposal,
+};
 use surplus_operator::config::{
     Instrument, OperatorConfig, QuoteParams, RiskLimits, SettlementConfig,
 };
 use surplus_operator::Venue;
-use surplus_settlement::core::alloy_primitives::{Address, B256};
-use surplus_settlement::core::{instrument_hash, Order};
+use surplus_settlement::core::alloy_primitives::{Address, B256, U256};
+use surplus_settlement::core::{instrument_hash, order_digest, Order};
 use surplus_settlement::{Signer, SIDE_BUY, SIDE_SELL};
 
 const INSTRUMENT: &str = "anthropic/claude-opus-4-8:output";
@@ -94,6 +96,47 @@ fn signed_wire(side: u8, price: u64, qty: u64, key: &str, salt: u8) -> WireOrder
             "0x{}",
             surplus_settlement::core::hex::encode(signed.signature)
         ),
+    }
+}
+
+/// A trader's signed cancel for an order it placed — the off-chain analogue of
+/// the contract's `cancelOrder`.
+fn signed_cancel(w: &WireOrder, key: &str) -> WireCancel {
+    let signer = Signer::from_hex(key).unwrap();
+    let contract: Address = CONTRACT.parse().unwrap();
+    let dom = surplus_settlement::domain(CHAIN_ID, contract);
+    let order_hash = order_digest(&w.order, &dom);
+    let digest = cancel_digest(U256::from(CHAIN_ID), contract, order_hash);
+    WireCancel {
+        order_hash,
+        trader: signer.address(),
+        signature: format!(
+            "0x{}",
+            surplus_settlement::core::hex::encode(signer.sign_digest(digest))
+        ),
+    }
+}
+
+/// Poll every node's pool until it reaches `want` (gossip is async).
+async fn await_pool(http: &reqwest::Client, operators: &[(Address, String)], want: u64) {
+    for (_, url) in operators {
+        let mut size = u64::MAX;
+        for _ in 0..50 {
+            let s: serde_json::Value = http
+                .get(format!("{url}/clob/status"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            size = s["poolSize"].as_u64().unwrap();
+            if size == want {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(size, want, "pool != {want} at {url}");
     }
 }
 
@@ -328,4 +371,82 @@ async fn tampered_fills_hash_rejected() {
     assert_eq!(r.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
     let body: serde_json::Value = r.json().await.unwrap();
     assert_eq!(body["verdict"], "fills-hash-mismatch", "{body}");
+}
+
+/// A signed cancel entered at one node propagates to every pool, removes the
+/// order, blocks its re-admission anywhere, and so removes it from the batch.
+#[tokio::test]
+async fn signed_cancel_propagates_and_blocks_rematch() {
+    let (operators, _clobs) = spawn_pair().await;
+    let http = reqwest::Client::new();
+
+    // A crossing pair enters at node 0; gossip carries both to node 1.
+    let sell = signed_wire(SIDE_SELL, 15_000_000, 10_000, SELLER_KEY, 7);
+    let buy = signed_wire(SIDE_BUY, 15_000_000, 10_000, BUYER_KEY, 8);
+    for w in [&sell, &buy] {
+        let r = http
+            .post(format!("{}/clob/order", operators[0].1))
+            .json(w)
+            .send()
+            .await
+            .unwrap();
+        assert!(r.status().is_success(), "{}", r.text().await.unwrap());
+    }
+    await_pool(&http, &operators, 2).await;
+
+    // The seller cancels — at a DIFFERENT node than entry. The cancel propagates.
+    let cancel = signed_cancel(&sell, SELLER_KEY);
+    let r = http
+        .post(format!("{}/clob/cancel", operators[1].1))
+        .json(&cancel)
+        .send()
+        .await
+        .unwrap();
+    assert!(r.status().is_success(), "{}", r.text().await.unwrap());
+    await_pool(&http, &operators, 1).await; // only the buy remains, everywhere
+
+    // The cancelled order cannot be re-admitted at any node (replay/grief-proof).
+    for (_, url) in &operators {
+        let r = http
+            .post(format!("{url}/clob/order"))
+            .json(&sell)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            r.status(),
+            reqwest::StatusCode::CONFLICT,
+            "cancelled order re-admitted at {url}"
+        );
+    }
+
+    // A cancel whose signature does not recover to the CLAIMED trader is refused
+    // (signed by the buyer's key, but lying that the seller authored it).
+    let mut forged = signed_cancel(&buy, BUYER_KEY);
+    forged.trader = Signer::from_hex(SELLER_KEY).unwrap().address();
+    let r = http
+        .post(format!("{}/clob/cancel", operators[0].1))
+        .json(&forged)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+    // The buy survived the forged cancel.
+    await_pool(&http, &operators, 1).await;
+
+    // With the sell gone nothing crosses: the epoch produces no batch.
+    let epoch = now() / 3600;
+    let leader = elected_index(&operators, epoch);
+    let report: serde_json::Value = http
+        .post(format!("{}/clob/run-epoch", operators[leader].1))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        report["batches"].as_array().unwrap().is_empty(),
+        "no cross after cancel: {report}"
+    );
 }
