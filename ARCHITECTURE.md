@@ -4,17 +4,37 @@
 > surplus inference. Operators **make markets** in inference tokens; the spread
 > is the product.
 
-This repo is the blueprint that builds that system. It clones the shape of the
-**ai-trading-blueprint** (operator-run autonomous agents, an arena UI, on-chain
-settlement, a validator-gated execution envelope) but trades a different asset:
-**prepaid inference tokens**, redeemable through the **Tangle Router** against
-real LLM operators.
+This repo is the blueprint that builds that system. It trades **prepaid
+inference token credits**: collateral-backed lots that a holder redeems for real
+inference served by the operator that sold them.
 
-The deliverable in this commit is the **engine** — the market, the
-market-making loop, and the router/privacy bridge — built and tested. The
-operator service, contracts, and arena UI are migrations layered on top of
-proven inference + trading blueprints; the map for that work is in
-[Blueprint migration](#blueprint-migration).
+## The shipped shape (two-layer liquidity)
+
+This is the live architecture, not a plan:
+
+- **Within a service instance** — ONE shared order book per instrument, matched by
+  a **rotating epoch-matcher** over the instance's bonded operators. Matching is
+  set-deterministic (`crates/matcher::match_epoch`, a pure function of the order
+  SET with a digest tiebreak — no sequencing discretion), driven by
+  `operator/src/clob.rs` over a PKI-gated gossip mesh (`operator/src/mesh.rs`,
+  blueprint-networking). A batch settles either **attested** (the issuing-book
+  quorum re-runs the match and co-signs) or **proven** (an SP1 proof that runs
+  the SAME `match_epoch` in-circuit — `zk/program` — and commits the input-set
+  commitment + fills, so a lone prover has no pairing/price/omission discretion).
+- **Across instances** — there is NO global matcher. The single market is the one
+  canonical `SurplusSettlement` contract (book-scoped: per-instance attester
+  quorum, nonce, and fee), plus blueprint-wide **NBBO aggregation**, **portable
+  signed EIP-712 orders**, and a **smart-order-router** in the app.
+- **Every operator is both a market-maker AND an inference server.** A seller
+  backs the lots it issues by serving the model itself (`operator/src/inference.rs`:
+  managed vLLM or an OpenAI-compatible backend) — router-proxy reselling is
+  refused on a bonded issuer. Redemption settles against a **work-committed
+  receipt** (proof of the model + request + output served), with a holder-
+  challenge window on the quorum path.
+
+The quoting brain (where to price) is the stateless `mm-sidecar` over
+`@surplus/market-core`; execution (which crossing orders fill) is the epoch
+matcher. See [The market-making loop](#the-market-making-loop).
 
 ---
 
@@ -82,11 +102,18 @@ caller-supplied, so every test asserts exact behavior and every session replays.
 - **`SimulatedMarket`** — seeded venue: reference price on a geometric random
   walk, Poisson taker flow crossing the book. Deterministic given a seed.
 
-### `@surplus/mm-loop` — the loop you asked for
+### `@surplus/mm-loop` — OFFLINE research / agentic-quoting prototype
 
-The market-making agent built **directly on the agent-runtime loops API**
-(`@tangle-network/agent-runtime/loops`, the `./loops` subpath of v0.48.0). It
-is a `runLoop` driven loop. See [The loop](#the-loop).
+A single-operator, continuous Avellaneda–Stoikov session built on the
+agent-runtime loops API (`@tangle-network/agent-runtime/loops`). **It is NOT the
+production maker** — nothing in the operator, sidecar, or any deploy unit imports
+it. It exists for two things: offline parameter sweeps (`@surplus/mm-eval`) and
+as the worked example of *agentic* quoting (an LLM in the quote loop) that a
+future sidecar can adopt behind the same `/quote` HTTP contract. The live quoting
+brain is the stateless `mm-sidecar` (below); the live *matching* is the
+set-deterministic epoch matcher (the continuous single-operator session can't
+give peers the bit-identical re-execution the shared book's co-signing needs).
+See [The market-making loop](#the-market-making-loop).
 
 ### `@surplus/router-bridge` — payments + privacy
 
@@ -100,7 +127,14 @@ is a `runLoop` driven loop. See [The loop](#the-loop).
 
 ---
 
-## The loop
+## The market-making loop
+
+> Scope: this describes the `@surplus/mm-loop` **research/agentic-prototype**
+> session shape. In production, quoting is the stateless `mm-sidecar` (one
+> risk-gated A–S quote set per `/quote` call, driven by the seed.sh tick) and
+> matching is the epoch matcher — NOT a continuous in-process runLoop. The two
+> share the same `@surplus/market-core` math; this section documents the loop
+> kernel that the offline harness and the future agentic sidecar run on.
 
 A **market-making session is one `runLoop` run**. The mapping onto the
 agent-runtime loop kernel:
@@ -288,27 +322,33 @@ makes the batch uncommittable.
 > operators correlate and de-anonymize the seller.
 
 A shielded credit account hides *identity on-chain*. It does **not** hide the
-*fulfillment path*: when surplus inference is redeemed, some operator runs it,
-sees the seller's IP, and — if always the same operator — can correlate timing +
-volume across redemptions and re-link the seller. Two separable problems, solved
-by two layers:
+*fulfillment path*: redeeming surplus inference is the seller's CLIENT dialing an
+operator's `/redeem` — the operator sees the source IP at that moment and, if
+always the same operator, can correlate timing + volume across redemptions and
+re-link the seller. The leak is on the **inbound** leg, so the fix lives on the
+**redemption client**, not the operator (which is the server there and cannot
+anonymize its own inbound peers). Two separable problems, two layers:
 
-### 1. Network anonymity → Tor, via Arti (not hand-rolled)
+### 1. Network anonymity → Tor, via Arti (not hand-rolled), on the client
 
 We do **not** roll our own onion crypto. Network-layer anonymity is delegated to
-**Tor** through **Arti** (`arti-client`, the Tor Project's Rust Tor
-implementation). Operators are reached either as Tor **onion services**
-(`http://<...>.onion`) or as clearnet HTTPS via a Tor exit, so the operator never
-learns the seller's IP and no on-path observer links the two. Tor brings the
-things a bespoke overlay can't: a real anonymity set, relay diversity, guard
-nodes, path constraints, directory-authority consensus, and years of audit.
+**Tor** through **Arti** (`arti-client`). The seller's redemption client reaches
+operators as Tor **onion services** (`http://<...>.onion`) or clearnet via a Tor
+exit, so the operator never learns the seller's IP. This requires operators to
+**publish `.onion` endpoints** in the venue registry (deploy work).
 
-`@surplus/router-bridge` ships `TorTransport`: an HTTP(S) transport that tunnels
-every request through Arti's local **SOCKS5** proxy (RFC 1928 — a wire protocol,
-not cryptography; all anonymity is Tor's). The destination is sent as a hostname
-so `.onion` names resolve inside Tor, never locally. Point `socksPort` at Arti's
-listener (default 9150). Tested against a real in-process SOCKS5 conversation —
-the same bytes Arti speaks; tests do **not** contact the live Tor network.
+Two integration points, both real:
+- **App / redemption client** (the leaking leg): `@surplus/router-bridge` ships
+  `TorTransport` + `TorRedemptionClient` — an HTTP(S) transport tunneling every
+  request through Arti's local **SOCKS5** proxy (`.onion` resolves inside Tor;
+  default listener 9150). Tested against a real in-process SOCKS5 conversation.
+  *(Wiring the app's redemption fetch through it is the remaining app step once
+  operators publish onions.)*
+- **Operator outbound** (`PRIVACY_MODE=tor`): when the operator itself is an
+  outbound client — a remote OpenAI-compatible backend, or acting as a redemption
+  client to another operator — `operator/src/inference.rs` routes through Arti's
+  SOCKS5 (`socks5h`, `SURPLUS_TOR_SOCKS`). This protects the operator's own calls;
+  it does not (and cannot) anonymize sellers dialing it.
 
 ### 2. Operator-selection anti-stickiness → ours (Tor can't do it)
 

@@ -31,7 +31,7 @@ fn arg(name: &str, default: &str) -> String {
 
 fn main() {
     let chain_id: u64 = arg("--chain-id", "84532").parse().expect("chain-id");
-    let contract: Address = arg("--contract", "0x1cD49739e9CF48C4906aDb44021dd8cE0d8aBa64")
+    let contract: Address = arg("--contract", "0x3fa622488fD970ECdE23b8384a98de6fFa5A1763")
         .parse()
         .expect("contract");
     let dom = domain(chain_id, contract);

@@ -415,7 +415,7 @@ mod tests {
                 .unwrap();
         let rid = B256::repeat_byte(0x11);
         let mh = keccak256(br#"[{"role":"user","content":"hi"}]"#);
-        let settlement: Address = "0x1cD49739e9CF48C4906aDb44021dd8cE0d8aBa64"
+        let settlement: Address = "0x3fa622488fD970ECdE23b8384a98de6fFa5A1763"
             .parse()
             .unwrap();
         let digest = serve_digest(

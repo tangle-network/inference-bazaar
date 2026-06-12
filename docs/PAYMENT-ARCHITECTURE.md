@@ -27,35 +27,30 @@ The market structure is settled. Two independent axes — don't conflate them:
   library**; vLLM or external OpenAI-compatible backend, configurable). The only
   singular role is *matcher-for-the-epoch*, which rotates.
 
-Build order: (1) `BookClient` seam in `crates/orderbook` → (2) inference-as-library
-in `surplus/operator` (operators serve + back their own lots) → (3) per-instance
-epoch matcher + gossip + Attested→Proven batch settlement → (4) cross-instance NBBO
-aggregation + SOR. The per-operator-island book that exists today is the Phase-A
-interim, **not** the target.
+This shipped via the build order (1) `BookClient` seam in `crates/orderbook` →
+(2) inference-as-library in `surplus/operator` (operators serve + back their own
+lots) → (3) per-instance epoch matcher + gossip + Attested/Proven batch
+settlement → (4) cross-instance NBBO aggregation + SOR. The two-layer market is
+the live shape; there is no per-operator-island interim anymore.
 
-## Why this felt confusing (it's not you — the seams are real but unwired)
+## How the pieces connect
 
-The system has **three half-connected pieces**, each owned by a different repo,
-and the seams between them are *designed but not yet wired*:
+The surplus credit market is the firm spine and it is wired end to end:
 
-1. **The router's payment plane** (`tangle-router`) — how a buyer pays for one
-   inference call. Today it has exactly **two** working rails: platform/Stripe
-   balance (fiat) and **ShieldedCredits SpendAuth** (crypto). There is **no
-   plain-USDC pay-per-call** path wired anywhere.
-2. **The inference operators** (`llm-inference-blueprint` + `tangle-inference-core`)
-   — who actually serves tokens and gets paid. They are hardwired to the
-   ShieldedCredits SpendAuth path; a `DirectProvider` (plain-USDC) primitive
-   exists but **has zero callers**.
-3. **The surplus credit market** (`surplus`) — the prepaid, discounted credit
-   *lots* traded on `SurplusSettlement` (currently on a **MockUSD** test token,
-   not real USDC), plus a redemption design that rides the router's SpendAuth
-   path. The live router hook that would make a credit spendable on a real
-   `/v1/chat/completions` is an **unchecked box** (`docs/specs/redemption-debit.md:260`).
-
-So "it only works with shielded credits" is **literally true today** for the
-crypto rail — that is the only on-chain payment path the router has. The
-confidence gap is real, not imagined. The rest of this doc makes the target
-state precise so it stops being fuzzy.
+1. **The surplus credit market** (`surplus`) — prepaid, collateral-backed credit
+   *lots* on `SurplusSettlement` (live tsUSD rail `0x3fa62248…`, real-USDC rail
+   `0xf6A64921…`). Settlement is atomic; batches settle either **attested**
+   (issuing-book quorum re-runs the match and co-signs) or **proven** (an SP1
+   proof that runs `match_epoch` in-circuit and commits the input-set
+   commitment + fills).
+2. **The inference operators** — every operator both makes markets AND serves the
+   model it sold from its own backend (`operator/src/inference.rs`: managed vLLM
+   or a configured OpenAI-compatible URL; router-proxy mode is refused on a
+   bonded issuer). A redeemed lot is debited against actual served usage, bound
+   to a **work-committed receipt**.
+3. **The router** (`tangle-router`) — the clearing house for reference pricing.
+   Its ShieldedCredits SpendAuth rail (and the Stripe/fiat balance) remain the
+   buyer-funding on-ramps; the firm spine above is the native two-sided rail.
 
 ## The one idea that dissolves the confusion: two orthogonal axes
 
@@ -128,13 +123,18 @@ Funded by Stripe/on-ramp. This is how most buyers pay today. Not crypto.
   live path. This is the rail you want and it's the cleanest "normal crypto" UX
   (sign one EIP-3009 / direct-transfer per call, no pool to pre-fund).
 
-### Settlement D — prepaid surplus credit LOT. WORKS on-chain (test token), not yet redeemable through the router.
-- `SurplusSettlement` (Base Sepolia `0x1cD49739…`) clears firm EIP-712 orders and
-  mints collateral-backed credit *lots* against a **MockUSD** token
-  (`app/src/lib/settlement.ts:16-17`). This is the secondary market for credits.
-- Redemption (spending a lot on real inference) is designed to ride Settlement C's
-  SpendAuth path (`packages/redemption/shielded-rail.ts`) — **the live router hook
-  is unbuilt** (`redemption-debit.md:260`).
+### Settlement D — prepaid surplus credit LOT. LIVE, redeemable for real inference.
+- `SurplusSettlement` (Base Sepolia tsUSD rail `0x3fa622488fD970ECdE23b8384a98de6fFa5A1763`;
+  real-USDC rail `0xf6A64921…`) clears firm EIP-712 orders and mints
+  collateral-backed credit *lots* (`app/src/lib/settlement.ts:16`). This is the
+  firm spine — both the primary market (a sell mints a lot against the seller's
+  collateral) and the secondary market (resale).
+- Redemption spends a lot on real inference: the holder opens a redemption, the
+  issuer serves from its OWN backend (`operator/src/inference.rs` — router-proxy
+  mode is refused on a bonded issuer), and settles with the holder's signed,
+  WORK-COMMITTED receipt (`keccak256(modelIdHash, messagesHash, outputHash)`), or
+  an issuing-book quorum attestation behind a holder-challenge window. A missed
+  deadline pays the holder from issuer collateral (`claimDefault`).
 
 ## What "decentralized inference" actually means here (and why this one is special)
 
