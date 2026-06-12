@@ -71,6 +71,21 @@ pub fn set_gauge(name: &'static str, value: i64) {
     map.entry(name).or_default().store(value, Ordering::Relaxed);
 }
 
+/// Register every known series at 0 so `/metrics` exposes the full set from
+/// boot (a counter at 0 is a real datapoint; a missing series breaks `rate()`
+/// and "flatlined to zero" alerts). Call once at operator startup.
+pub fn init() {
+    use names::*;
+    for c in [
+        EPOCHS_RUN, QUORUM_REACHED, QUORUM_FAILED, ATTEST_SIGNED, ATTEST_REFUSED,
+        BATCHES_SUBMITTED, SUBMIT_REVERTS, GOSSIP_SEND_FAILURES, FILLS, SPEND_KEYS,
+        SPEND_SERVED_TOKENS, SPEND_SETTLED_TOKENS, REDEEM_SERVED_TOKENS,
+    ] {
+        inc_by(c, 0);
+    }
+    set_gauge(POOL_SIZE, 0);
+}
+
 impl Metrics {
     /// Prometheus text exposition. One HELP/TYPE per metric; labeled series get
     /// a `{verdict="…"}` line plus the unlabeled total.

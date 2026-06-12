@@ -201,6 +201,7 @@ impl BackgroundService for MarketVenueService {
     async fn start(&self) -> Result<oneshot::Receiver<Result<(), RunnerError>>, RunnerError> {
         let (tx, rx) = oneshot::channel();
         // Publish the venue so job handlers can reach it.
+        surplus_operator::metrics::init();
         let _ = VENUE.set(self.venue.clone());
         http::spawn_auto_flush(self.venue.clone());
         let mut app = http::router(self.venue.clone());
