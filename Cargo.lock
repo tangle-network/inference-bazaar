@@ -9043,6 +9043,7 @@ dependencies = [
  "blueprint-networking",
  "blueprint-sdk",
  "crossbeam-channel",
+ "futures",
  "libp2p",
  "reqwest 0.12.28",
  "serde",
