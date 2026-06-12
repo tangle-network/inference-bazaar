@@ -53,8 +53,14 @@ fn print_fixture_values() {
     println!("buyDigest:       {}", order_digest(&fixture_buy(), &dom));
     println!("sellDigest:      {}", order_digest(&fixture_sell(), &dom));
     println!("fillsHash:       {}", fills_hash(&fills));
-    println!("receiptDigest:   {}", receipt_digest(B256::with_last_byte(0x01), 20_000, &dom));
-    println!("batchDigest:     {}", batch_digest(0, fills_hash(&fills), &dom));
+    println!(
+        "receiptDigest:   {}",
+        receipt_digest(B256::with_last_byte(0x01), 20_000, &dom)
+    );
+    println!(
+        "batchDigest:     {}",
+        batch_digest(0, fills_hash(&fills), &dom)
+    );
 }
 
 #[test]

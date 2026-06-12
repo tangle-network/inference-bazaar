@@ -73,12 +73,9 @@ async fn main() -> anyhow::Result<()> {
     // ── Funding: ETH for gas, USD for cash + collateral ──────────────────────
     let raw = ProviderBuilder::new().connect_http(RPC.parse()?);
     for who in [seller.address(), buyer.address()] {
-        raw.raw_request::<_, bool>(
-            "anvil_setBalance".into(),
-            (who, U256::from(10u128.pow(19))),
-        )
-        .await
-        .ok();
+        raw.raw_request::<_, bool>("anvil_setBalance".into(), (who, U256::from(10u128.pow(19))))
+            .await
+            .ok();
     }
     let op_wallet = ProviderBuilder::new()
         .wallet(alloy::network::EthereumWallet::from(
@@ -86,8 +83,18 @@ async fn main() -> anyhow::Result<()> {
         ))
         .connect_http(RPC.parse()?);
     let usd_op = IMockUSD::new(usd_addr, &op_wallet);
-    usd_op.mint(seller.address(), U256::from(1_000_000_000u64)).send().await?.get_receipt().await?;
-    usd_op.mint(buyer.address(), U256::from(1_000_000_000u64)).send().await?.get_receipt().await?;
+    usd_op
+        .mint(seller.address(), U256::from(1_000_000_000u64))
+        .send()
+        .await?
+        .get_receipt()
+        .await?;
+    usd_op
+        .mint(buyer.address(), U256::from(1_000_000_000u64))
+        .send()
+        .await?
+        .get_receipt()
+        .await?;
 
     for key in [SELLER_KEY, BUYER_KEY] {
         let wallet = ProviderBuilder::new()
@@ -103,13 +110,21 @@ async fn main() -> anyhow::Result<()> {
             .await?;
     }
     buyer_client.deposit(U256::from(100_000_000u64)).await?; // $100 cash
-    seller_client.deposit_collateral(U256::from(100_000_000u64)).await?; // $100 bond
+    seller_client
+        .deposit_collateral(U256::from(100_000_000u64))
+        .await?; // $100 bond
     println!("funded: buyer cash $100, seller collateral $100");
 
     // ── 1. Trustless settleFills: mint a lot atomically ──────────────────────
     let fill = SignedFill::pair(
-        seller.sign_order(&order(SIDE_SELL, 14_000_000, 50_000, seller.address(), 1), &dom),
-        buyer.sign_order(&order(SIDE_BUY, 15_000_000, 50_000, buyer.address(), 2), &dom),
+        seller.sign_order(
+            &order(SIDE_SELL, 14_000_000, 50_000, seller.address(), 1),
+            &dom,
+        ),
+        buyer.sign_order(
+            &order(SIDE_BUY, 15_000_000, 50_000, buyer.address(), 2),
+            &dom,
+        ),
         50_000,
         4_000_000_000 - 1,
         &dom,
@@ -117,29 +132,45 @@ async fn main() -> anyhow::Result<()> {
     let (_tx, lots) = operator.settle_fills_with_lots(&[fill]).await?;
     let lot1 = lots[0];
     // cost = 14e6 * 50k / 1e6 = 700_000 micro
-    assert_eq!(buyer_client.balance_of(buyer.address()).await?, U256::from(99_300_000u64));
-    assert_eq!(operator.liability_of(seller.address()).await?, U256::from(700_000u64));
+    assert_eq!(
+        buyer_client.balance_of(buyer.address()).await?,
+        U256::from(99_300_000u64)
+    );
+    assert_eq!(
+        operator.liability_of(seller.address()).await?,
+        U256::from(700_000u64)
+    );
     println!("fill settled atomically: lot {lot1:#x}, buyer debited $0.70, liability $0.70");
 
     // ── 2. Redemption happy path: holder receipt frees liability ─────────────
     let redemption = buyer_client.request_redemption(lot1, 50_000).await?;
     let receipt_sig = buyer.sign_receipt(redemption, 50_000, &dom).to_vec();
-    seller_client.settle_redemption(redemption, 50_000, receipt_sig).await?;
+    seller_client
+        .settle_redemption(redemption, 50_000, receipt_sig)
+        .await?;
     assert_eq!(operator.liability_of(seller.address()).await?, U256::ZERO);
     println!("redemption served + receipted: liability back to $0");
 
     // ── 3. Default path: deadline passes → holder paid from collateral ───────
     let fill2 = SignedFill::pair(
-        seller.sign_order(&order(SIDE_SELL, 14_000_000, 50_000, seller.address(), 3), &dom),
-        buyer.sign_order(&order(SIDE_BUY, 15_000_000, 50_000, buyer.address(), 4), &dom),
+        seller.sign_order(
+            &order(SIDE_SELL, 14_000_000, 50_000, seller.address(), 3),
+            &dom,
+        ),
+        buyer.sign_order(
+            &order(SIDE_BUY, 15_000_000, 50_000, buyer.address(), 4),
+            &dom,
+        ),
         50_000,
         4_000_000_000 - 1,
         &dom,
     )?;
     let (_tx, lots2) = operator.settle_fills_with_lots(&[fill2]).await?;
     let redemption2 = buyer_client.request_redemption(lots2[0], 50_000).await?;
-    raw.raw_request::<_, serde_json::Value>("evm_increaseTime".into(), (6 * 3600 + 60,)).await?;
-    raw.raw_request::<_, serde_json::Value>("evm_mine".into(), ()).await?;
+    raw.raw_request::<_, serde_json::Value>("evm_increaseTime".into(), (6 * 3600 + 60,))
+        .await?;
+    raw.raw_request::<_, serde_json::Value>("evm_mine".into(), ())
+        .await?;
     let balance_before = buyer_client.balance_of(buyer.address()).await?;
     let payout = buyer_client.claim_default(redemption2).await?;
     // refund 700_000 + 5% penalty = 735_000
@@ -152,15 +183,23 @@ async fn main() -> anyhow::Result<()> {
     println!("default claimed: holder repaid $0.735 (incl. 5% penalty) from issuer collateral");
 
     // ── 4. Attested batch: 2-of-3 quorum vouches signatures ──────────────────
-    let attesters: Vec<Signer> =
-        [0xA1u8, 0xA2, 0xA3].iter().map(|b| Signer::from_hex(&format!("{:02x}", b).repeat(32)).unwrap()).collect();
+    let attesters: Vec<Signer> = [0xA1u8, 0xA2, 0xA3]
+        .iter()
+        .map(|b| Signer::from_hex(&format!("{:02x}", b).repeat(32)).unwrap())
+        .collect();
     let mut addrs: Vec<Address> = attesters.iter().map(Signer::address).collect();
     addrs.sort();
     operator.set_attesters(addrs.clone(), 2).await?;
     let mut batch = Batch::default();
     batch.push(SignedFill::pair(
-        seller.sign_order(&order(SIDE_SELL, 14_000_000, 40_000, seller.address(), 5), &dom),
-        buyer.sign_order(&order(SIDE_BUY, 15_000_000, 40_000, buyer.address(), 6), &dom),
+        seller.sign_order(
+            &order(SIDE_SELL, 14_000_000, 40_000, seller.address(), 5),
+            &dom,
+        ),
+        buyer.sign_order(
+            &order(SIDE_BUY, 15_000_000, 40_000, buyer.address(), 6),
+            &dom,
+        ),
         40_000,
         4_000_000_000 - 1,
         &dom,
@@ -169,18 +208,32 @@ async fn main() -> anyhow::Result<()> {
     let digest = batch.attestation_digest(nonce, &dom);
     let sigs = surplus_settlement::sort_quorum_sigs(
         digest,
-        attesters.iter().map(|a| a.sign_digest(digest).to_vec()).collect(),
+        attesters
+            .iter()
+            .map(|a| a.sign_digest(digest).to_vec())
+            .collect(),
     );
-    operator.settle_batch_attested(&batch, sigs[..2].to_vec()).await?;
-    println!("attested batch settled (2-of-3 quorum), batchNonce -> {}", nonce + 1);
+    operator
+        .settle_batch_attested(&batch, sigs[..2].to_vec())
+        .await?;
+    println!(
+        "attested batch settled (2-of-3 quorum), batchNonce -> {}",
+        nonce + 1
+    );
 
     // ── 5. Proven batch: strict mock pins (domainSeparator, fillsHash) ───────
     let vkey = B256::with_last_byte(0x42);
     operator.set_sp1_verifier(verifier_addr, vkey).await?;
     let mut batch2 = Batch::default();
     batch2.push(SignedFill::pair(
-        seller.sign_order(&order(SIDE_SELL, 14_000_000, 30_000, seller.address(), 7), &dom),
-        buyer.sign_order(&order(SIDE_BUY, 15_000_000, 30_000, buyer.address(), 8), &dom),
+        seller.sign_order(
+            &order(SIDE_SELL, 14_000_000, 30_000, seller.address(), 7),
+            &dom,
+        ),
+        buyer.sign_order(
+            &order(SIDE_BUY, 15_000_000, 30_000, buyer.address(), 8),
+            &dom,
+        ),
         30_000,
         4_000_000_000 - 1,
         &dom,
@@ -201,7 +254,9 @@ async fn main() -> anyhow::Result<()> {
         .await?
         .get_receipt()
         .await?;
-    operator.settle_batch_proven(&batch2, vec![0xde, 0xad]).await?;
+    operator
+        .settle_batch_proven(&batch2, vec![0xde, 0xad])
+        .await?;
     println!("proven batch settled against strict verifier (publicValues bound)");
 
     println!("\nE2E PASS: atomic fill, receipt redemption, collateral default, attested + proven batches");

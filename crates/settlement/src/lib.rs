@@ -74,8 +74,14 @@ impl SignedFill {
         if !sell.verify(domain) {
             return Err(FillError::BadSignature(sell.digest(domain)));
         }
-        validate_pair(&buy.order, &sell.order, qty, exec_price, now_unix).map_err(FillError::Pair)?;
-        Ok(SignedFill { buy, sell, qty_tokens: qty, exec_price_micro_per_m: exec_price })
+        validate_pair(&buy.order, &sell.order, qty, exec_price, now_unix)
+            .map_err(FillError::Pair)?;
+        Ok(SignedFill {
+            buy,
+            sell,
+            qty_tokens: qty,
+            exec_price_micro_per_m: exec_price,
+        })
     }
 
     pub fn batch_fill(&self) -> BatchFill {
@@ -134,14 +140,22 @@ impl Signer {
     }
 
     pub fn sign_order(&self, order: &Order, domain: &Eip712Domain) -> SignedOrder {
-        debug_assert_eq!(order.trader, self.address, "order.trader must be the signer");
+        debug_assert_eq!(
+            order.trader, self.address,
+            "order.trader must be the signer"
+        );
         SignedOrder {
             signature: self.sign_digest(order_digest(order, domain)).to_vec(),
             order: order.clone(),
         }
     }
 
-    pub fn sign_receipt(&self, redemption_id: B256, served: u64, domain: &Eip712Domain) -> [u8; 65] {
+    pub fn sign_receipt(
+        &self,
+        redemption_id: B256,
+        served: u64,
+        domain: &Eip712Domain,
+    ) -> [u8; 65] {
         self.sign_digest(receipt_digest(redemption_id, served, domain))
     }
 }
@@ -205,7 +219,9 @@ pub fn verify_quorum(
     }
     let mut last = Address::ZERO;
     for sig in sigs {
-        let Some(signer) = recover_signer(digest, sig) else { return false };
+        let Some(signer) = recover_signer(digest, sig) else {
+            return false;
+        };
         if signer <= last || !attesters.contains(&signer) {
             return false;
         }
@@ -275,7 +291,8 @@ mod tests {
         let dom = domain(31_337, Address::ZERO);
         let maker = signer(0x11);
         let taker = signer(0x22);
-        let mut sell = maker.sign_order(&order(SIDE_SELL, 14_000_000, 50_000, maker.address()), &dom);
+        let mut sell =
+            maker.sign_order(&order(SIDE_SELL, 14_000_000, 50_000, maker.address()), &dom);
         sell.order.priceMicroPerM = 1; // tamper after signing
         let buy = taker.sign_order(&order(SIDE_BUY, 15_000_000, 50_000, taker.address()), &dom);
         assert!(matches!(
@@ -299,10 +316,15 @@ mod tests {
         let digest = batch.attestation_digest(0, &dom);
         let sigs = sort_quorum_sigs(
             digest,
-            atts.iter().map(|a| a.sign_digest(digest).to_vec()).collect(),
+            atts.iter()
+                .map(|a| a.sign_digest(digest).to_vec())
+                .collect(),
         );
         assert!(verify_quorum(digest, &sigs, &addrs, 2));
-        assert!(!verify_quorum(digest, &sigs[..1].to_vec(), &addrs, 2), "below threshold");
+        assert!(
+            !verify_quorum(digest, &sigs[..1].to_vec(), &addrs, 2),
+            "below threshold"
+        );
 
         let outsider = signer(0xBB);
         let bad = sort_quorum_sigs(digest, vec![outsider.sign_digest(digest).to_vec()]);
@@ -310,7 +332,10 @@ mod tests {
 
         // Different nonce, different digest: old sigs no longer verify.
         let digest2 = batch.attestation_digest(1, &dom);
-        assert!(!verify_quorum(digest2, &sigs, &addrs, 2), "nonce binds attestation");
+        assert!(
+            !verify_quorum(digest2, &sigs, &addrs, 2),
+            "nonce binds attestation"
+        );
     }
 
     #[test]

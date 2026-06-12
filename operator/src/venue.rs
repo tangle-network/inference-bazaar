@@ -127,8 +127,12 @@ impl Venue {
     /// risk gate bounds deviation regardless.
     fn load_refs(&self) {
         let Some(path) = refs_path() else { return };
-        let Ok(raw) = std::fs::read(&path) else { return };
-        let Ok(saved) = serde_json::from_slice::<HashMap<String, f64>>(&raw) else { return };
+        let Ok(raw) = std::fs::read(&path) else {
+            return;
+        };
+        let Ok(saved) = serde_json::from_slice::<HashMap<String, f64>>(&raw) else {
+            return;
+        };
         let mut venues = self.venues.lock().unwrap();
         let mut restored = 0;
         for (id, ref_mid) in saved {
@@ -194,8 +198,11 @@ impl Venue {
         // Journal refs so a restarted venue quotes immediately instead of
         // erroring NoReference until the next quoter pass (an on-chain tick
         // landing in that window would burn the job for nothing).
-        let snapshot: HashMap<String, f64> =
-            venues.iter().filter(|(_, v)| v.ref_mid > 0.0).map(|(k, v)| (k.clone(), v.ref_mid)).collect();
+        let snapshot: HashMap<String, f64> = venues
+            .iter()
+            .filter(|(_, v)| v.ref_mid > 0.0)
+            .map(|(k, v)| (k.clone(), v.ref_mid))
+            .collect();
         persist_refs(&snapshot);
         Ok(json!({ "ok": true, "refMid": ref_mid }))
     }
@@ -292,7 +299,13 @@ impl Venue {
         }
         let quote = self
             .sidecar
-            .quote(&self.cfg, instrument_id, ref_mid, inventory as f64, drawdown)
+            .quote(
+                &self.cfg,
+                instrument_id,
+                ref_mid,
+                inventory as f64,
+                drawdown,
+            )
             .await
             .map_err(|e| VenueError::Sidecar(e.to_string()))?;
 
@@ -331,8 +344,7 @@ impl Venue {
             .filter(|v| (1..=10).contains(v))
             .unwrap_or(1);
         let inst_tick = v.instrument.tick_size.max(1);
-        let level_step =
-            (((ref_mid * 0.003) / inst_tick as f64).round() as i64).max(1) * inst_tick;
+        let level_step = (((ref_mid * 0.003) / inst_tick as f64).round() as i64).max(1) * inst_tick;
 
         let mut placed = Vec::new();
         let mut all_fills: Vec<Fill> = Vec::new();
@@ -344,67 +356,71 @@ impl Venue {
         for (side, touch) in [(Side::Buy, &quote.bid), (Side::Sell, &quote.ask)] {
             let Some(touch) = touch else { continue };
             for lvl in 0..ladder_levels {
-            let mut q = crate::sidecar::Quote {
-                price: match side {
-                    Side::Buy => touch.price - (lvl * level_step) as f64,
-                    Side::Sell => touch.price + (lvl * level_step) as f64,
-                },
-                qty: touch.qty * (1.0 + lvl as f64 * 0.75),
-            };
-            if q.price <= 0.0 {
-                continue;
-            }
-            if let Some((sell_budget, buy_budget)) = &mut budgets {
-                let budget: &mut u128 = match side {
-                    Side::Sell => sell_budget,
-                    Side::Buy => buy_budget,
+                let mut q = crate::sidecar::Quote {
+                    price: match side {
+                        Side::Buy => touch.price - (lvl * level_step) as f64,
+                        Side::Sell => touch.price + (lvl * level_step) as f64,
+                    },
+                    qty: touch.qty * (1.0 + lvl as f64 * 0.75),
                 };
-                let price = q.price.round() as u64;
-                let max_qty = budget
-                    .saturating_mul(1_000_000)
-                    .saturating_sub(500_000)
-                    .checked_div(price.max(1) as u128)
-                    .unwrap_or(0)
-                    .min(u64::MAX as u128) as u64;
-                let qty = (q.qty.round() as u64).min(max_qty);
-                if qty < min_qty {
+                if q.price <= 0.0 {
                     continue;
                 }
-                q.qty = qty as f64;
-                *budget = budget.saturating_sub(
-                    surplus_settlement::core::cost_micro(price, qty).to::<u128>(),
-                );
-            }
-            let q = &q;
-            // When a settlement signer is configured, the MM quote is a signed
-            // firm order: its book id is the EIP-712 digest, and any cross
-            // against another signed order yields a settleable fill.
-            let (id, owner) = match self.signed_mm_quote(instrument_id, side, q) {
-                Some((digest_hex, signed)) => {
-                    self.signed.lock().unwrap().orders.insert(digest_hex.clone(), signed);
-                    (digest_hex, self.mm_owner.clone())
+                if let Some((sell_budget, buy_budget)) = &mut budgets {
+                    let budget: &mut u128 = match side {
+                        Side::Sell => sell_budget,
+                        Side::Buy => buy_budget,
+                    };
+                    let price = q.price.round() as u64;
+                    let max_qty = budget
+                        .saturating_mul(1_000_000)
+                        .saturating_sub(500_000)
+                        .checked_div(price.max(1) as u128)
+                        .unwrap_or(0)
+                        .min(u64::MAX as u128) as u64;
+                    let qty = (q.qty.round() as u64).min(max_qty);
+                    if qty < min_qty {
+                        continue;
+                    }
+                    q.qty = qty as f64;
+                    *budget = budget.saturating_sub(
+                        surplus_settlement::core::cost_micro(price, qty).to::<u128>(),
+                    );
                 }
-                None => (self.next_id("mm"), self.mm_owner.clone()),
-            };
-            let order = Order {
-                id,
-                instrument_id: instrument_id.to_string(),
-                side,
-                price: q.price.round() as i64,
-                qty: q.qty.round() as i64,
-                owner,
-                ts: self.next_ts(),
-            };
-            let price = order.price;
-            let qty = order.qty;
-            let out = v
-                .book
-                .place(order)
-                .map_err(|e| VenueError::Rejected(e.to_string()))?;
-            all_fills.extend(out.fills.iter().cloned());
-            placed.push(json!({
-                "side": side, "price": price, "qty": qty, "resting": out.resting.is_some(),
-            }));
+                let q = &q;
+                // When a settlement signer is configured, the MM quote is a signed
+                // firm order: its book id is the EIP-712 digest, and any cross
+                // against another signed order yields a settleable fill.
+                let (id, owner) = match self.signed_mm_quote(instrument_id, side, q) {
+                    Some((digest_hex, signed)) => {
+                        self.signed
+                            .lock()
+                            .unwrap()
+                            .orders
+                            .insert(digest_hex.clone(), signed);
+                        (digest_hex, self.mm_owner.clone())
+                    }
+                    None => (self.next_id("mm"), self.mm_owner.clone()),
+                };
+                let order = Order {
+                    id,
+                    instrument_id: instrument_id.to_string(),
+                    side,
+                    price: q.price.round() as i64,
+                    qty: q.qty.round() as i64,
+                    owner,
+                    ts: self.next_ts(),
+                };
+                let price = order.price;
+                let qty = order.qty;
+                let out = v
+                    .book
+                    .place(order)
+                    .map_err(|e| VenueError::Rejected(e.to_string()))?;
+                all_fills.extend(out.fills.iter().cloned());
+                placed.push(json!({
+                    "side": side, "price": price, "qty": qty, "resting": out.resting.is_some(),
+                }));
             }
         }
         apply_inventory(v, &all_fills, &self.mm_owner);
@@ -440,13 +456,17 @@ impl InstrumentVenue {
 }
 
 fn refs_path() -> Option<std::path::PathBuf> {
-    std::env::var("DATA_DIR").ok().map(|d| std::path::Path::new(&d).join("refs.json"))
+    std::env::var("DATA_DIR")
+        .ok()
+        .map(|d| std::path::Path::new(&d).join("refs.json"))
 }
 
 fn persist_refs(refs: &HashMap<String, f64>) {
     let Some(path) = refs_path() else { return };
     let tmp = path.with_extension("json.tmp");
-    let Ok(bytes) = serde_json::to_vec(refs) else { return };
+    let Ok(bytes) = serde_json::to_vec(refs) else {
+        return;
+    };
     if let Err(e) = std::fs::write(&tmp, &bytes).and_then(|()| std::fs::rename(&tmp, &path)) {
         tracing::warn!("refs journal write failed: {e}");
     }

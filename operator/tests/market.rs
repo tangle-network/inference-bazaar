@@ -98,15 +98,21 @@ async fn rfq_quote_countersign_fill_outbox() {
     assert_eq!(maker_order.side, 1, "taker buys => maker sells");
     assert_eq!(maker_order.qtyTokens, 30_000);
     assert_eq!(maker_order.priceMicroPerM % 1000, 0, "tick aligned");
-    assert!(maker_order.priceMicroPerM >= 15_010_000, "ask never better than risk gate");
+    assert!(
+        maker_order.priceMicroPerM >= 15_010_000,
+        "ask never better than risk gate"
+    );
     assert!(maker_order.expiry >= now() + 100, "firm TTL");
 
     // The signature is real and verifies under the settlement domain.
     let dom = domain(31_337, CONTRACT.parse().unwrap());
     let sig = quote["signature"].as_str().unwrap();
-    let sig_bytes =
-        surplus_settlement::core::hex::decode(sig.trim_start_matches("0x")).unwrap();
-    assert!(surplus_settlement::verify_order(&maker_order, &sig_bytes, &dom));
+    let sig_bytes = surplus_settlement::core::hex::decode(sig.trim_start_matches("0x")).unwrap();
+    assert!(surplus_settlement::verify_order(
+        &maker_order,
+        &sig_bytes,
+        &dom
+    ));
 
     // 2. Buyer countersigns and hits the quote.
     let buyer = Signer::from_hex(BUYER_KEY).unwrap();
@@ -139,7 +145,10 @@ async fn rfq_quote_countersign_fill_outbox() {
         .unwrap();
     assert_eq!(result["filled"], true);
     assert_eq!(result["qtyTokens"], 30_000);
-    assert_eq!(result["execPriceMicroPerM"], maker_order.priceMicroPerM, "maker price");
+    assert_eq!(
+        result["execPriceMicroPerM"], maker_order.priceMicroPerM,
+        "maker price"
+    );
     assert_eq!(result["outboxLen"], 1);
 
     // Operator sold 30k => inventory -30k.
@@ -166,7 +175,11 @@ async fn rfq_quote_countersign_fill_outbox() {
     assert_eq!(outbox["count"], 1);
     let flush = venue.flush_settlement().await.unwrap();
     assert_eq!(flush["mode"], "dry");
-    assert_eq!(venue.outbox_json()["count"], 1, "dry flush preserves the outbox");
+    assert_eq!(
+        venue.outbox_json()["count"],
+        1,
+        "dry flush preserves the outbox"
+    );
 }
 
 #[tokio::test]
@@ -175,7 +188,9 @@ async fn signed_clob_orders_cross_and_pair() {
     venue.set_ref(INSTRUMENT, 15_000_000.0).unwrap();
     let dom = domain(31_337, CONTRACT.parse().unwrap());
 
-    let seller = Signer::from_hex("0x3333333333333333333333333333333333333333333333333333333333333333").unwrap();
+    let seller =
+        Signer::from_hex("0x3333333333333333333333333333333333333333333333333333333333333333")
+            .unwrap();
     let buyer = Signer::from_hex(BUYER_KEY).unwrap();
 
     let ask = seller.sign_order(

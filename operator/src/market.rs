@@ -14,12 +14,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use surplus_orderbook::{Fill, MatchingEngine, Order as BookOrder, Side};
 use surplus_settlement::core::alloy_primitives::{keccak256, Address, B256};
 use surplus_settlement::{
-    domain, instrument_hash, Batch, Eip712Domain, Order, SignedFill, SignedOrder, Signer,
-    SIDE_BUY, SIDE_SELL,
+    domain, instrument_hash, Batch, Eip712Domain, Order, SignedFill, SignedOrder, Signer, SIDE_BUY,
+    SIDE_SELL,
 };
 
 pub(crate) fn now_unix() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).expect("clock before epoch").as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock before epoch")
+        .as_secs()
 }
 
 fn side_to_book(side: u8) -> Option<Side> {
@@ -45,7 +48,10 @@ impl SettleCtx {
     pub fn from_config(cfg: Option<&SettlementConfig>) -> Option<SettleCtx> {
         let cfg = cfg?;
         let contract: Address = cfg.contract.parse().ok()?;
-        let signer = cfg.operator_key.as_deref().and_then(|k| Signer::from_hex(k).ok());
+        let signer = cfg
+            .operator_key
+            .as_deref()
+            .and_then(|k| Signer::from_hex(k).ok());
         Some(SettleCtx {
             domain: domain(cfg.chain_id, contract),
             signer,
@@ -84,13 +90,19 @@ impl SignedState {
     pub fn pair_book_fills(&mut self, fills: &[Fill], domain: &Eip712Domain, now: u64) -> usize {
         let mut paired = 0;
         for f in fills {
-            let (Some(maker), Some(taker)) =
-                (self.orders.get(&f.maker_order_id), self.orders.get(&f.taker_order_id))
-            else {
+            let (Some(maker), Some(taker)) = (
+                self.orders.get(&f.maker_order_id),
+                self.orders.get(&f.taker_order_id),
+            ) else {
                 continue;
             };
-            match SignedFill::pair(maker.signed.clone(), taker.signed.clone(), f.qty as u64, now, domain)
-            {
+            match SignedFill::pair(
+                maker.signed.clone(),
+                taker.signed.clone(),
+                f.qty as u64,
+                now,
+                domain,
+            ) {
                 Ok(fill) => {
                     *self.filled.entry(f.maker_order_id.clone()).or_insert(0) += f.qty as u64;
                     *self.filled.entry(f.taker_order_id.clone()).or_insert(0) += f.qty as u64;
@@ -108,7 +120,9 @@ impl SignedState {
     }
 
     pub fn remaining(&self, digest_hex: &str, order: &Order) -> u64 {
-        order.qtyTokens.saturating_sub(self.filled.get(digest_hex).copied().unwrap_or(0))
+        order
+            .qtyTokens
+            .saturating_sub(self.filled.get(digest_hex).copied().unwrap_or(0))
     }
 }
 
@@ -132,9 +146,16 @@ impl SignedOrderBody {
                 self.instrument_id
             )));
         }
-        let signature = surplus_settlement::core::hex::decode(self.signature.trim_start_matches("0x"))
-            .map_err(|_| VenueError::Rejected("signature is not hex".into()))?;
-        Ok((self.instrument_id, SignedOrder { order: self.order, signature }))
+        let signature =
+            surplus_settlement::core::hex::decode(self.signature.trim_start_matches("0x"))
+                .map_err(|_| VenueError::Rejected("signature is not hex".into()))?;
+        Ok((
+            self.instrument_id,
+            SignedOrder {
+                order: self.order,
+                signature,
+            },
+        ))
     }
 }
 
@@ -165,7 +186,9 @@ impl Venue {
     fn settle_ctx(&self) -> Result<&SettleCtx, VenueError> {
         self.settle
             .as_ref()
-            .ok_or(VenueError::SettlementUnconfigured("set SURPLUS_CHAIN_ID and SURPLUS_SETTLEMENT_ADDR"))
+            .ok_or(VenueError::SettlementUnconfigured(
+                "set SURPLUS_CHAIN_ID and SURPLUS_SETTLEMENT_ADDR",
+            ))
     }
 
     fn salt(&self) -> B256 {
@@ -194,7 +217,10 @@ impl Venue {
             return Err(VenueError::Rejected("order expired".into()));
         }
         if side_to_book(signed.order.side).is_none() {
-            return Err(VenueError::Rejected(format!("bad side {}", signed.order.side)));
+            return Err(VenueError::Rejected(format!(
+                "bad side {}",
+                signed.order.side
+            )));
         }
         let digest_hex = format!("{:#x}", signed.digest(&ctx.domain));
 
@@ -223,7 +249,10 @@ impl Venue {
             .map_err(|e| VenueError::Rejected(e.to_string()))?;
         signed_state.orders.insert(
             digest_hex.clone(),
-            SignedEntry { instrument_id: instrument_id.clone(), signed },
+            SignedEntry {
+                instrument_id: instrument_id.clone(),
+                signed,
+            },
         );
         let paired = signed_state.pair_book_fills(&out.fills, &ctx.domain, now);
         if paired > 0 {
@@ -265,7 +294,13 @@ impl Venue {
         };
         let signed = signer.sign_order(&order, &ctx.domain);
         let digest_hex = format!("{:#x}", signed.digest(&ctx.domain));
-        Some((digest_hex, SignedEntry { instrument_id: instrument_id.to_string(), signed }))
+        Some((
+            digest_hex,
+            SignedEntry {
+                instrument_id: instrument_id.to_string(),
+                signed,
+            },
+        ))
     }
 
     /// RFQ: a firm, signed, short-TTL quote for exactly the requested size,
@@ -282,7 +317,9 @@ impl Venue {
         let signer = ctx
             .signer
             .as_ref()
-            .ok_or(VenueError::SettlementUnconfigured("set SURPLUS_OPERATOR_KEY to quote"))?;
+            .ok_or(VenueError::SettlementUnconfigured(
+                "set SURPLUS_OPERATOR_KEY to quote",
+            ))?;
 
         let (ref_mid, inventory, drawdown, tick, min_qty) = {
             let venues = self.venues.lock().unwrap();
@@ -296,14 +333,26 @@ impl Venue {
                 .find(|i| i.id == instrument_id)
                 .map(|i| (i.tick_size, i.min_qty))
                 .unwrap_or((1, 1));
-            (v.ref_mid, v.inventory_tokens, v.drawdown_micro, inst.0, inst.1)
+            (
+                v.ref_mid,
+                v.inventory_tokens,
+                v.drawdown_micro,
+                inst.0,
+                inst.1,
+            )
         };
         if ref_mid <= 0.0 {
             return Err(VenueError::NoReference);
         }
         let quote = self
             .sidecar
-            .quote(&self.cfg, instrument_id, ref_mid, inventory as f64, drawdown)
+            .quote(
+                &self.cfg,
+                instrument_id,
+                ref_mid,
+                inventory as f64,
+                drawdown,
+            )
             .await
             .map_err(|e| VenueError::Sidecar(e.to_string()))?;
         if !quote.valid {
@@ -339,7 +388,9 @@ impl Venue {
         }
         let qty = qty_tokens.min(q.qty.round() as u64);
         if qty < min_qty as u64 {
-            return Err(VenueError::Rejected(format!("qty {qty} below min {min_qty}")));
+            return Err(VenueError::Rejected(format!(
+                "qty {qty} below min {min_qty}"
+            )));
         }
         // A firm quote is a real commitment: cap it by on-chain funding net of
         // everything already signed but not yet settled, so the venue never
@@ -350,7 +401,9 @@ impl Venue {
             let stale = self.chain_cache.lock().unwrap().fetched_at + 15 < now;
             if stale {
                 if let Err(e) = self.refresh_chain_cache().await {
-                    tracing::warn!("chain cache refresh failed, quoting on last known funding: {e}");
+                    tracing::warn!(
+                        "chain cache refresh failed, quoting on last known funding: {e}"
+                    );
                 }
             }
         }
@@ -433,7 +486,10 @@ impl Venue {
         // the fill's buy/sell traders — whichever side the operator is on (the
         // operator can be maker OR taker; a self-fill is already rejected by
         // SignedFill::pair, so at most one branch fires).
-        let op = self.settle.as_ref().and_then(|c| c.signer.as_ref().map(Signer::address));
+        let op = self
+            .settle
+            .as_ref()
+            .and_then(|c| c.signer.as_ref().map(Signer::address));
         if let (Some(op), Some(v)) = (op, venues.get_mut(&maker_inst)) {
             if fill.buy.order.trader == op {
                 v.inventory_tokens += qty as i64;
@@ -456,7 +512,9 @@ impl Venue {
 
     pub fn outbox_json(&self) -> Value {
         let signed_state = self.signed.lock().unwrap();
-        let batch = Batch { fills: signed_state.outbox.clone() };
+        let batch = Batch {
+            fills: signed_state.outbox.clone(),
+        };
         json!({
             "count": batch.len(),
             "fillsHash": format!("{:#x}", batch.fills_hash()),
@@ -501,18 +559,17 @@ impl Venue {
 
         #[cfg(feature = "chain")]
         if let (Some(rpc), Some(key)) = (_ctx.rpc_url.as_deref(), _ctx.operator_key.as_deref()) {
-            let client = match surplus_settlement::chain::SettlementClient::connect(
-                rpc, key, _ctx.contract,
-            )
-            .await
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    // Couldn't even connect: re-queue everything (transient).
-                    self.requeue(fills);
-                    return Err(VenueError::Chain(e.to_string()));
-                }
-            };
+            let client =
+                match surplus_settlement::chain::SettlementClient::connect(rpc, key, _ctx.contract)
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        // Couldn't even connect: re-queue everything (transient).
+                        self.requeue(fills);
+                        return Err(VenueError::Chain(e.to_string()));
+                    }
+                };
             if let Err(e) = client.assert_domain().await {
                 self.requeue(fills);
                 return Err(VenueError::Chain(e.to_string()));
@@ -582,10 +639,15 @@ impl Venue {
     /// and the flush path drops terminal failures fill-by-fill.
     pub(crate) fn load_outbox(&self) {
         let Some(path) = outbox_path() else { return };
-        let Ok(raw) = std::fs::read(&path) else { return };
+        let Ok(raw) = std::fs::read(&path) else {
+            return;
+        };
         match serde_json::from_slice::<Vec<SignedFill>>(&raw) {
             Ok(fills) if !fills.is_empty() => {
-                tracing::info!(count = fills.len(), "restored settlement outbox from journal");
+                tracing::info!(
+                    count = fills.len(),
+                    "restored settlement outbox from journal"
+                );
                 self.signed.lock().unwrap().outbox = fills;
             }
             Ok(_) => {}
@@ -599,10 +661,14 @@ impl Venue {
     pub async fn refresh_chain_cache(&self) -> Result<(), VenueError> {
         #[cfg(feature = "chain")]
         {
-            let Some(ctx) = self.settle.as_ref() else { return Ok(()) };
-            let (Some(rpc), Some(key), Some(signer)) =
-                (ctx.rpc_url.as_deref(), ctx.operator_key.as_deref(), ctx.signer.as_ref())
-            else {
+            let Some(ctx) = self.settle.as_ref() else {
+                return Ok(());
+            };
+            let (Some(rpc), Some(key), Some(signer)) = (
+                ctx.rpc_url.as_deref(),
+                ctx.operator_key.as_deref(),
+                ctx.signer.as_ref(),
+            ) else {
                 return Ok(());
             };
             let op = signer.address();
@@ -656,8 +722,8 @@ impl Venue {
             if remaining == 0 {
                 continue;
             }
-            let cost = surplus_settlement::core::cost_micro(o.priceMicroPerM, remaining)
-                .to::<u128>();
+            let cost =
+                surplus_settlement::core::cost_micro(o.priceMicroPerM, remaining).to::<u128>();
             if o.side == SIDE_SELL {
                 sell += cost;
             } else {
@@ -677,15 +743,19 @@ impl Venue {
         let op = self.settle.as_ref()?.signer.as_ref()?.address();
         let (out_sell, out_buy) = self.outstanding_commitments(op, now);
         // Mint-time invariant: (outstanding + new) * (1 + penalty) <= freeCollateral.
-        let sellable = cache.free_collateral_micro * 10_000
-            / (10_000 + cache.penalty_bps as u128);
-        Some((sellable.saturating_sub(out_sell), cache.balance_micro.saturating_sub(out_buy)))
+        let sellable = cache.free_collateral_micro * 10_000 / (10_000 + cache.penalty_bps as u128);
+        Some((
+            sellable.saturating_sub(out_sell),
+            cache.balance_micro.saturating_sub(out_buy),
+        ))
     }
 }
 
 /// Journal path for the settlement outbox; `None` disables persistence (dev).
 fn outbox_path() -> Option<std::path::PathBuf> {
-    std::env::var("DATA_DIR").ok().map(|d| std::path::Path::new(&d).join("outbox.json"))
+    std::env::var("DATA_DIR")
+        .ok()
+        .map(|d| std::path::Path::new(&d).join("outbox.json"))
 }
 
 /// Write the outbox journal (atomic rename). Called under the `signed` lock,

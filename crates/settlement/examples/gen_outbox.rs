@@ -4,15 +4,18 @@
 //!   cargo run -p surplus-settlement --example gen_outbox -- <chain-id> <contract> > outbox.json
 
 use alloy_primitives::{Address, B256};
-use surplus_settlement::{domain, instrument_hash, Batch, Order, SignedFill, Signer, SIDE_BUY, SIDE_SELL};
+use surplus_settlement::{
+    domain, instrument_hash, Batch, Order, SignedFill, Signer, SIDE_BUY, SIDE_SELL,
+};
 
 fn main() {
     let mut args = std::env::args().skip(1);
     let chain_id: u64 = args.next().and_then(|a| a.parse().ok()).unwrap_or(31_337);
-    let contract: Address = args
-        .next()
-        .and_then(|a| a.parse().ok())
-        .unwrap_or_else(|| "0x1111111111111111111111111111111111111111".parse().unwrap());
+    let contract: Address = args.next().and_then(|a| a.parse().ok()).unwrap_or_else(|| {
+        "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap()
+    });
     let dom = domain(chain_id, contract);
 
     let maker = Signer::from_hex(&"11".repeat(32)).unwrap();

@@ -7,6 +7,7 @@
 //!     full BlueprintRunner — the venue runs as a BackgroundService and on-chain
 //!     jobs (workflow_tick, list_instrument, status) drive it.
 
+pub mod clob;
 pub mod config;
 pub mod http;
 pub mod market;

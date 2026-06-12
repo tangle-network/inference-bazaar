@@ -37,7 +37,10 @@ pub fn router(venue: Shared) -> Router {
         .route("/redeem/receipt", post(redeem_receipt))
         .route("/settlement/outbox", get(settlement_outbox))
         .route("/settlement/flush", post(settlement_flush))
-        .layer(axum::middleware::from_fn_with_state(limiter, crate::ratelimit::limit))
+        .layer(axum::middleware::from_fn_with_state(
+            limiter,
+            crate::ratelimit::limit,
+        ))
         .with_state(venue)
 }
 
@@ -152,7 +155,14 @@ struct PlaceOrderBody {
 
 async fn place_order(State(v): State<Shared>, Json(b): Json<PlaceOrderBody>) -> impl IntoResponse {
     let rail = b.rail.unwrap_or_else(|| "router-credits".to_string());
-    match v.place(&b.instrument_id, b.side, b.price, b.qty_tokens, &b.owner, &rail) {
+    match v.place(
+        &b.instrument_id,
+        b.side,
+        b.price,
+        b.qty_tokens,
+        &b.owner,
+        &rail,
+    ) {
         Ok(val) => Json(val).into_response(),
         Err(e) => (err_status(&e), e.to_string()).into_response(),
     }
@@ -180,7 +190,10 @@ async fn mm_tick(State(v): State<Shared>, Json(b): Json<InstBody>) -> impl IntoR
     }
 }
 
-async fn place_signed(State(v): State<Shared>, Json(b): Json<SignedOrderBody>) -> impl IntoResponse {
+async fn place_signed(
+    State(v): State<Shared>,
+    Json(b): Json<SignedOrderBody>,
+) -> impl IntoResponse {
     match v.place_signed(b) {
         Ok(val) => Json(val).into_response(),
         Err(e) => (err_status(&e), e.to_string()).into_response(),

@@ -110,7 +110,9 @@ pub async fn list_instrument(
 // to `$DATA_DIR/instruments.json` and re-registered on boot.
 
 fn instruments_path() -> Option<std::path::PathBuf> {
-    std::env::var("DATA_DIR").ok().map(|d| std::path::Path::new(&d).join("instruments.json"))
+    std::env::var("DATA_DIR")
+        .ok()
+        .map(|d| std::path::Path::new(&d).join("instruments.json"))
 }
 
 /// Serializes concurrent job handlers — read-modify-write on the journal file
@@ -118,7 +120,9 @@ fn instruments_path() -> Option<std::path::PathBuf> {
 static PERSIST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn persist_instrument(inst: &Instrument) {
-    let Some(path) = instruments_path() else { return };
+    let Some(path) = instruments_path() else {
+        return;
+    };
     let _guard = PERSIST_LOCK.lock().unwrap();
     let mut all = load_instruments();
     all.retain(|i| i.id != inst.id);
@@ -131,7 +135,9 @@ fn persist_instrument(inst: &Instrument) {
 }
 
 fn load_instruments() -> Vec<Instrument> {
-    let Some(path) = instruments_path() else { return Vec::new() };
+    let Some(path) = instruments_path() else {
+        return Vec::new();
+    };
     std::fs::read(&path)
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
@@ -159,7 +165,10 @@ pub async fn workflow_tick(
         .await
         .map_err(|e| RunnerError::Other(e.to_string().into()))?;
     Ok(TangleResult(WorkflowTickResult {
-        quoting: report.get("quoting").and_then(|x| x.as_bool()).unwrap_or(false),
+        quoting: report
+            .get("quoting")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false),
         inventoryTokens: report
             .get("inventoryTokens")
             .and_then(|x| x.as_i64())
@@ -194,7 +203,19 @@ impl BackgroundService for MarketVenueService {
         // Publish the venue so job handlers can reach it.
         let _ = VENUE.set(self.venue.clone());
         http::spawn_auto_flush(self.venue.clone());
-        let app = http::router(self.venue.clone());
+        let mut app = http::router(self.venue.clone());
+        // Shared CLOB (opt-in via SURPLUS_CLOB_OPERATORS): gossip + epoch consensus.
+        if let Some(cfg) = surplus_operator::clob::ClobConfig::from_env() {
+            match surplus_operator::clob::Clob::new(self.venue.clone(), cfg) {
+                Ok(clob) => {
+                    let clob = Arc::new(clob);
+                    surplus_operator::clob::spawn_epoch_loop(clob.clone());
+                    app = app.merge(surplus_operator::clob::router(clob));
+                    tracing::info!("shared CLOB epoch service enabled");
+                }
+                Err(e) => tracing::error!("shared CLOB disabled: {e}"),
+            }
+        }
         let addr = self.addr.clone();
         tokio::spawn(async move {
             match tokio::net::TcpListener::bind(&addr).await {

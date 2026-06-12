@@ -86,7 +86,9 @@ impl OperatorConfig {
         let router_url = std::env::var("SURPLUS_ROUTER_URL")
             .unwrap_or_else(|_| "https://router.tangle.tools".to_string());
         let settlement = match (
-            std::env::var("SURPLUS_CHAIN_ID").ok().and_then(|v| v.parse::<u64>().ok()),
+            std::env::var("SURPLUS_CHAIN_ID")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok()),
             std::env::var("SURPLUS_SETTLEMENT_ADDR").ok(),
         ) {
             (Some(chain_id), Some(contract)) => Some(SettlementConfig {
@@ -138,5 +140,4 @@ impl OperatorConfig {
             },
         }
     }
-
 }

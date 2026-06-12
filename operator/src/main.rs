@@ -15,7 +15,15 @@ async fn main() -> anyhow::Result<()> {
 
     let venue = Arc::new(Venue::from_env());
     http::spawn_auto_flush(venue.clone());
-    let app = http::router(venue);
+    let mut app = http::router(venue.clone());
+
+    // Shared CLOB (opt-in via SURPLUS_CLOB_OPERATORS): gossip + epoch consensus.
+    if let Some(cfg) = surplus_operator::clob::ClobConfig::from_env() {
+        let clob = Arc::new(surplus_operator::clob::Clob::new(venue, cfg)?);
+        surplus_operator::clob::spawn_epoch_loop(clob.clone());
+        app = app.merge(surplus_operator::clob::router(clob));
+        tracing::info!("shared CLOB epoch service enabled");
+    }
 
     let addr = std::env::var("SURPLUS_OPERATOR_ADDR").unwrap_or_else(|_| "127.0.0.1:9100".into());
     let listener = tokio::net::TcpListener::bind(&addr).await?;

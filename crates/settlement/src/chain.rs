@@ -179,34 +179,63 @@ impl SettlementClient {
         fills: &[SignedFill],
     ) -> anyhow::Result<(B256, Vec<B256>)> {
         let inputs: Vec<_> = fills.iter().map(to_fill_input).collect();
-        let receipt = self.contract.settleFills(inputs).send().await?.get_receipt().await?;
-        anyhow::ensure!(receipt.status(), "settleFills reverted: {:?}", receipt.transaction_hash);
+        let receipt = self
+            .contract
+            .settleFills(inputs)
+            .send()
+            .await?
+            .get_receipt()
+            .await?;
+        anyhow::ensure!(
+            receipt.status(),
+            "settleFills reverted: {:?}",
+            receipt.transaction_hash
+        );
         let lots = receipt
             .logs()
             .iter()
             .filter_map(|log| {
-                log.log_decode::<ISurplusSettlement::FillSettled>().ok().map(|l| l.inner.lotId)
+                log.log_decode::<ISurplusSettlement::FillSettled>()
+                    .ok()
+                    .map(|l| l.inner.lotId)
             })
             .collect();
         Ok((receipt.transaction_hash, lots))
     }
 
     pub async fn deposit(&self, amount: U256) -> anyhow::Result<()> {
-        let r = self.contract.deposit(amount).send().await?.get_receipt().await?;
+        let r = self
+            .contract
+            .deposit(amount)
+            .send()
+            .await?
+            .get_receipt()
+            .await?;
         anyhow::ensure!(r.status(), "deposit reverted");
         Ok(())
     }
 
     pub async fn deposit_collateral(&self, amount: U256) -> anyhow::Result<()> {
-        let r = self.contract.depositCollateral(amount).send().await?.get_receipt().await?;
+        let r = self
+            .contract
+            .depositCollateral(amount)
+            .send()
+            .await?
+            .get_receipt()
+            .await?;
         anyhow::ensure!(r.status(), "depositCollateral reverted");
         Ok(())
     }
 
     /// Open a redemption; returns the redemption id from the event.
     pub async fn request_redemption(&self, lot_id: B256, qty: u64) -> anyhow::Result<B256> {
-        let receipt =
-            self.contract.requestRedemption(lot_id, qty).send().await?.get_receipt().await?;
+        let receipt = self
+            .contract
+            .requestRedemption(lot_id, qty)
+            .send()
+            .await?
+            .get_receipt()
+            .await?;
         anyhow::ensure!(receipt.status(), "requestRedemption reverted");
         receipt
             .logs()
@@ -232,7 +261,11 @@ impl SettlementClient {
     }
 
     pub async fn receipt_digest(&self, redemption_id: B256, served: u64) -> anyhow::Result<B256> {
-        Ok(self.contract.receiptDigest(redemption_id, served).call().await?)
+        Ok(self
+            .contract
+            .receiptDigest(redemption_id, served)
+            .call()
+            .await?)
     }
 
     pub async fn settle_redemption(
@@ -253,8 +286,13 @@ impl SettlementClient {
     }
 
     pub async fn claim_default(&self, redemption_id: B256) -> anyhow::Result<U256> {
-        let receipt =
-            self.contract.claimDefault(redemption_id).send().await?.get_receipt().await?;
+        let receipt = self
+            .contract
+            .claimDefault(redemption_id)
+            .send()
+            .await?
+            .get_receipt()
+            .await?;
         anyhow::ensure!(receipt.status(), "claimDefault reverted");
         let payout = receipt
             .logs()
@@ -269,13 +307,25 @@ impl SettlementClient {
     }
 
     pub async fn set_attesters(&self, signers: Vec<Address>, threshold: u16) -> anyhow::Result<()> {
-        let r = self.contract.setAttesters(signers, threshold).send().await?.get_receipt().await?;
+        let r = self
+            .contract
+            .setAttesters(signers, threshold)
+            .send()
+            .await?
+            .get_receipt()
+            .await?;
         anyhow::ensure!(r.status(), "setAttesters reverted");
         Ok(())
     }
 
     pub async fn set_sp1_verifier(&self, verifier: Address, vkey: B256) -> anyhow::Result<()> {
-        let r = self.contract.setSp1Verifier(verifier, vkey).send().await?.get_receipt().await?;
+        let r = self
+            .contract
+            .setSp1Verifier(verifier, vkey)
+            .send()
+            .await?
+            .get_receipt()
+            .await?;
         anyhow::ensure!(r.status(), "setSp1Verifier reverted");
         Ok(())
     }
@@ -297,7 +347,19 @@ impl SettlementClient {
         batch: &Batch,
         sigs: Vec<Vec<u8>>,
     ) -> anyhow::Result<B256> {
-        let fills: Vec<_> = batch.batch_fills().iter().map(to_batch_fill).collect();
+        self.settle_batch_fills_attested(&batch.batch_fills(), sigs)
+            .await
+    }
+
+    /// Attested submit of pre-matched `BatchFill`s exactly as produced by the
+    /// epoch matcher — no `SignedFill` reconstruction, so the calldata (and the
+    /// fillsHash the contract recomputes) is byte-for-byte what the quorum signed.
+    pub async fn settle_batch_fills_attested(
+        &self,
+        fills: &[crate::BatchFill],
+        sigs: Vec<Vec<u8>>,
+    ) -> anyhow::Result<B256> {
+        let fills: Vec<_> = fills.iter().map(to_batch_fill).collect();
         let sigs: Vec<alloy_primitives::Bytes> = sigs.into_iter().map(Into::into).collect();
         let receipt = self
             .contract

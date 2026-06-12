@@ -8,16 +8,23 @@
 //! the epoch number, the batch nonce) and converges without trusting each other.
 //!
 //! Because [`crate::match_epoch`] is set-deterministic, a peer can *recompute* a
-//! proposer's claimed batch exactly. So the only two ways a proposer can cheat —
-//! computing a wrong match, or omitting orders it received — are both caught here
-//! ([`verify_proposal`]); it cannot reorder or front-run at all.
+//! proposer's claimed batch exactly. So the only three ways a proposer can cheat —
+//! fabricating an order a trader never signed, computing a wrong match, or
+//! omitting orders it received — are all caught here ([`verify_proposal`]); it
+//! cannot reorder or front-run at all.
+//!
+//! Signature verification is non-negotiable: `settleBatchAttested` deliberately
+//! skips per-order trader signatures on-chain (its `BatchFill` carries none —
+//! "verified off-chain, quorum-vouched"). The quorum IS the authenticity check,
+//! so an attester that co-signs without verifying every order's signature lets a
+//! proposer spend any trader's balance.
 
 use std::collections::HashSet;
 
+use surplus_settlement::SignedOrder;
 use surplus_settlement_core::{
     alloy_primitives::{Address, B256},
-    batch_digest, instrument_hash, order_digest, recover_signer, Eip712Domain,
-    Order as SignedOrder,
+    batch_digest, instrument_hash, order_digest, recover_signer, Eip712Domain, Order,
 };
 
 use crate::{match_epoch, EpochBatch};
@@ -38,15 +45,16 @@ pub fn elect_proposer(operators: &[Address], epoch: u64) -> Option<Address> {
 }
 
 /// What the elected proposer broadcasts at epoch close: the input order set it
-/// matched — verbatim, so peers recompute rather than trust — plus the contract
-/// `batchNonce` it bound to. The fills are NOT sent; peers derive them.
+/// matched — verbatim *with trader signatures*, so peers verify authenticity and
+/// recompute rather than trust — plus the contract `batchNonce` it bound to. The
+/// fills are NOT sent; peers derive them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BatchProposal {
     pub epoch: u64,
     pub batch_nonce: u64,
     pub instrument_id: String,
     pub proposer: Address,
-    /// The gossiped order set the proposer matched.
+    /// The gossiped order set the proposer matched, signatures included.
     pub orders: Vec<SignedOrder>,
     /// The proposer's claimed result. Redundant — peers recompute it — but it is
     /// what the co-signature commits to via [`batch_digest`].
@@ -65,6 +73,10 @@ pub struct Attestation {
 pub enum Verdict {
     /// Honest and complete — co-sign this batch digest.
     Sign(B256),
+    /// Orders whose signature does not recover to `order.trader` (digests
+    /// returned for a fraud claim). Fabrication; do not sign. This is THE check
+    /// the contract delegates to the quorum on the attested path.
+    Forged(Vec<B256>),
     /// The proposer's claimed match does not reproduce. Fraud; do not sign.
     FillsHashMismatch,
     /// The proposer omitted orders this peer holds (digests returned for a fraud
@@ -73,10 +85,13 @@ pub enum Verdict {
 }
 
 /// A peer verifies a proposal against ITS view of the gossiped order set. Set-
-/// determinism leaves a proposer exactly two ways to cheat, both checked here:
-///   1. **Wrong match** — recompute over the proposer's claimed set; it must
+/// determinism leaves a proposer exactly three ways to cheat, all checked here:
+///   1. **Fabrication** — every order's signature must recover to its `trader`.
+///      `settleBatchAttested` does not re-check this on-chain; the quorum is
+///      the authenticity gate, so this check IS the security of the path.
+///   2. **Wrong match** — recompute over the proposer's claimed set; it must
 ///      reproduce the claimed `fillsHash`.
-///   2. **Censorship** — every order this peer holds for the instrument must
+///   3. **Censorship** — every order this peer holds for the instrument must
 ///      appear in the proposer's set.
 /// Only then co-sign `batch_digest(batch_nonce, fillsHash, domain)`.
 pub fn verify_proposal(
@@ -86,13 +101,19 @@ pub fn verify_proposal(
     min_qty: i64,
     domain: &Eip712Domain,
 ) -> Verdict {
-    let recomputed: EpochBatch = match_epoch(
-        &proposal.instrument_id,
-        tick_size,
-        min_qty,
-        domain,
-        &proposal.orders,
-    );
+    let forged: Vec<B256> = proposal
+        .orders
+        .iter()
+        .filter(|so| !so.verify(domain))
+        .map(|so| order_digest(&so.order, domain))
+        .collect();
+    if !forged.is_empty() {
+        return Verdict::Forged(forged);
+    }
+
+    let inner: Vec<Order> = proposal.orders.iter().map(|so| so.order.clone()).collect();
+    let recomputed: EpochBatch =
+        match_epoch(&proposal.instrument_id, tick_size, min_qty, domain, &inner);
     if recomputed.fills_hash != proposal.fills_hash {
         return Verdict::FillsHashMismatch;
     }
@@ -101,12 +122,12 @@ pub fn verify_proposal(
     let included: HashSet<B256> = proposal
         .orders
         .iter()
-        .map(|o| order_digest(o, domain))
+        .map(|so| order_digest(&so.order, domain))
         .collect();
     let censored: Vec<B256> = my_orders
         .iter()
-        .filter(|o| o.instrument == want_instrument)
-        .map(|o| order_digest(o, domain))
+        .filter(|so| so.order.instrument == want_instrument)
+        .map(|so| order_digest(&so.order, domain))
         .filter(|d| !included.contains(d))
         .collect();
     if !censored.is_empty() {
@@ -162,22 +183,28 @@ mod tests {
         domain(84532, Address::with_last_byte(0xcc))
     }
 
-    fn order(side: u8, price: u64, qty: u64, trader: u8) -> SignedOrder {
-        SignedOrder {
+    fn trader(i: usize) -> Signer {
+        Signer::from_hex(KEYS[i]).unwrap()
+    }
+
+    fn signed(side: u8, price: u64, qty: u64, who: &Signer, salt: u8) -> SignedOrder {
+        let o = Order {
             instrument: instrument_hash("m"),
             side,
             priceMicroPerM: price,
             qtyTokens: qty,
             lotId: B256::ZERO,
-            trader: Address::with_last_byte(trader),
+            trader: who.address(),
             expiry: u64::MAX,
-            salt: B256::with_last_byte(trader),
-        }
+            salt: B256::with_last_byte(salt),
+        };
+        who.sign_order(&o, &dom())
     }
 
     fn proposal_over(orders: Vec<SignedOrder>, batch_nonce: u64) -> BatchProposal {
         let d = dom();
-        let batch = match_epoch("m", 1, 1, &d, &orders);
+        let inner: Vec<Order> = orders.iter().map(|so| so.order.clone()).collect();
+        let batch = match_epoch("m", 1, 1, &d, &inner);
         BatchProposal {
             epoch: 7,
             batch_nonce,
@@ -207,7 +234,10 @@ mod tests {
 
     #[test]
     fn honest_complete_proposal_is_signed() {
-        let orders = vec![order(SIDE_SELL, 100, 10, 2), order(SIDE_BUY, 100, 10, 1)];
+        let orders = vec![
+            signed(SIDE_SELL, 100, 10, &trader(1), 2),
+            signed(SIDE_BUY, 100, 10, &trader(0), 1),
+        ];
         let p = proposal_over(orders.clone(), 42);
         // A peer with the same set signs the expected digest.
         let want = batch_digest(42, p.fills_hash, &dom());
@@ -217,9 +247,55 @@ mod tests {
         );
     }
 
+    /// THE check the contract delegates to the quorum: an order whose signature
+    /// does not recover to its trader must never be co-signed — in any disguise.
+    #[test]
+    fn forged_order_is_rejected() {
+        let honest = signed(SIDE_SELL, 100, 10, &trader(1), 2);
+        // Fabrication: order claims trader(2) but is signed by trader(0) — the
+        // proposer trying to spend a victim's on-chain balance.
+        let mut victim_order = Order {
+            instrument: instrument_hash("m"),
+            side: SIDE_BUY,
+            priceMicroPerM: 100,
+            qtyTokens: 10,
+            lotId: B256::ZERO,
+            trader: trader(2).address(),
+            expiry: u64::MAX,
+            salt: B256::with_last_byte(1),
+        };
+        let forged = SignedOrder {
+            signature: trader(0)
+                .sign_digest(order_digest(&victim_order, &dom()))
+                .to_vec(),
+            order: victim_order.clone(),
+        };
+        let p = proposal_over(vec![honest.clone(), forged], 1);
+        let verdict = verify_proposal(&p, &[honest.clone()], 1, 1, &dom());
+        assert_eq!(
+            verdict,
+            Verdict::Forged(vec![order_digest(&victim_order, &dom())])
+        );
+
+        // Garbage signature is equally rejected.
+        victim_order.salt = B256::with_last_byte(99);
+        let garbage = SignedOrder {
+            signature: vec![0u8; 65],
+            order: victim_order.clone(),
+        };
+        let p = proposal_over(vec![honest.clone(), garbage], 1);
+        assert_eq!(
+            verify_proposal(&p, &[honest], 1, 1, &dom()),
+            Verdict::Forged(vec![order_digest(&victim_order, &dom())])
+        );
+    }
+
     #[test]
     fn wrong_match_is_rejected() {
-        let orders = vec![order(SIDE_SELL, 100, 10, 2), order(SIDE_BUY, 100, 10, 1)];
+        let orders = vec![
+            signed(SIDE_SELL, 100, 10, &trader(1), 2),
+            signed(SIDE_BUY, 100, 10, &trader(0), 1),
+        ];
         let mut p = proposal_over(orders.clone(), 1);
         p.fills_hash = B256::repeat_byte(0xde); // proposer lies about the result
         assert_eq!(
@@ -232,14 +308,17 @@ mod tests {
     fn censorship_is_detected() {
         // Proposer matched only a subset; the peer also holds a third order the
         // proposer omitted → the peer refuses to sign and names the omission.
-        let included = vec![order(SIDE_SELL, 100, 10, 2), order(SIDE_BUY, 100, 10, 1)];
+        let included = vec![
+            signed(SIDE_SELL, 100, 10, &trader(1), 2),
+            signed(SIDE_BUY, 100, 10, &trader(0), 1),
+        ];
         let p = proposal_over(included.clone(), 1);
-        let omitted = order(SIDE_SELL, 101, 5, 3);
+        let omitted = signed(SIDE_SELL, 101, 5, &trader(2), 3);
         let my_view = [included, vec![omitted.clone()]].concat();
         let verdict = verify_proposal(&p, &my_view, 1, 1, &dom());
         assert_eq!(
             verdict,
-            Verdict::Censored(vec![order_digest(&omitted, &dom())])
+            Verdict::Censored(vec![order_digest(&omitted.order, &dom())])
         );
     }
 

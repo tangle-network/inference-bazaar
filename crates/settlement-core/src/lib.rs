@@ -75,12 +75,19 @@ pub fn order_digest(order: &Order, domain: &Eip712Domain) -> B256 {
 }
 
 pub fn receipt_digest(redemption_id: B256, served_tokens: u64, domain: &Eip712Domain) -> B256 {
-    RedemptionReceipt { redemptionId: redemption_id, servedTokens: served_tokens }
-        .eip712_signing_hash(domain)
+    RedemptionReceipt {
+        redemptionId: redemption_id,
+        servedTokens: served_tokens,
+    }
+    .eip712_signing_hash(domain)
 }
 
 pub fn batch_digest(batch_nonce: u64, fills_hash: B256, domain: &Eip712Domain) -> B256 {
-    SettlementBatch { batchNonce: batch_nonce, fillsHash: fills_hash }.eip712_signing_hash(domain)
+    SettlementBatch {
+        batchNonce: batch_nonce,
+        fillsHash: fills_hash,
+    }
+    .eip712_signing_hash(domain)
 }
 
 /// `keccak256(abi.encode(fills))` — exactly what `settleBatch*` computes from
@@ -123,7 +130,9 @@ pub fn recover_signer(digest: B256, signature: &[u8]) -> Option<Address> {
     let rec_id = RecoveryId::from_byte(v)?;
     let key = VerifyingKey::recover_from_prehash(digest.as_slice(), &sig, rec_id).ok()?;
     let encoded = key.to_encoded_point(false);
-    Some(Address::from_slice(&keccak256(&encoded.as_bytes()[1..])[12..]))
+    Some(Address::from_slice(
+        &keccak256(&encoded.as_bytes()[1..])[12..],
+    ))
 }
 
 /// Verify an order's signature against its EIP-712 digest.

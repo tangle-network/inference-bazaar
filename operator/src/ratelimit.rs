@@ -38,12 +38,20 @@ impl RateLimiter {
             .and_then(|v| v.parse().ok())
             .filter(|v: &f64| *v > 0.0)
             .unwrap_or(6.0);
-        RateLimiter { buckets: Mutex::new(HashMap::new()), capacity, refill_per_sec }
+        RateLimiter {
+            buckets: Mutex::new(HashMap::new()),
+            capacity,
+            refill_per_sec,
+        }
     }
 
     #[cfg(test)]
     fn new(capacity: f64, refill_per_sec: f64) -> Self {
-        RateLimiter { buckets: Mutex::new(HashMap::new()), capacity, refill_per_sec }
+        RateLimiter {
+            buckets: Mutex::new(HashMap::new()),
+            capacity,
+            refill_per_sec,
+        }
     }
 
     /// Spend `cost` tokens for `ip`. Returns seconds to wait when denied.
@@ -54,9 +62,10 @@ impl RateLimiter {
             let full_after = self.capacity / self.refill_per_sec;
             buckets.retain(|_, b| now.duration_since(b.last).as_secs_f64() < full_after);
         }
-        let b = buckets
-            .entry(ip)
-            .or_insert(Bucket { tokens: self.capacity, last: now });
+        let b = buckets.entry(ip).or_insert(Bucket {
+            tokens: self.capacity,
+            last: now,
+        });
         b.tokens = (b.tokens + now.duration_since(b.last).as_secs_f64() * self.refill_per_sec)
             .min(self.capacity);
         b.last = now;
@@ -128,7 +137,7 @@ mod tests {
         assert!(rl.check(IP, 10.0, t0).is_ok());
         let wait = rl.check(IP, 10.0, t0).unwrap_err();
         assert_eq!(wait, 5); // 10 tokens at 2/s
-        // After 5s the bucket holds exactly the cost again.
+                             // After 5s the bucket holds exactly the cost again.
         assert!(rl.check(IP, 10.0, t0 + Duration::from_secs(5)).is_ok());
     }
 
@@ -151,6 +160,8 @@ mod tests {
         }
         assert!(rl.check(IP, route_cost("/redeem"), t0).is_err());
         // The same client can still read the book (cost 1 refills fast).
-        assert!(rl.check(IP, route_cost("/book"), t0 + Duration::from_secs(1)).is_ok());
+        assert!(rl
+            .check(IP, route_cost("/book"), t0 + Duration::from_secs(1))
+            .is_ok());
     }
 }

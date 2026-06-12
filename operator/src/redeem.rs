@@ -17,12 +17,12 @@
 //!   POST /redeem          { redemptionId, messages, maxTokens?, auth } → completion + receipt digest
 //!   POST /redeem/receipt  { redemptionId, servedTokens, signature } → settle tx
 
-use surplus_settlement::core::alloy_primitives::{keccak256, Address, B256, U256};
-use surplus_settlement::instrument_hash;
 use crate::venue::{Venue, VenueError};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use serde_json::{json, Value};
+use surplus_settlement::core::alloy_primitives::{keccak256, Address, B256, U256};
+use surplus_settlement::instrument_hash;
 
 /// EIP-712 domain `SurplusServe/1`, bound to the settlement contract + chain so
 /// an authorization for one deployment is meaningless on another.
@@ -71,8 +71,10 @@ pub fn serve_digest(
 ) -> B256 {
     let mut dom = Vec::with_capacity(160);
     dom.extend_from_slice(
-        keccak256(b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
-            .as_slice(),
+        keccak256(
+            b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
+        )
+        .as_slice(),
     );
     dom.extend_from_slice(keccak256(SERVE_DOMAIN_NAME).as_slice());
     dom.extend_from_slice(keccak256(b"1").as_slice());
@@ -119,25 +121,36 @@ impl Venue {
             return Err(VenueError::Rejected("serve authorization expired".into()));
         }
         if body.auth.expiry > now + 3600 {
-            return Err(VenueError::Rejected("serve authorization expiry too far out".into()));
+            return Err(VenueError::Rejected(
+                "serve authorization expiry too far out".into(),
+            ));
         }
         let sig = hex::decode(body.auth.signature.trim_start_matches("0x"))
             .map_err(|_| VenueError::Rejected("auth signature is not hex".into()))?;
         let messages_hash = keccak256(body.messages.get().as_bytes());
         let max_tokens = u64::from(body.max_tokens.unwrap_or(0));
         let chain_id = ctx.domain.chain_id.unwrap_or_default();
-        let digest = serve_digest(chain_id, ctx.contract, rid, messages_hash, max_tokens, body.auth.expiry);
+        let digest = serve_digest(
+            chain_id,
+            ctx.contract,
+            rid,
+            messages_hash,
+            max_tokens,
+            body.auth.expiry,
+        );
         let signer = recover_signer(digest, &sig)
             .ok_or_else(|| VenueError::Rejected("unrecoverable auth signature".into()))?;
 
-        let client =
-            surplus_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
-                .await
-                .map_err(|e| VenueError::Chain(e.to_string()))?;
+        let client = surplus_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
+            .await
+            .map_err(|e| VenueError::Chain(e.to_string()))?;
 
         // The redemption must be open, in deadline, holder-authorized, and on a
         // lot WE issued.
-        let r = client.get_redemption(rid).await.map_err(|e| VenueError::Chain(e.to_string()))?;
+        let r = client
+            .get_redemption(rid)
+            .await
+            .map_err(|e| VenueError::Chain(e.to_string()))?;
         if r.state != 1 {
             return Err(VenueError::Rejected("redemption is not open".into()));
         }
@@ -145,14 +158,21 @@ impl Venue {
             return Err(VenueError::Rejected("redemption deadline passed".into()));
         }
         if signer != r.holder {
-            return Err(VenueError::Rejected("serve authorization is not from the lot holder".into()));
+            return Err(VenueError::Rejected(
+                "serve authorization is not from the lot holder".into(),
+            ));
         }
-        let lot = client.get_lot(r.lotId).await.map_err(|e| VenueError::Chain(e.to_string()))?;
+        let lot = client
+            .get_lot(r.lotId)
+            .await
+            .map_err(|e| VenueError::Chain(e.to_string()))?;
         let me = ctx
             .operator_address_hex()
             .ok_or(VenueError::SettlementUnconfigured("operator key"))?;
         if format!("{:#x}", lot.issuer).to_lowercase() != me.to_lowercase() {
-            return Err(VenueError::Rejected("lot was not issued by this operator".into()));
+            return Err(VenueError::Rejected(
+                "lot was not issued by this operator".into(),
+            ));
         }
         // Resolve the instrument (model + token kind) from its on-chain hash.
         let inst = self
@@ -168,7 +188,9 @@ impl Venue {
             let mut redeem = self.redeem.lock().unwrap();
             let prog = redeem.entry(body.redemption_id.clone()).or_default();
             if !prog.used_auths.insert(digest) {
-                return Err(VenueError::Rejected("serve authorization already used".into()));
+                return Err(VenueError::Rejected(
+                    "serve authorization already used".into(),
+                ));
             }
             prog.served
         };
@@ -216,12 +238,17 @@ impl Venue {
         };
         if !status.is_success() {
             release_auth();
-            return Err(VenueError::Rejected(format!("router {status}: {completion}")));
+            return Err(VenueError::Rejected(format!(
+                "router {status}: {completion}"
+            )));
         }
 
         // Meter the lot's token kind; never serve past the redemption quota.
-        let usage_key =
-            if inst.token_kind == "input" { "prompt_tokens" } else { "completion_tokens" };
+        let usage_key = if inst.token_kind == "input" {
+            "prompt_tokens"
+        } else {
+            "completion_tokens"
+        };
         let used = completion
             .get("usage")
             .and_then(|u| u.get(usage_key))
@@ -270,27 +297,32 @@ impl Venue {
         let sig = hex::decode(body.signature.trim_start_matches("0x"))
             .map_err(|_| VenueError::Rejected("signature is not hex".into()))?;
 
-        let client =
-            surplus_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
-                .await
-                .map_err(|e| VenueError::Chain(e.to_string()))?;
+        let client = surplus_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
+            .await
+            .map_err(|e| VenueError::Chain(e.to_string()))?;
         client
             .settle_redemption(rid, body.served_tokens, sig)
             .await
             .map_err(|e| VenueError::Chain(e.to_string()))?;
         self.redeem.lock().unwrap().remove(&body.redemption_id);
 
-        Ok(json!({ "ok": true, "redemptionId": body.redemption_id, "servedTokens": body.served_tokens }))
+        Ok(
+            json!({ "ok": true, "redemptionId": body.redemption_id, "servedTokens": body.served_tokens }),
+        )
     }
 
     #[cfg(not(feature = "chain"))]
     pub async fn redeem_serve(&self, _body: RedeemServeBody) -> Result<Value, VenueError> {
-        Err(VenueError::SettlementUnconfigured("build with --features chain"))
+        Err(VenueError::SettlementUnconfigured(
+            "build with --features chain",
+        ))
     }
 
     #[cfg(not(feature = "chain"))]
     pub async fn redeem_receipt(&self, _body: RedeemReceiptBody) -> Result<Value, VenueError> {
-        Err(VenueError::SettlementUnconfigured("build with --features chain"))
+        Err(VenueError::SettlementUnconfigured(
+            "build with --features chain",
+        ))
     }
 }
 
@@ -302,26 +334,68 @@ mod tests {
 
     #[test]
     fn serve_digest_signs_and_recovers() {
-        let signer = Signer::from_hex(
-            "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
-        )
-        .unwrap();
+        let signer =
+            Signer::from_hex("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d")
+                .unwrap();
         let rid = B256::repeat_byte(0x11);
         let mh = keccak256(br#"[{"role":"user","content":"hi"}]"#);
-        let settlement: Address =
-            "0x1cD49739e9CF48C4906aDb44021dd8cE0d8aBa64".parse().unwrap();
-        let digest = serve_digest(U256::from(84532u64), settlement, rid, mh, 200, 1_900_000_000);
+        let settlement: Address = "0x1cD49739e9CF48C4906aDb44021dd8cE0d8aBa64"
+            .parse()
+            .unwrap();
+        let digest = serve_digest(
+            U256::from(84532u64),
+            settlement,
+            rid,
+            mh,
+            200,
+            1_900_000_000,
+        );
         let sig = signer.sign_digest(digest);
         assert_eq!(recover_signer(digest, &sig), Some(signer.address()));
 
         // Every signed field perturbs the digest.
         let variants = [
             serve_digest(U256::from(1u64), settlement, rid, mh, 200, 1_900_000_000),
-            serve_digest(U256::from(84532u64), Address::ZERO, rid, mh, 200, 1_900_000_000),
-            serve_digest(U256::from(84532u64), settlement, B256::ZERO, mh, 200, 1_900_000_000),
-            serve_digest(U256::from(84532u64), settlement, rid, B256::ZERO, 200, 1_900_000_000),
-            serve_digest(U256::from(84532u64), settlement, rid, mh, 201, 1_900_000_000),
-            serve_digest(U256::from(84532u64), settlement, rid, mh, 200, 1_900_000_001),
+            serve_digest(
+                U256::from(84532u64),
+                Address::ZERO,
+                rid,
+                mh,
+                200,
+                1_900_000_000,
+            ),
+            serve_digest(
+                U256::from(84532u64),
+                settlement,
+                B256::ZERO,
+                mh,
+                200,
+                1_900_000_000,
+            ),
+            serve_digest(
+                U256::from(84532u64),
+                settlement,
+                rid,
+                B256::ZERO,
+                200,
+                1_900_000_000,
+            ),
+            serve_digest(
+                U256::from(84532u64),
+                settlement,
+                rid,
+                mh,
+                201,
+                1_900_000_000,
+            ),
+            serve_digest(
+                U256::from(84532u64),
+                settlement,
+                rid,
+                mh,
+                200,
+                1_900_000_001,
+            ),
         ];
         for v in variants {
             assert_ne!(v, digest);

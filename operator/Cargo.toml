@@ -30,6 +30,7 @@ required-features = ["blueprint"]
 [dependencies]
 surplus-orderbook = { path = "../crates/orderbook" }
 surplus-settlement = { path = "../crates/settlement" }
+surplus-matcher = { path = "../crates/matcher" }
 axum = { version = "0.7", features = ["json", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync"] }
 serde = { version = "1", features = ["derive"] }
