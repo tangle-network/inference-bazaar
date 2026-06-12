@@ -120,32 +120,52 @@ pub struct ClobConfig {
 impl ClobConfig {
     /// `SURPLUS_CLOB_OPERATORS="0xabc..=http://h1:9500,0xdef..=http://h2:9400"`
     /// plus `SURPLUS_CLOB_THRESHOLD` (default 2) and `SURPLUS_CLOB_EPOCH_SECS`
-    /// (default 10). Returns None when unset — the shared CLOB is opt-in.
-    pub fn from_env() -> Option<Self> {
-        let raw = std::env::var("SURPLUS_CLOB_OPERATORS").ok()?;
+    /// (default 10). `Ok(None)` when unset — the shared CLOB is opt-in. A SET
+    /// but malformed value is an ERROR, never a silent skip: a node that boots
+    /// green while quietly not participating also stalls every peer that needs
+    /// its co-signature for quorum.
+    pub fn from_env() -> anyhow::Result<Option<Self>> {
+        let Ok(raw) = std::env::var("SURPLUS_CLOB_OPERATORS") else {
+            return Ok(None);
+        };
         let mut operators = Vec::new();
         for entry in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-            let (addr, url) = entry.split_once('=')?;
-            let addr: Address = addr.trim().parse().ok()?;
+            let (addr, url) = entry.split_once('=').ok_or_else(|| {
+                anyhow::anyhow!("SURPLUS_CLOB_OPERATORS entry '{entry}' is not 0xaddr=url")
+            })?;
+            let addr: Address = addr.trim().parse().map_err(|_| {
+                anyhow::anyhow!("SURPLUS_CLOB_OPERATORS entry '{entry}' has a bad address")
+            })?;
             operators.push((addr, url.trim().trim_end_matches('/').to_string()));
         }
-        if operators.is_empty() {
-            return None;
-        }
-        let threshold = std::env::var("SURPLUS_CLOB_THRESHOLD")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(2);
-        let epoch_secs = std::env::var("SURPLUS_CLOB_EPOCH_SECS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .filter(|v: &u64| *v >= 2)
-            .unwrap_or(10);
-        Some(ClobConfig {
+        anyhow::ensure!(
+            !operators.is_empty(),
+            "SURPLUS_CLOB_OPERATORS is set but lists no operators"
+        );
+        let threshold = match std::env::var("SURPLUS_CLOB_THRESHOLD") {
+            Ok(v) => v
+                .parse()
+                .map_err(|_| anyhow::anyhow!("SURPLUS_CLOB_THRESHOLD '{v}' is not a number"))?,
+            Err(_) => 2,
+        };
+        let epoch_secs = match std::env::var("SURPLUS_CLOB_EPOCH_SECS") {
+            Ok(v) => {
+                let secs: u64 = v.parse().map_err(|_| {
+                    anyhow::anyhow!("SURPLUS_CLOB_EPOCH_SECS '{v}' is not a number")
+                })?;
+                anyhow::ensure!(
+                    secs >= 2,
+                    "SURPLUS_CLOB_EPOCH_SECS must be >= 2, got {secs}"
+                );
+                secs
+            }
+            Err(_) => 10,
+        };
+        Ok(Some(ClobConfig {
             epoch_secs,
             threshold,
             operators,
-        })
+        }))
     }
 
     fn addresses(&self) -> Vec<Address> {
@@ -608,16 +628,20 @@ impl Clob {
         let batch_nonce = self.read_batch_nonce().await?;
         let digest = batch_digest(batch_nonce, batch.fills_hash, &domain);
 
-        // Self-attest, then collect peer co-signatures over the transport.
+        // One signature, two jobs: it is the proposer's attestation AND the
+        // proposal's transport authentication (peers verify it recovers to the
+        // elected proposer before doing any expensive verification).
+        let self_sig = self.signer().sign_digest(digest);
         let mut attestations = vec![Attestation {
             attester: self.me,
-            signature: self.signer().sign_digest(digest).to_vec(),
+            signature: self_sig.to_vec(),
         }];
         let wire = WireProposal {
             epoch,
             batch_nonce,
             instrument_id: inst.id.clone(),
             proposer: self.me,
+            proposer_sig: format!("0x{}", surplus_settlement::core::hex::encode(self_sig)),
             orders: snapshot,
             fills_hash: batch.fills_hash,
         };
@@ -730,6 +754,23 @@ impl Clob {
                 }),
             ));
         }
+        // Transport authentication: the proposal must carry the elected
+        // proposer's signature over the batch digest it claims. Without this,
+        // anyone could replay public gossip data as a "proposal" and trigger
+        // this node's co-sign side effects (pool prune + settled marking) —
+        // stranding orders with no key — and burn a full match_epoch per
+        // request. One ecrecover, before any expensive work.
+        let domain = self.domain().clone();
+        let claimed_digest = batch_digest(wire.batch_nonce, wire.fills_hash, &domain);
+        let proposer_sig =
+            surplus_settlement::core::hex::decode(wire.proposer_sig.trim_start_matches("0x"))
+                .unwrap_or_default();
+        if recover_signer(claimed_digest, &proposer_sig) != Some(wire.proposer) {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                json!({ "verdict": "unauthenticated-proposer" }),
+            ));
+        }
         let Some(inst) = self.instrument(&wire.instrument_id) else {
             return Err((
                 StatusCode::NOT_FOUND,
@@ -737,7 +778,6 @@ impl Clob {
             ));
         };
 
-        let domain = self.domain().clone();
         let my_orders = self.snapshot(&wire.instrument_id);
         let proposal = BatchProposal {
             epoch: wire.epoch,
@@ -865,6 +905,11 @@ pub struct WireProposal {
     pub batch_nonce: u64,
     pub instrument_id: String,
     pub proposer: Address,
+    /// The proposer's 65-byte signature over `batch_digest(batchNonce,
+    /// fillsHash)`, 0x-hex — the same signature it self-attests with. Proves
+    /// the proposal really comes from the elected proposer; peers refuse
+    /// co-sign side effects without it.
+    pub proposer_sig: String,
     /// The matched order set, trader signatures included (`SignedOrder`
     /// serializes its signature as 0x-hex).
     pub orders: Vec<SignedOrder>,
@@ -964,7 +1009,7 @@ async fn clob_status(State(c): State<SharedClob>) -> impl IntoResponse {
 /// ops endpoints — mounted in both transports; in mesh mode the fanout simply
 /// rides the mesh instead of peer URLs).
 pub fn start_from_env(venue: Arc<Venue>) -> anyhow::Result<Option<(SharedClob, Router)>> {
-    let Some(cfg) = ClobConfig::from_env() else {
+    let Some(cfg) = ClobConfig::from_env()? else {
         return Ok(None);
     };
     #[cfg(feature = "mesh")]

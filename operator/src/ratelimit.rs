@@ -82,7 +82,11 @@ impl RateLimiter {
 fn route_cost(path: &str) -> f64 {
     match path {
         "/redeem" => 10.0,
+        // A proposal triggers a full match_epoch re-execution plus a signature
+        // recovery per order — the costliest thing a request can buy.
+        "/clob/propose" => 5.0,
         "/rfq" | "/rfq/fill" | "/redeem/receipt" | "/settlement/flush" => 3.0,
+        "/clob/order" | "/clob/gossip" | "/clob/cancel" | "/clob/cancel-gossip" => 2.0,
         "/health" => 0.0,
         _ => 1.0,
     }

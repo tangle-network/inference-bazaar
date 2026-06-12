@@ -16,8 +16,18 @@ use surplus_operator::config::{
 };
 use surplus_operator::Venue;
 use surplus_settlement::core::alloy_primitives::{Address, B256, U256};
-use surplus_settlement::core::{instrument_hash, order_digest, Order};
+use surplus_settlement::core::{batch_digest, instrument_hash, order_digest, Order};
 use surplus_settlement::{Signer, SIDE_BUY, SIDE_SELL};
+
+/// The proposer's transport-auth signature over the claimed batch digest.
+fn proposer_sig(key: &str, batch_nonce: u64, fills_hash: B256) -> String {
+    let dom = surplus_settlement::domain(CHAIN_ID, CONTRACT.parse().unwrap());
+    let sig =
+        Signer::from_hex(key)
+            .unwrap()
+            .sign_digest(batch_digest(batch_nonce, fills_hash, &dom));
+    format!("0x{}", surplus_settlement::core::hex::encode(sig))
+}
 
 const INSTRUMENT: &str = "anthropic/claude-opus-4-8:output";
 const CONTRACT: &str = "0x00000000000000000000000000000000000000cc";
@@ -299,6 +309,7 @@ async fn forged_and_impersonated_proposals_rejected() {
         batch_nonce: 0,
         instrument_id: INSTRUMENT.into(),
         proposer: operators[leader].0,
+        proposer_sig: proposer_sig(OP_KEYS[leader], 0, batch.fills_hash),
         orders: orders.clone(),
         fills_hash: batch.fills_hash,
     };
@@ -312,21 +323,19 @@ async fn forged_and_impersonated_proposals_rejected() {
     let body: serde_json::Value = r.json().await.unwrap();
     assert_eq!(body["verdict"], "forged", "{body}");
 
-    // Impersonation: correct content, wrong proposer for the epoch → refused.
+    // Impersonation: correct content, wrong proposer for the epoch → refused
+    // even with that party's own valid signature.
+    let solo_hash =
+        surplus_matcher::match_epoch(INSTRUMENT, 1000, 1000, &dom, &[honest_sell.order.clone()])
+            .fills_hash;
     let impostor = WireProposal {
         epoch,
         batch_nonce: 0,
         instrument_id: INSTRUMENT.into(),
         proposer: operators[1 - leader].0,
+        proposer_sig: proposer_sig(OP_KEYS[1 - leader], 0, solo_hash),
         orders: vec![to_signed(&honest_sell)],
-        fills_hash: surplus_matcher::match_epoch(
-            INSTRUMENT,
-            1000,
-            1000,
-            &dom,
-            &[honest_sell.order.clone()],
-        )
-        .fills_hash,
+        fills_hash: solo_hash,
     };
     let r = http
         .post(format!("{peer_url}/clob/propose"))
@@ -335,6 +344,28 @@ async fn forged_and_impersonated_proposals_rejected() {
         .await
         .unwrap();
     assert_eq!(r.status(), reqwest::StatusCode::FORBIDDEN);
+
+    // Unauthenticated: the ELECTED proposer is claimed, but the signature is
+    // someone else's — the replay-public-gossip attack. Refused before any
+    // verification work, and the peer's pool must be untouched.
+    let unauthenticated = WireProposal {
+        epoch,
+        batch_nonce: 0,
+        instrument_id: INSTRUMENT.into(),
+        proposer: operators[leader].0,
+        proposer_sig: proposer_sig(SELLER_KEY, 0, batch.fills_hash),
+        orders,
+        fills_hash: batch.fills_hash,
+    };
+    let r = http
+        .post(format!("{peer_url}/clob/propose"))
+        .json(&unauthenticated)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let body: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(body["verdict"], "unauthenticated-proposer", "{body}");
 }
 
 #[tokio::test]
@@ -354,11 +385,14 @@ async fn tampered_fills_hash_rejected() {
     };
 
     // The proposer lies about the result (e.g., claims a different exec price).
+    // Its signature over the lying digest is genuine — authentication passes,
+    // recomputation catches the lie.
     let proposal = WireProposal {
         epoch,
         batch_nonce: 0,
         instrument_id: INSTRUMENT.into(),
         proposer: operators[leader].0,
+        proposer_sig: proposer_sig(OP_KEYS[leader], 0, B256::repeat_byte(0xde)),
         orders: vec![to_signed(&sell), to_signed(&buy)],
         fills_hash: B256::repeat_byte(0xde),
     };
