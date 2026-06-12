@@ -145,7 +145,11 @@ pub fn verify_proposal(
 /// that recover to a *distinct bonded* operator over `digest`, and returns the
 /// signature set once it reaches `threshold` — exactly what `settleBatchAttested`
 /// re-verifies on-chain. `None` until quorum, so the proposer knows when to
-/// submit. Signature order follows `attestations` (deterministic for the caller).
+/// submit. Signatures are ordered by ascending signer address because the
+/// contract's `_verifyQuorum` REQUIRES strictly ascending recovered signers —
+/// collection order (proposer self-signs first) only passes when the proposer
+/// happens to hold the lowest address, i.e. it works or reverts by election
+/// parity. The output here is submit-ready.
 pub fn aggregate_attestation(
     digest: B256,
     attestations: &[Attestation],
@@ -154,16 +158,20 @@ pub fn aggregate_attestation(
 ) -> Option<Vec<Vec<u8>>> {
     let bonded: HashSet<Address> = bonded.iter().copied().collect();
     let mut counted: HashSet<Address> = HashSet::new();
-    let mut sigs: Vec<Vec<u8>> = Vec::new();
+    let mut accepted: Vec<(Address, Vec<u8>)> = Vec::new();
     for a in attestations {
         if recover_signer(digest, &a.signature) == Some(a.attester)
             && bonded.contains(&a.attester)
             && counted.insert(a.attester)
         {
-            sigs.push(a.signature.clone());
+            accepted.push((a.attester, a.signature.clone()));
         }
     }
-    (sigs.len() >= threshold).then_some(sigs)
+    if accepted.len() < threshold {
+        return None;
+    }
+    accepted.sort_by_key(|(addr, _)| *addr);
+    Some(accepted.into_iter().map(|(_, sig)| sig).collect())
 }
 
 #[cfg(test)]
@@ -320,6 +328,36 @@ mod tests {
             verdict,
             Verdict::Censored(vec![order_digest(&omitted.order, &dom())])
         );
+    }
+
+    /// The contract's `_verifyQuorum` requires strictly ascending recovered
+    /// signers; the aggregate must be submit-ready no matter who collected it
+    /// (the proposer self-signs FIRST, so collection order is descending
+    /// whenever the proposer holds a high address).
+    #[test]
+    fn aggregation_orders_signatures_by_ascending_signer() {
+        let signers: Vec<Signer> = KEYS.iter().map(|k| Signer::from_hex(k).unwrap()).collect();
+        let bonded: Vec<Address> = signers.iter().map(|s| s.address()).collect();
+        let digest = B256::repeat_byte(0xab);
+
+        let mut descending: Vec<&Signer> = signers.iter().collect();
+        descending.sort_by_key(|s| std::cmp::Reverse(s.address()));
+        let atts: Vec<Attestation> = descending
+            .iter()
+            .map(|s| Attestation {
+                attester: s.address(),
+                signature: s.sign_digest(digest).to_vec(),
+            })
+            .collect();
+
+        let sigs = aggregate_attestation(digest, &atts, &bonded, 3).unwrap();
+        let recovered: Vec<Address> = sigs
+            .iter()
+            .map(|s| recover_signer(digest, s).unwrap())
+            .collect();
+        let mut want = bonded.clone();
+        want.sort_unstable();
+        assert_eq!(recovered, want, "sigs must recover in ascending signer order");
     }
 
     #[test]

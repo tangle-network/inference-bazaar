@@ -31,6 +31,7 @@ const settlementAbi = parseAbi([
   'function depositCollateral(uint256 amount)',
   'function balances(address) view returns (uint256)',
   'function collateral(address) view returns (uint256)',
+  'function liability(address) view returns (uint256)',
   'function batchNonce() view returns (uint64)',
   'function lots(bytes32) view returns (address holder, address issuer, bytes32 instrument, uint64 qtyTokens, uint64 lockedTokens, uint64 expiry, uint128 notionalMicro)',
 ])
@@ -76,11 +77,16 @@ if ((await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionN
   await retry(async () => tx(await bw.writeContract({ address: USD, abi: usdAbi, functionName: 'approve', args: [SETTLEMENT, COST] })), 'buyer approve')
   await retry(async () => tx(await bw.writeContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'deposit', args: [COST] })), 'buyer deposit')
 }
-const COLLATERAL = (COST * 110n) / 100n
-if ((await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'collateral', args: [seller.address] })) < COLLATERAL) {
-  await retry(async () => tx(await sw.writeContract({ address: USD, abi: usdAbi, functionName: 'mint', args: [seller.address, COLLATERAL] })), 'seller mint')
-  await retry(async () => tx(await sw.writeContract({ address: USD, abi: usdAbi, functionName: 'approve', args: [SETTLEMENT, COLLATERAL] })), 'seller approve')
-  await retry(async () => tx(await sw.writeContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'depositCollateral', args: [COLLATERAL] })), 'seller collateral')
+// Collateral must cover EXISTING liability (prior unredeemed lots) plus this
+// mint, with the 500bps penalty margin — re-runs accumulate liability.
+const liability = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'liability', args: [seller.address] })
+const required = ((liability + COST) * 110n) / 100n
+const have = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'collateral', args: [seller.address] })
+if (have < required) {
+  const topup = required - have
+  await retry(async () => tx(await sw.writeContract({ address: USD, abi: usdAbi, functionName: 'mint', args: [seller.address, topup] })), 'seller mint')
+  await retry(async () => tx(await sw.writeContract({ address: USD, abi: usdAbi, functionName: 'approve', args: [SETTLEMENT, topup] })), 'seller approve')
+  await retry(async () => tx(await sw.writeContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'depositCollateral', args: [topup] })), 'seller collateral')
 }
 console.log('funded on Base Sepolia')
 
