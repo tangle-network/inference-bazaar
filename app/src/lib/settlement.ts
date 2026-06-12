@@ -47,6 +47,10 @@ export const RECEIPT_TYPES = {
   RedemptionReceipt: [
     { name: 'redemptionId', type: 'bytes32' },
     { name: 'servedTokens', type: 'uint64' },
+    // Proof of WHAT was served: keccak256(modelIdHash, messagesHash, outputHash).
+    // /redeem returns it; the holder reproduces outputHash from the served
+    // content before signing. Must match RECEIPT_TYPEHASH in the contract.
+    { name: 'workCommitment', type: 'bytes32' },
   ],
 } as const
 

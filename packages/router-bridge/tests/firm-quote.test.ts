@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   BATCH_TYPES,
+  buildBatchMessage,
   buildOrderMessage,
   buildReceiptMessage,
+  buildServeMessage,
   CANONICAL_TYPE_STRINGS,
   fillCostMicro,
   ORDER_TYPES,
   RECEIPT_TYPES,
+  SERVE_TYPES,
   SIDE_BUY,
   ZERO_LOT,
   type FirmOrder,
@@ -17,24 +20,42 @@ function typeString(name: string, fields: readonly { name: string; type: string 
   return `${name}(${fields.map((f) => `${f.type} ${f.name}`).join(',')})`
 }
 
+// The canonical typehash preimages, pinned INDEPENDENTLY here (these exact
+// strings are the typehash inputs in contracts/src/SurplusSettlement.sol,
+// crates/settlement-core/src/lib.rs, and operator/src/redeem.rs). Asserting the
+// types objects against these literals — NOT against CANONICAL_TYPE_STRINGS,
+// which lives in the same module — is what catches a real drift (e.g. a missing
+// bookId in SettlementBatch) instead of a tautology.
+const PINNED = {
+  Order:
+    'Order(bytes32 instrument,uint8 side,uint64 priceMicroPerM,uint64 qtyTokens,bytes32 lotId,address trader,uint64 expiry,bytes32 salt)',
+  RedemptionReceipt: 'RedemptionReceipt(bytes32 redemptionId,uint64 servedTokens,bytes32 workCommitment)',
+  SettlementBatch: 'SettlementBatch(bytes32 bookId,uint64 batchNonce,bytes32 fillsHash)',
+  ServeRequest: 'ServeRequest(bytes32 redemptionId,bytes32 messagesHash,uint64 maxTokens,uint64 expiry)',
+} as const
+
 describe('EIP-712 type parity with SurplusSettlement.sol / settlement-core', () => {
-  // The wallet derives the typehash from the types object; if these strings
-  // match the canonical ones (pinned byte-for-byte against Solidity and Rust
-  // in their parity tests), wallet signatures verify on-chain.
-  it('Order type string matches the contract typehash preimage', () => {
-    expect(typeString('Order', ORDER_TYPES.Order)).toBe(CANONICAL_TYPE_STRINGS.Order)
+  // Each types object must produce the canonical typehash preimage byte-for-byte,
+  // AND the module's own CANONICAL_TYPE_STRINGS must equal the same literal — so
+  // a wallet, the contract, and the Rust core all hash identical typehashes.
+  it('Order', () => {
+    expect(typeString('Order', ORDER_TYPES.Order)).toBe(PINNED.Order)
+    expect(CANONICAL_TYPE_STRINGS.Order).toBe(PINNED.Order)
   })
 
-  it('RedemptionReceipt type string matches', () => {
-    expect(typeString('RedemptionReceipt', RECEIPT_TYPES.RedemptionReceipt)).toBe(
-      CANONICAL_TYPE_STRINGS.RedemptionReceipt,
-    )
+  it('RedemptionReceipt (commits workCommitment)', () => {
+    expect(typeString('RedemptionReceipt', RECEIPT_TYPES.RedemptionReceipt)).toBe(PINNED.RedemptionReceipt)
+    expect(CANONICAL_TYPE_STRINGS.RedemptionReceipt).toBe(PINNED.RedemptionReceipt)
   })
 
-  it('SettlementBatch type string matches', () => {
-    expect(typeString('SettlementBatch', BATCH_TYPES.SettlementBatch)).toBe(
-      CANONICAL_TYPE_STRINGS.SettlementBatch,
-    )
+  it('SettlementBatch (commits bookId)', () => {
+    expect(typeString('SettlementBatch', BATCH_TYPES.SettlementBatch)).toBe(PINNED.SettlementBatch)
+    expect(CANONICAL_TYPE_STRINGS.SettlementBatch).toBe(PINNED.SettlementBatch)
+  })
+
+  it('ServeRequest', () => {
+    expect(typeString('ServeRequest', SERVE_TYPES.ServeRequest)).toBe(PINNED.ServeRequest)
+    expect(CANONICAL_TYPE_STRINGS.ServeRequest).toBe(PINNED.ServeRequest)
   })
 })
 
@@ -65,10 +86,30 @@ describe('buildOrderMessage', () => {
     expect(Object.keys(msg.message)).toEqual(ORDER_TYPES.Order.map((f) => f.name))
   })
 
-  it('builds redemption receipts', () => {
-    const msg = buildReceiptMessage('0x' + '01'.repeat(32), 20_000n, 3799, '0x' + '11'.repeat(20))
+  it('builds work-committed redemption receipts', () => {
+    const msg = buildReceiptMessage(
+      '0x' + '01'.repeat(32),
+      20_000n,
+      '0x' + '77'.repeat(32),
+      3799,
+      '0x' + '11'.repeat(20),
+    )
     expect(msg.primaryType).toBe('RedemptionReceipt')
     expect(msg.message.servedTokens).toBe(20_000n)
+    expect(msg.message.workCommitment).toBe('0x' + '77'.repeat(32))
+    expect(Object.keys(msg.message)).toEqual(RECEIPT_TYPES.RedemptionReceipt.map((f) => f.name))
+  })
+
+  it('builds batch messages with bookId', () => {
+    const msg = buildBatchMessage('0x' + 'b0'.repeat(32), 0n, '0x' + 'fa'.repeat(32), 3799, '0x' + '11'.repeat(20))
+    expect(msg.primaryType).toBe('SettlementBatch')
+    expect(Object.keys(msg.message)).toEqual(BATCH_TYPES.SettlementBatch.map((f) => f.name))
+  })
+
+  it('builds serve requests under the SurplusServe domain', () => {
+    const msg = buildServeMessage('0x' + '01'.repeat(32), '0x' + '02'.repeat(32), 1024n, 1_900_000_000n, 3799, '0x' + '11'.repeat(20))
+    expect(msg.domain.name).toBe('SurplusServe')
+    expect(msg.primaryType).toBe('ServeRequest')
   })
 })
 

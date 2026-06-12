@@ -94,10 +94,11 @@ const receiptTyped = {
     RedemptionReceipt: [
       { name: 'redemptionId', type: 'bytes32' },
       { name: 'servedTokens', type: 'uint64' },
+      { name: 'workCommitment', type: 'bytes32' },
     ],
   },
   primaryType: 'RedemptionReceipt',
-  message: { redemptionId, servedTokens: BigInt(serve.totalServedTokens) },
+  message: { redemptionId, servedTokens: BigInt(serve.totalServedTokens), workCommitment: serve.workCommitment },
 }
 if (hashTypedData(receiptTyped) !== serve.receiptDigest) {
   throw new Error(`receipt digest mismatch: local ${hashTypedData(receiptTyped)} vs venue ${serve.receiptDigest}`)
@@ -105,7 +106,7 @@ if (hashTypedData(receiptTyped) !== serve.receiptDigest) {
 const signature = await buyer.signTypedData(receiptTyped)
 const settle = await (await fetch(`${VENUE}/redeem/receipt`, {
   method: 'POST', headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ redemptionId, servedTokens: serve.totalServedTokens, signature }),
+  body: JSON.stringify({ redemptionId, servedTokens: serve.totalServedTokens, workCommitment: serve.workCommitment, signature }),
 })).json()
 console.log('settled:', JSON.stringify(settle))
 

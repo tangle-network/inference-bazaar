@@ -110,19 +110,38 @@ function SpendLot({ lot }: { lot: CreditLot }) {
       })
       if (!res.ok) throw new Error(await res.text())
       const out = await res.json()
+      // Reproduce outputHash over the served content (mirrors the operator's
+      // output_hash: concatenated choice contents) and refuse to sign if the
+      // operator's work commitment doesn't match what we actually received.
+      const served = (out.completion?.choices ?? [])
+        .map((c: { message?: { content?: string } }) => c.message?.content ?? '')
+        .join('')
+      const localOutputHash = keccak256(toBytes(served))
+      if (out.outputHash && out.outputHash !== localOutputHash) {
+        throw new Error('served output does not match the operator work commitment')
+      }
       const text: string = out.completion?.choices?.[0]?.message?.content ?? ''
       setBusy('Sign the receipt…')
       const receiptSig = await signTypedDataAsync({
         domain: EIP712_DOMAIN,
         types: RECEIPT_TYPES,
         primaryType: 'RedemptionReceipt',
-        message: { redemptionId, servedTokens: BigInt(out.totalServedTokens) },
+        message: {
+          redemptionId,
+          servedTokens: BigInt(out.totalServedTokens),
+          workCommitment: out.workCommitment,
+        },
       })
       setBusy('Settling on-chain…')
       const res2 = await fetch(`${venueUrl}/redeem/receipt`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ redemptionId, servedTokens: out.totalServedTokens, signature: receiptSig }),
+        body: JSON.stringify({
+          redemptionId,
+          servedTokens: out.totalServedTokens,
+          workCommitment: out.workCommitment,
+          signature: receiptSig,
+        }),
       })
       if (!res2.ok) throw new Error(await res2.text())
       setServed({ text, servedTokens: Number(out.totalServedTokens) })

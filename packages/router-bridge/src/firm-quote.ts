@@ -36,13 +36,31 @@ export const RECEIPT_TYPES = {
   RedemptionReceipt: [
     { name: 'redemptionId', type: 'bytes32' },
     { name: 'servedTokens', type: 'uint64' },
+    { name: 'workCommitment', type: 'bytes32' },
   ],
 } as const
 
 export const BATCH_TYPES = {
   SettlementBatch: [
+    { name: 'bookId', type: 'bytes32' },
     { name: 'batchNonce', type: 'uint64' },
     { name: 'fillsHash', type: 'bytes32' },
+  ],
+} as const
+
+/** Off-chain holder gate the operator verifies (`operator/src/redeem.rs`). Its
+ * own domain (`SurplusServe`/1), NOT a settlement-contract struct. */
+export const SURPLUS_SERVE_DOMAIN = {
+  name: 'SurplusServe',
+  version: '1',
+} as const
+
+export const SERVE_TYPES = {
+  ServeRequest: [
+    { name: 'redemptionId', type: 'bytes32' },
+    { name: 'messagesHash', type: 'bytes32' },
+    { name: 'maxTokens', type: 'uint64' },
+    { name: 'expiry', type: 'uint64' },
   ],
 } as const
 
@@ -50,8 +68,9 @@ export const BATCH_TYPES = {
 export const CANONICAL_TYPE_STRINGS = {
   Order:
     'Order(bytes32 instrument,uint8 side,uint64 priceMicroPerM,uint64 qtyTokens,bytes32 lotId,address trader,uint64 expiry,bytes32 salt)',
-  RedemptionReceipt: 'RedemptionReceipt(bytes32 redemptionId,uint64 servedTokens)',
-  SettlementBatch: 'SettlementBatch(uint64 batchNonce,bytes32 fillsHash)',
+  RedemptionReceipt: 'RedemptionReceipt(bytes32 redemptionId,uint64 servedTokens,bytes32 workCommitment)',
+  SettlementBatch: 'SettlementBatch(bytes32 bookId,uint64 batchNonce,bytes32 fillsHash)',
+  ServeRequest: 'ServeRequest(bytes32 redemptionId,bytes32 messagesHash,uint64 maxTokens,uint64 expiry)',
 } as const
 
 /** A firm order exactly as signed and as the operator's HTTP API expects it. */
@@ -98,6 +117,7 @@ export function buildOrderMessage(order: FirmOrder, chainId: number, contractAdd
 export function buildReceiptMessage(
   redemptionId: string,
   servedTokens: bigint,
+  workCommitment: string,
   chainId: number,
   contractAddress: string,
 ) {
@@ -112,6 +132,56 @@ export function buildReceiptMessage(
     message: {
       redemptionId: redemptionId as `0x${string}`,
       servedTokens,
+      workCommitment: workCommitment as `0x${string}`,
+    },
+  }
+}
+
+export function buildBatchMessage(
+  bookId: string,
+  batchNonce: bigint,
+  fillsHash: string,
+  chainId: number,
+  contractAddress: string,
+) {
+  return {
+    domain: {
+      ...SURPLUS_SETTLEMENT_DOMAIN,
+      chainId,
+      verifyingContract: contractAddress as `0x${string}`,
+    },
+    types: BATCH_TYPES,
+    primaryType: 'SettlementBatch' as const,
+    message: {
+      bookId: bookId as `0x${string}`,
+      batchNonce,
+      fillsHash: fillsHash as `0x${string}`,
+    },
+  }
+}
+
+/** Build the holder's ServeRequest auth (off-chain `SurplusServe` domain). */
+export function buildServeMessage(
+  redemptionId: string,
+  messagesHash: string,
+  maxTokens: bigint,
+  expiry: bigint,
+  chainId: number,
+  contractAddress: string,
+) {
+  return {
+    domain: {
+      ...SURPLUS_SERVE_DOMAIN,
+      chainId,
+      verifyingContract: contractAddress as `0x${string}`,
+    },
+    types: SERVE_TYPES,
+    primaryType: 'ServeRequest' as const,
+    message: {
+      redemptionId: redemptionId as `0x${string}`,
+      messagesHash: messagesHash as `0x${string}`,
+      maxTokens,
+      expiry,
     },
   }
 }
