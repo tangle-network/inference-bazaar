@@ -67,6 +67,14 @@ const MAX_POOL: usize = 10_000;
 /// expiry. Two days bounds the unseen-order case without growing the set.
 const CANCEL_TTL_SECS: u64 = 2 * 24 * 3600;
 
+/// How long a proposer waits for peer co-signatures, derived from the epoch so
+/// it can never overrun a short epoch into the next round (audit M7: a fixed
+/// 8s window overlapped any `epoch_secs < 8`). 80% of the epoch leaves headroom
+/// for the on-chain submit, clamped to a sane floor/ceiling.
+pub fn attest_deadline(epoch_secs: u64) -> Duration {
+    Duration::from_millis((epoch_secs * 800).clamp(1_000, 8_000))
+}
+
 // EIP-712 `SurplusCancel/1`, domain-separated from every other Surplus signature
 // (settlement orders, serve auths) so a cancel can never be replayed as anything
 // else. Mirrors the on-chain `cancelOrder` authority (msg.sender == trader) with
@@ -550,6 +558,16 @@ impl Clob {
         now_unix() / self.cfg.epoch_secs
     }
 
+    /// The deterministic wall-clock time by which `epoch`'s batch must have
+    /// settled: the epoch closes at `(epoch+1)*epoch_secs`, plus a margin for
+    /// the on-chain submit. An order must stay valid through this instant or it
+    /// can revert the batch with `OrderExpired`. Derived from the AGREED epoch
+    /// (not each node's `now`), so proposer and verifiers compute the identical
+    /// cutoff and never disagree on which orders are in (audit M3).
+    fn settlement_deadline(&self, epoch: u64) -> u64 {
+        (epoch + 1) * self.cfg.epoch_secs + EXPIRY_MARGIN_SECS
+    }
+
     pub(crate) fn domain(&self) -> &surplus_settlement::Eip712Domain {
         &self.venue.settle.as_ref().expect("checked in new()").domain
     }
@@ -593,6 +611,18 @@ impl Clob {
                 "order expires too soon to batch".into(),
             ));
         }
+        // The integer matching book is i64-domained; an order whose price or qty
+        // exceeds i64::MAX is settleable via settleFills but `match_epoch` would
+        // silently drop it (audit L2). Reject it here with a clear reason rather
+        // than admit an order the CLOB can never match.
+        if i64::try_from(signed.order.priceMicroPerM).is_err()
+            || i64::try_from(signed.order.qtyTokens).is_err()
+        {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "price/qty exceeds the matchable range (use the RFQ rail)".into(),
+            ));
+        }
         let digest = signed.digest(self.domain());
         // Settlement is final: an order a co-signed batch touched can never
         // re-enter the pool, however many times its bytes are replayed.
@@ -632,14 +662,18 @@ impl Clob {
         }))
     }
 
-    /// Snapshot the pool for one instrument, dropping orders that expire too
-    /// soon to settle (the contract rejects the whole batch on one expired order).
-    fn snapshot(&self, instrument_id: &str) -> Vec<SignedOrder> {
-        let horizon = now_unix() + EXPIRY_MARGIN_SECS;
+    /// Snapshot the pool for one instrument for the given epoch, dropping orders
+    /// that won't survive to this epoch's settlement (the contract reverts the
+    /// whole batch on one `OrderExpired`). The cutoff is epoch-deterministic so
+    /// every verifier drops exactly the same orders.
+    fn snapshot(&self, instrument_id: &str, epoch: u64) -> Vec<SignedOrder> {
+        let deadline = self.settlement_deadline(epoch);
         let mut pool = self.pool.lock().unwrap();
-        pool.retain(|_, e| e.signed.order.expiry >= horizon);
+        // Hygiene: evict anything already past its own absolute expiry.
+        let now = now_unix();
+        pool.retain(|_, e| e.signed.order.expiry >= now);
         pool.values()
-            .filter(|e| e.instrument_id == instrument_id)
+            .filter(|e| e.instrument_id == instrument_id && e.signed.order.expiry >= deadline)
             .map(|e| e.signed.clone())
             .collect()
     }
@@ -671,7 +705,7 @@ impl Clob {
         crate::metrics::inc(crate::metrics::names::EPOCHS_RUN);
         let mut reports = Vec::new();
         for inst in self.venue.instruments() {
-            let snapshot = self.snapshot(&inst.id);
+            let snapshot = self.snapshot(&inst.id, epoch);
             if snapshot.is_empty() {
                 continue;
             }
@@ -877,7 +911,22 @@ impl Clob {
             ));
         };
 
-        let my_orders = self.snapshot(&wire.instrument_id);
+        // Never co-sign a batch containing an order that won't survive to this
+        // epoch's settlement — it would revert OrderExpired on-chain and grief
+        // the whole batch. The cutoff is epoch-deterministic, so an honest
+        // proposer's snapshot already excludes these and only a malicious one
+        // includes them (audit M3). match_epoch is expiry-blind by design (it
+        // must stay a pure function of the order set for the zk guest), so this
+        // chain-state-free temporal check lives here, at the consensus layer.
+        let deadline = self.settlement_deadline(wire.epoch);
+        if let Some(o) = wire.orders.iter().find(|o| o.order.expiry < deadline) {
+            return Err((
+                StatusCode::CONFLICT,
+                json!({ "verdict": "expires-before-settlement", "order": format!("{:#x}", o.digest(&domain)) }),
+            ));
+        }
+
+        let my_orders = self.snapshot(&wire.instrument_id, wire.epoch);
         let proposal = BatchProposal {
             epoch: wire.epoch,
             book_id: wire.book_id,
@@ -926,7 +975,10 @@ impl Clob {
                 ))
             }
             Verdict::FillsHashMismatch => {
-                crate::metrics::inc_labeled(crate::metrics::names::ATTEST_REFUSED, "fills-hash-mismatch");
+                crate::metrics::inc_labeled(
+                    crate::metrics::names::ATTEST_REFUSED,
+                    "fills-hash-mismatch",
+                );
                 Err((
                     StatusCode::UNPROCESSABLE_ENTITY,
                     json!({ "verdict": "fills-hash-mismatch" }),

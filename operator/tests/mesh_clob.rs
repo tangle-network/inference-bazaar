@@ -148,7 +148,7 @@ async fn three_nodes_gossip_cosign_over_pki_mesh() {
     let mut clobs: Vec<Arc<Clob>> = Vec::new();
     for (key, handle) in OP_KEYS.iter().zip(&handles) {
         let venue = Arc::new(venue_with(key));
-        let net = MeshNet::new(handle.clone());
+        let net = MeshNet::new(handle.clone(), 3600);
         let clob = Arc::new(Clob::with_net(venue, cfg.clone(), net.clone()).unwrap());
         spawn_mesh_loop(clob.clone(), net, handle.clone());
         clobs.push(clob);
