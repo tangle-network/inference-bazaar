@@ -19,7 +19,7 @@ contract HandlerSmoke is Test {
 
     function setUp() public {
         usd = new MockUSD();
-        s = new SurplusSettlement(IERC20(address(usd)), 30 days, 6 hours, 500, 200, feeRecipient);
+        s = new SurplusSettlement(IERC20(address(usd)), 30 days, 6 hours, 1 hours, 500, 200, feeRecipient);
         address[] memory a = new address[](1);
         a[0] = address(0xA11CE);
         s.registerBook(keccak256("b"), a, 1, 0, address(0));

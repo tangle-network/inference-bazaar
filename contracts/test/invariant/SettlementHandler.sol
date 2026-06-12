@@ -170,8 +170,8 @@ contract SettlementHandler is CommonBase, StdCheats, StdUtils {
         vm.prank(holder);
         try settlement.requestRedemption(lotId, reqQty) returns (bytes32 rid) {
             uint64 serveQty = uint64(bound(served, 0, reqQty));
-            bytes memory sig = _signDigest(hk, settlement.receiptDigest(rid, serveQty));
-            try settlement.settleRedemption(rid, serveQty, sig) {
+            bytes memory sig = _signDigest(hk, settlement.receiptDigest(rid, serveQty, bytes32(uint256(1))));
+            try settlement.settleRedemption(rid, serveQty, bytes32(uint256(1)), sig) {
                 redemptionsSettled++;
             }
                 catch { }

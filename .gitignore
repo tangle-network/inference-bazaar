@@ -19,3 +19,4 @@ contracts/dependencies/
 # SP1
 zk/target/
 zk/program/target/
+.keys/

@@ -67,6 +67,14 @@ const MAX_POOL: usize = 10_000;
 /// expiry. Two days bounds the unseen-order case without growing the set.
 const CANCEL_TTL_SECS: u64 = 2 * 24 * 3600;
 
+/// How long a proposer waits for peer co-signatures, derived from the epoch so
+/// it can never overrun a short epoch into the next round (audit M7: a fixed
+/// 8s window overlapped any `epoch_secs < 8`). 80% of the epoch leaves headroom
+/// for the on-chain submit, clamped to a sane floor/ceiling.
+pub fn attest_deadline(epoch_secs: u64) -> Duration {
+    Duration::from_millis((epoch_secs * 800).clamp(1_000, 8_000))
+}
+
 // EIP-712 `SurplusCancel/1`, domain-separated from every other Surplus signature
 // (settlement orders, serve auths) so a cancel can never be replayed as anything
 // else. Mirrors the on-chain `cancelOrder` authority (msg.sender == trader) with
@@ -335,6 +343,13 @@ impl ClobNet for HttpNet {
 
 // ─────────────────────────────── Service state ───────────────────────────────
 
+/// The restart-durable finality record (settled + cancelled order digests).
+#[derive(Default, Serialize, Deserialize)]
+struct FinalityJournal {
+    settled: HashMap<B256, u64>,
+    cancelled: HashMap<B256, (Address, u64)>,
+}
+
 struct PoolEntry {
     instrument_id: String,
     signed: SignedOrder,
@@ -413,7 +428,7 @@ impl Clob {
             cfg.threshold,
             cfg.operators.len()
         );
-        Ok(Clob {
+        let clob = Clob {
             venue,
             cfg,
             me,
@@ -423,7 +438,66 @@ impl Clob {
             last_epoch: AtomicU64::new(0),
             membership_ok: AtomicBool::new(true),
             net,
-        })
+        };
+        clob.load_finality();
+        Ok(clob)
+    }
+
+    /// Where the finality sets are journaled. The pool is NOT persisted — peers
+    /// re-gossip it on restart — but `settled` and `cancelled` are the finality
+    /// record: losing them re-opens a settled or cancelled order for re-admission
+    /// and a batch-reverting re-match (audit H1). They grow only on settlement /
+    /// cancel events, so persist-on-mutation is cheap.
+    fn finality_path() -> Option<std::path::PathBuf> {
+        std::env::var("DATA_DIR")
+            .ok()
+            .map(|d| std::path::Path::new(&d).join("clob-finality.json"))
+    }
+
+    fn load_finality(&self) {
+        let Some(path) = Self::finality_path() else {
+            return;
+        };
+        let Ok(raw) = std::fs::read(&path) else {
+            return;
+        };
+        let Ok(j) = serde_json::from_slice::<FinalityJournal>(&raw) else {
+            tracing::error!("clob finality journal unreadable (keeping file)");
+            return;
+        };
+        let now = now_unix();
+        let mut settled = self.settled.lock().unwrap();
+        let mut cancelled = self.cancelled.lock().unwrap();
+        for (d, exp) in j.settled {
+            if exp >= now {
+                settled.insert(d, exp);
+            }
+        }
+        for (h, (t, exp)) in j.cancelled {
+            if exp >= now {
+                cancelled.insert(h, (t, exp));
+            }
+        }
+        tracing::info!(
+            settled = settled.len(),
+            cancelled = cancelled.len(),
+            "restored CLOB finality sets from journal"
+        );
+    }
+
+    fn persist_finality(&self) {
+        let Some(path) = Self::finality_path() else {
+            return;
+        };
+        let j = FinalityJournal {
+            settled: self.settled.lock().unwrap().clone(),
+            cancelled: self.cancelled.lock().unwrap().clone(),
+        };
+        if let Ok(bytes) = serde_json::to_vec(&j) {
+            if let Err(e) = std::fs::write(&path, bytes) {
+                tracing::error!("clob finality journal write failed: {e}");
+            }
+        }
     }
 
     /// Reconcile the configured operator set/threshold against the contract's
@@ -527,6 +601,8 @@ impl Clob {
             .lock()
             .unwrap()
             .insert(c.order_hash, (c.trader, ttl));
+        drop(pool);
+        self.persist_finality();
         Ok(json!({
             "orderHash": format!("{:#x}", c.order_hash),
             "cancelled": true,
@@ -548,6 +624,16 @@ impl Clob {
 
     pub fn current_epoch(&self) -> u64 {
         now_unix() / self.cfg.epoch_secs
+    }
+
+    /// The deterministic wall-clock time by which `epoch`'s batch must have
+    /// settled: the epoch closes at `(epoch+1)*epoch_secs`, plus a margin for
+    /// the on-chain submit. An order must stay valid through this instant or it
+    /// can revert the batch with `OrderExpired`. Derived from the AGREED epoch
+    /// (not each node's `now`), so proposer and verifiers compute the identical
+    /// cutoff and never disagree on which orders are in (audit M3).
+    fn settlement_deadline(&self, epoch: u64) -> u64 {
+        (epoch + 1) * self.cfg.epoch_secs + EXPIRY_MARGIN_SECS
     }
 
     pub(crate) fn domain(&self) -> &surplus_settlement::Eip712Domain {
@@ -593,6 +679,18 @@ impl Clob {
                 "order expires too soon to batch".into(),
             ));
         }
+        // The integer matching book is i64-domained; an order whose price or qty
+        // exceeds i64::MAX is settleable via settleFills but `match_epoch` would
+        // silently drop it (audit L2). Reject it here with a clear reason rather
+        // than admit an order the CLOB can never match.
+        if i64::try_from(signed.order.priceMicroPerM).is_err()
+            || i64::try_from(signed.order.qtyTokens).is_err()
+        {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "price/qty exceeds the matchable range (use the RFQ rail)".into(),
+            ));
+        }
         let digest = signed.digest(self.domain());
         // Settlement is final: an order a co-signed batch touched can never
         // re-enter the pool, however many times its bytes are replayed.
@@ -632,14 +730,18 @@ impl Clob {
         }))
     }
 
-    /// Snapshot the pool for one instrument, dropping orders that expire too
-    /// soon to settle (the contract rejects the whole batch on one expired order).
-    fn snapshot(&self, instrument_id: &str) -> Vec<SignedOrder> {
-        let horizon = now_unix() + EXPIRY_MARGIN_SECS;
+    /// Snapshot the pool for one instrument for the given epoch, dropping orders
+    /// that won't survive to this epoch's settlement (the contract reverts the
+    /// whole batch on one `OrderExpired`). The cutoff is epoch-deterministic so
+    /// every verifier drops exactly the same orders.
+    fn snapshot(&self, instrument_id: &str, epoch: u64) -> Vec<SignedOrder> {
+        let deadline = self.settlement_deadline(epoch);
         let mut pool = self.pool.lock().unwrap();
-        pool.retain(|_, e| e.signed.order.expiry >= horizon);
+        // Hygiene: evict anything already past its own absolute expiry.
+        let now = now_unix();
+        pool.retain(|_, e| e.signed.order.expiry >= now);
         pool.values()
-            .filter(|e| e.instrument_id == instrument_id)
+            .filter(|e| e.instrument_id == instrument_id && e.signed.order.expiry >= deadline)
             .map(|e| e.signed.clone())
             .collect()
     }
@@ -660,6 +762,9 @@ impl Clob {
             }
         }
         crate::metrics::set_gauge(crate::metrics::names::POOL_SIZE, pool.len() as i64);
+        drop(pool);
+        drop(settled);
+        self.persist_finality();
     }
 
     // ───────────────────────────── Proposer side ─────────────────────────────
@@ -671,7 +776,7 @@ impl Clob {
         crate::metrics::inc(crate::metrics::names::EPOCHS_RUN);
         let mut reports = Vec::new();
         for inst in self.venue.instruments() {
-            let snapshot = self.snapshot(&inst.id);
+            let snapshot = self.snapshot(&inst.id, epoch);
             if snapshot.is_empty() {
                 continue;
             }
@@ -877,7 +982,22 @@ impl Clob {
             ));
         };
 
-        let my_orders = self.snapshot(&wire.instrument_id);
+        // Never co-sign a batch containing an order that won't survive to this
+        // epoch's settlement — it would revert OrderExpired on-chain and grief
+        // the whole batch. The cutoff is epoch-deterministic, so an honest
+        // proposer's snapshot already excludes these and only a malicious one
+        // includes them (audit M3). match_epoch is expiry-blind by design (it
+        // must stay a pure function of the order set for the zk guest), so this
+        // chain-state-free temporal check lives here, at the consensus layer.
+        let deadline = self.settlement_deadline(wire.epoch);
+        if let Some(o) = wire.orders.iter().find(|o| o.order.expiry < deadline) {
+            return Err((
+                StatusCode::CONFLICT,
+                json!({ "verdict": "expires-before-settlement", "order": format!("{:#x}", o.digest(&domain)) }),
+            ));
+        }
+
+        let my_orders = self.snapshot(&wire.instrument_id, wire.epoch);
         let proposal = BatchProposal {
             epoch: wire.epoch,
             book_id: wire.book_id,
@@ -926,7 +1046,10 @@ impl Clob {
                 ))
             }
             Verdict::FillsHashMismatch => {
-                crate::metrics::inc_labeled(crate::metrics::names::ATTEST_REFUSED, "fills-hash-mismatch");
+                crate::metrics::inc_labeled(
+                    crate::metrics::names::ATTEST_REFUSED,
+                    "fills-hash-mismatch",
+                );
                 Err((
                     StatusCode::UNPROCESSABLE_ENTITY,
                     json!({ "verdict": "fills-hash-mismatch" }),
@@ -1042,6 +1165,12 @@ pub fn router(clob: SharedClob) -> Router {
         .route("/clob/propose", post(clob_propose))
         .route("/clob/run-epoch", post(clob_run_epoch))
         .route("/clob/status", get(clob_status))
+        // A proposal carries the full matched order set; at MAX_POOL (10k orders
+        // × ~450B JSON) it nears 5MB, well over axum's 2MB default — which would
+        // 413 legitimate proposals exactly at the load the pool cap allows
+        // (audit H4). Raise the limit with headroom. The eventual scale fix is a
+        // digest-list proposal with pull-missing, but this removes the cliff now.
+        .layer(axum::extract::DefaultBodyLimit::max(16 * 1024 * 1024))
         .with_state(clob)
 }
 
@@ -1115,14 +1244,25 @@ async fn clob_status(State(c): State<SharedClob>) -> impl IntoResponse {
 /// HTTP peer list. Returns the service plus its HTTP surface (order entry +
 /// ops endpoints — mounted in both transports; in mesh mode the fanout simply
 /// rides the mesh instead of peer URLs).
+///
+/// A fleet MUST be homogeneous: a mesh node fans proposals out only on the
+/// mesh, so a mixed mesh/HTTP fleet partitions and HTTP-led epochs are vetoed
+/// (audit H7). The transport is logged loudly at boot so a mismatch is visible
+/// in ops, and the gossip_send_failures / quorum_failed metrics surface the
+/// resulting partition. Treat transport as a fleet-wide deployment parameter.
 pub fn start_from_env(venue: Arc<Venue>) -> anyhow::Result<Option<(SharedClob, Router)>> {
     let Some(cfg) = ClobConfig::from_env()? else {
         return Ok(None);
     };
     #[cfg(feature = "mesh")]
     if std::env::var("SURPLUS_MESH_ADDR").is_ok() {
+        tracing::info!("shared CLOB transport: PKI mesh (the whole fleet must run mesh)");
         return crate::mesh::start(venue, cfg).map(Some);
     }
+    tracing::info!(
+        peers = cfg.operators.len(),
+        "shared CLOB transport: HTTP peer list (the whole fleet must run HTTP)"
+    );
     let clob = Arc::new(Clob::new(venue, cfg)?);
     spawn_membership_reconciler(clob.clone());
     spawn_epoch_loop(clob.clone());
@@ -1172,4 +1312,35 @@ pub fn spawn_epoch_loop(clob: SharedClob) {
             tracing::debug!(%report, "epoch run");
         }
     });
+}
+
+#[cfg(test)]
+mod finality_tests {
+    use super::*;
+
+    #[test]
+    fn finality_journal_round_trips() {
+        let mut settled = HashMap::new();
+        settled.insert(B256::repeat_byte(0x11), 1_900_000_000u64);
+        let mut cancelled = HashMap::new();
+        cancelled.insert(
+            B256::repeat_byte(0x22),
+            (Address::repeat_byte(0xaa), 1_900_000_001u64),
+        );
+        let j = FinalityJournal {
+            settled: settled.clone(),
+            cancelled: cancelled.clone(),
+        };
+        let bytes = serde_json::to_vec(&j).unwrap();
+        let back: FinalityJournal = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(back.settled, settled);
+        assert_eq!(back.cancelled, cancelled);
+    }
+
+    #[test]
+    fn attest_deadline_scales_and_clamps() {
+        assert_eq!(attest_deadline(10), Duration::from_millis(8000)); // clamped to ceiling
+        assert_eq!(attest_deadline(5), Duration::from_millis(4000)); // 80%
+        assert_eq!(attest_deadline(1), Duration::from_millis(1000)); // floor
+    }
 }
