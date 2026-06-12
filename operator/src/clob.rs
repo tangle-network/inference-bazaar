@@ -343,6 +343,13 @@ impl ClobNet for HttpNet {
 
 // ─────────────────────────────── Service state ───────────────────────────────
 
+/// The restart-durable finality record (settled + cancelled order digests).
+#[derive(Default, Serialize, Deserialize)]
+struct FinalityJournal {
+    settled: HashMap<B256, u64>,
+    cancelled: HashMap<B256, (Address, u64)>,
+}
+
 struct PoolEntry {
     instrument_id: String,
     signed: SignedOrder,
@@ -421,7 +428,7 @@ impl Clob {
             cfg.threshold,
             cfg.operators.len()
         );
-        Ok(Clob {
+        let clob = Clob {
             venue,
             cfg,
             me,
@@ -431,7 +438,66 @@ impl Clob {
             last_epoch: AtomicU64::new(0),
             membership_ok: AtomicBool::new(true),
             net,
-        })
+        };
+        clob.load_finality();
+        Ok(clob)
+    }
+
+    /// Where the finality sets are journaled. The pool is NOT persisted — peers
+    /// re-gossip it on restart — but `settled` and `cancelled` are the finality
+    /// record: losing them re-opens a settled or cancelled order for re-admission
+    /// and a batch-reverting re-match (audit H1). They grow only on settlement /
+    /// cancel events, so persist-on-mutation is cheap.
+    fn finality_path() -> Option<std::path::PathBuf> {
+        std::env::var("DATA_DIR")
+            .ok()
+            .map(|d| std::path::Path::new(&d).join("clob-finality.json"))
+    }
+
+    fn load_finality(&self) {
+        let Some(path) = Self::finality_path() else {
+            return;
+        };
+        let Ok(raw) = std::fs::read(&path) else {
+            return;
+        };
+        let Ok(j) = serde_json::from_slice::<FinalityJournal>(&raw) else {
+            tracing::error!("clob finality journal unreadable (keeping file)");
+            return;
+        };
+        let now = now_unix();
+        let mut settled = self.settled.lock().unwrap();
+        let mut cancelled = self.cancelled.lock().unwrap();
+        for (d, exp) in j.settled {
+            if exp >= now {
+                settled.insert(d, exp);
+            }
+        }
+        for (h, (t, exp)) in j.cancelled {
+            if exp >= now {
+                cancelled.insert(h, (t, exp));
+            }
+        }
+        tracing::info!(
+            settled = settled.len(),
+            cancelled = cancelled.len(),
+            "restored CLOB finality sets from journal"
+        );
+    }
+
+    fn persist_finality(&self) {
+        let Some(path) = Self::finality_path() else {
+            return;
+        };
+        let j = FinalityJournal {
+            settled: self.settled.lock().unwrap().clone(),
+            cancelled: self.cancelled.lock().unwrap().clone(),
+        };
+        if let Ok(bytes) = serde_json::to_vec(&j) {
+            if let Err(e) = std::fs::write(&path, bytes) {
+                tracing::error!("clob finality journal write failed: {e}");
+            }
+        }
     }
 
     /// Reconcile the configured operator set/threshold against the contract's
@@ -535,6 +601,8 @@ impl Clob {
             .lock()
             .unwrap()
             .insert(c.order_hash, (c.trader, ttl));
+        drop(pool);
+        self.persist_finality();
         Ok(json!({
             "orderHash": format!("{:#x}", c.order_hash),
             "cancelled": true,
@@ -694,6 +762,9 @@ impl Clob {
             }
         }
         crate::metrics::set_gauge(crate::metrics::names::POOL_SIZE, pool.len() as i64);
+        drop(pool);
+        drop(settled);
+        self.persist_finality();
     }
 
     // ───────────────────────────── Proposer side ─────────────────────────────
@@ -1094,6 +1165,12 @@ pub fn router(clob: SharedClob) -> Router {
         .route("/clob/propose", post(clob_propose))
         .route("/clob/run-epoch", post(clob_run_epoch))
         .route("/clob/status", get(clob_status))
+        // A proposal carries the full matched order set; at MAX_POOL (10k orders
+        // × ~450B JSON) it nears 5MB, well over axum's 2MB default — which would
+        // 413 legitimate proposals exactly at the load the pool cap allows
+        // (audit H4). Raise the limit with headroom. The eventual scale fix is a
+        // digest-list proposal with pull-missing, but this removes the cliff now.
+        .layer(axum::extract::DefaultBodyLimit::max(16 * 1024 * 1024))
         .with_state(clob)
 }
 
@@ -1167,14 +1244,25 @@ async fn clob_status(State(c): State<SharedClob>) -> impl IntoResponse {
 /// HTTP peer list. Returns the service plus its HTTP surface (order entry +
 /// ops endpoints — mounted in both transports; in mesh mode the fanout simply
 /// rides the mesh instead of peer URLs).
+///
+/// A fleet MUST be homogeneous: a mesh node fans proposals out only on the
+/// mesh, so a mixed mesh/HTTP fleet partitions and HTTP-led epochs are vetoed
+/// (audit H7). The transport is logged loudly at boot so a mismatch is visible
+/// in ops, and the gossip_send_failures / quorum_failed metrics surface the
+/// resulting partition. Treat transport as a fleet-wide deployment parameter.
 pub fn start_from_env(venue: Arc<Venue>) -> anyhow::Result<Option<(SharedClob, Router)>> {
     let Some(cfg) = ClobConfig::from_env()? else {
         return Ok(None);
     };
     #[cfg(feature = "mesh")]
     if std::env::var("SURPLUS_MESH_ADDR").is_ok() {
+        tracing::info!("shared CLOB transport: PKI mesh (the whole fleet must run mesh)");
         return crate::mesh::start(venue, cfg).map(Some);
     }
+    tracing::info!(
+        peers = cfg.operators.len(),
+        "shared CLOB transport: HTTP peer list (the whole fleet must run HTTP)"
+    );
     let clob = Arc::new(Clob::new(venue, cfg)?);
     spawn_membership_reconciler(clob.clone());
     spawn_epoch_loop(clob.clone());
@@ -1224,4 +1312,35 @@ pub fn spawn_epoch_loop(clob: SharedClob) {
             tracing::debug!(%report, "epoch run");
         }
     });
+}
+
+#[cfg(test)]
+mod finality_tests {
+    use super::*;
+
+    #[test]
+    fn finality_journal_round_trips() {
+        let mut settled = HashMap::new();
+        settled.insert(B256::repeat_byte(0x11), 1_900_000_000u64);
+        let mut cancelled = HashMap::new();
+        cancelled.insert(
+            B256::repeat_byte(0x22),
+            (Address::repeat_byte(0xaa), 1_900_000_001u64),
+        );
+        let j = FinalityJournal {
+            settled: settled.clone(),
+            cancelled: cancelled.clone(),
+        };
+        let bytes = serde_json::to_vec(&j).unwrap();
+        let back: FinalityJournal = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(back.settled, settled);
+        assert_eq!(back.cancelled, cancelled);
+    }
+
+    #[test]
+    fn attest_deadline_scales_and_clamps() {
+        assert_eq!(attest_deadline(10), Duration::from_millis(8000)); // clamped to ceiling
+        assert_eq!(attest_deadline(5), Duration::from_millis(4000)); // 80%
+        assert_eq!(attest_deadline(1), Duration::from_millis(1000)); // floor
+    }
 }

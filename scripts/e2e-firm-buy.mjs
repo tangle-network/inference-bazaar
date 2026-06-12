@@ -1,6 +1,7 @@
 // E2E proof: a fresh buyer buys 1M Sonnet output tokens firm, settled on Base Sepolia.
 import { createPublicClient, createWalletClient, http, parseAbi, keccak256, toHex, zeroHash } from 'viem'
-import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts'
+import { privateKeyToAccount } from 'viem/accounts'
+import { ephemeralKey } from './_keys.mjs'
 import { baseSepolia } from 'viem/chains'
 
 const RPC = process.env.RPC ?? 'https://sepolia.base.org'
@@ -25,8 +26,7 @@ const usdAbi = parseAbi([
 
 const pub = createPublicClient({ chain: baseSepolia, transport: http(RPC) })
 const fs = await import('node:fs')
-const KEYFILE = '/tmp/surplus-e2e-buyer.key'
-const buyerKey = fs.existsSync(KEYFILE) ? fs.readFileSync(KEYFILE, 'utf8').trim() : (() => { const k = generatePrivateKey(); fs.writeFileSync(KEYFILE, k, { mode: 0o600 }); return k })()
+const buyerKey = ephemeralKey('firm-buyer')
 const buyer = privateKeyToAccount(buyerKey)
 const wallet = createWalletClient({ account: buyer, chain: baseSepolia, transport: http(RPC) })
 const funder = createWalletClient({ account: privateKeyToAccount(FUNDER_KEY), chain: baseSepolia, transport: http(RPC) })
