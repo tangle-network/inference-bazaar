@@ -276,7 +276,7 @@ to the phase that delivers it.
 | 8 Productionization | ◑ Hetzner fleet live, tcloud PR open (#41); audit/oracle/legal left | G6 |
 
 **Contract cutover 2026-06-12:** the live tsUSD rail is SurplusSettlement v2
-`0x3fa622488fD970ECdE23b8384a98de6fFa5A1763` (per-book matching domains).
+`0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83` (per-book matching domains).
 Tx hashes recorded before this date settled on the v1 contract
 (`0x1cD49739…`, still on-chain, retired). Tests: 58 forge + 46 Rust + the TS
 suites green. Live on Base Sepolia: on-chain

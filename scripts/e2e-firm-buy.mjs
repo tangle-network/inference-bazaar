@@ -5,7 +5,7 @@ import { baseSepolia } from 'viem/chains'
 
 const RPC = process.env.RPC ?? 'https://sepolia.base.org'
 const VENUE = process.env.VENUE ?? 'https://surplus.178.104.232.124.sslip.io'
-const SETTLEMENT = process.env.SETTLEMENT ?? '0x3fa622488fD970ECdE23b8384a98de6fFa5A1763'
+const SETTLEMENT = process.env.SETTLEMENT ?? '0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83'
 const USD = process.env.USD ?? '0x14Ff9231D03Fd9AD75e553004585f13Ff51db630'
 // 'mint' (test tsUSD, open mint) or 'transfer' (real USDC: the funder pays).
 const FUND_MODE = process.env.FUND_MODE ?? 'mint'
