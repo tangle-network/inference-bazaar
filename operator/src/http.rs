@@ -21,6 +21,7 @@ pub type Shared = Arc<Venue>;
 pub fn router(venue: Shared) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/metrics", get(metrics_text))
         .route("/instruments", get(instruments))
         .route("/ref", post(set_ref))
         .route("/book", post(book))
@@ -119,6 +120,14 @@ fn err_status(e: &VenueError) -> StatusCode {
 
 async fn health() -> impl IntoResponse {
     Json(serde_json::json!({ "ok": true }))
+}
+
+/// Prometheus exposition for ops scraping (audit H6).
+async fn metrics_text() -> impl IntoResponse {
+    (
+        [("content-type", "text/plain; version=0.0.4")],
+        crate::metrics::metrics().render_prometheus(),
+    )
 }
 
 async fn instruments(State(v): State<Shared>) -> impl IntoResponse {

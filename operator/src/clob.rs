@@ -273,6 +273,7 @@ impl ClobNet for HttpNet {
             let body = w.clone();
             tokio::spawn(async move {
                 if let Err(e) = http.post(&url).json(&body).send().await {
+                    crate::metrics::inc(crate::metrics::names::GOSSIP_SEND_FAILURES);
                     tracing::warn!(%url, "gossip relay failed: {e}");
                 }
             });
@@ -580,6 +581,7 @@ impl Clob {
                 signed,
             },
         );
+        crate::metrics::set_gauge(crate::metrics::names::POOL_SIZE, pool.len() as i64);
         Ok(json!({
             "digest": format!("{digest:#x}"),
             "instrumentId": instrument_id,
@@ -615,6 +617,7 @@ impl Clob {
                 settled.insert(digest, o.expiry);
             }
         }
+        crate::metrics::set_gauge(crate::metrics::names::POOL_SIZE, pool.len() as i64);
     }
 
     // ───────────────────────────── Proposer side ─────────────────────────────
@@ -623,6 +626,7 @@ impl Clob {
     /// Returns a per-instrument report. Election is NOT re-checked here — peers
     /// enforce it when deciding whether to co-sign.
     pub async fn run_epoch(self: &Arc<Self>, epoch: u64) -> Value {
+        crate::metrics::inc(crate::metrics::names::EPOCHS_RUN);
         let mut reports = Vec::new();
         for inst in self.venue.instruments() {
             let snapshot = self.snapshot(&inst.id);
@@ -685,6 +689,7 @@ impl Clob {
             self.cfg.threshold,
         );
         let Some(sigs) = quorum else {
+            crate::metrics::inc(crate::metrics::names::QUORUM_FAILED);
             tracing::warn!(
                 instrument = %inst.id, epoch,
                 got = attestations.len(), need = self.cfg.threshold,
@@ -698,12 +703,22 @@ impl Clob {
                 "attestations": attestations.len(),
             })));
         };
+        crate::metrics::inc(crate::metrics::names::QUORUM_REACHED);
 
         // Quorum reached: the batch is final for the network. Prune before
         // submitting — co-signers already pruned, and re-matching filled orders
         // would poison the next epoch.
         self.prune_filled(&batch.fills);
-        let submitted = self.submit(&batch.fills, sigs).await?;
+        let submitted = match self.submit(&batch.fills, sigs).await {
+            Ok(tx) => {
+                crate::metrics::inc(crate::metrics::names::BATCHES_SUBMITTED);
+                tx
+            }
+            Err(e) => {
+                crate::metrics::inc(crate::metrics::names::SUBMIT_REVERTS);
+                return Err(e);
+            }
+        };
         tracing::info!(
             instrument = %inst.id, epoch, batch_nonce,
             fills = batch.fills.len(),
@@ -841,6 +856,7 @@ impl Clob {
                     .iter()
                     .find(|o| self.is_cancelled(o.digest(&domain), o.order.trader))
                 {
+                    crate::metrics::inc_labeled(crate::metrics::names::ATTEST_REFUSED, "cancelled");
                     return Err((
                         StatusCode::CONFLICT,
                         json!({ "verdict": "cancelled", "order": format!("{:#x}", o.digest(&domain)) }),
@@ -851,6 +867,7 @@ impl Clob {
                 // verified batch came back with the verdict — no second
                 // match_epoch run.
                 self.prune_filled(&batch.fills);
+                crate::metrics::inc(crate::metrics::names::ATTEST_SIGNED);
                 Ok(WireAttestation {
                     attester: self.me,
                     signature: format!(
@@ -859,18 +876,27 @@ impl Clob {
                     ),
                 })
             }
-            Verdict::Forged(digests) => Err((
-                StatusCode::UNPROCESSABLE_ENTITY,
-                json!({ "verdict": "forged", "orders": hex_all(&digests) }),
-            )),
-            Verdict::FillsHashMismatch => Err((
-                StatusCode::UNPROCESSABLE_ENTITY,
-                json!({ "verdict": "fills-hash-mismatch" }),
-            )),
-            Verdict::Censored(digests) => Err((
-                StatusCode::CONFLICT,
-                json!({ "verdict": "censored", "missing": hex_all(&digests) }),
-            )),
+            Verdict::Forged(digests) => {
+                crate::metrics::inc_labeled(crate::metrics::names::ATTEST_REFUSED, "forged");
+                Err((
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    json!({ "verdict": "forged", "orders": hex_all(&digests) }),
+                ))
+            }
+            Verdict::FillsHashMismatch => {
+                crate::metrics::inc_labeled(crate::metrics::names::ATTEST_REFUSED, "fills-hash-mismatch");
+                Err((
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    json!({ "verdict": "fills-hash-mismatch" }),
+                ))
+            }
+            Verdict::Censored(digests) => {
+                crate::metrics::inc_labeled(crate::metrics::names::ATTEST_REFUSED, "censored");
+                Err((
+                    StatusCode::CONFLICT,
+                    json!({ "verdict": "censored", "missing": hex_all(&digests) }),
+                ))
+            }
         }
     }
 
