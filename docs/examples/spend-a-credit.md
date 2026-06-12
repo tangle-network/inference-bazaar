@@ -6,7 +6,7 @@ every step settling on Base Sepolia. Run it as written; every address below
 is live.
 
 ```
-Settlement   0x3fa622488fD970ECdE23b8384a98de6fFa5A1763   (SurplusSettlement, Base Sepolia — tsUSD rail)
+Settlement   0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83   (SurplusSettlement, Base Sepolia — tsUSD rail)
 tsUSD        0x14Ff9231D03Fd9AD75e553004585f13Ff51db630   (test payment token, open mint)
 Venue 1      https://surplus.178.104.232.124.sslip.io      (operator 0x483f…, 12% policy)
 Venue 2      https://surplus2.178.104.232.124.sslip.io     (operator 0x2420…, 9% policy)
@@ -30,7 +30,7 @@ You need: a key with a little Base Sepolia ETH for gas. `export KEY=0x…`,
 
 ```bash
 USD=0x14Ff9231D03Fd9AD75e553004585f13Ff51db630
-SET=0x3fa622488fD970ECdE23b8384a98de6fFa5A1763
+SET=0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83
 cast send $USD "mint(address,uint256)" $ME 20000000      --rpc-url $RPC --private-key $KEY  # $20 test tsUSD
 cast send $USD "approve(address,uint256)" $SET 20000000  --rpc-url $RPC --private-key $KEY
 cast send $SET "deposit(uint256)" 20000000               --rpc-url $RPC --private-key $KEY

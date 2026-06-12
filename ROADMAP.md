@@ -277,13 +277,14 @@ to the phase that delivers it.
 
 **Settlement contract:** `SurplusSettlement` is the one canonical contract, with
 per-book matching domains (each instance gets its own attester quorum, nonce, and
-fee). Two live Base Sepolia rails of it: tsUSD
-`0x3fa622488fD970ECdE23b8384a98de6fFa5A1763` and real-USDC `0xf6A64921…`.
-Redemption attestation is bound to a lot's issuing book (no cross-instance
-confiscation); book fee/recipient are write-once; the proven path runs the match
-in-circuit (SP1) and commits the input-set commitment + fills. Live on Base
-Sepolia: on-chain job triggers (tick keepers), credit spend with work-committed
-receipts (G1), cross-operator attested batches (shared CLOB). Still open: contract
-audit (G6), slashing-backed redemption (G3), real SP1 proofs registered on-chain,
-USDC-rail bonding, and the dynamic registry reconciler — see
-`.evolve/critical-audit/2026-06-12T02:16:28Z/` and the audit memory for the gap list.
+fee). Live tsUSD rail `0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83` (+ real-USDC
+`0xf6A64921…`). Redemption attestation is bound to a lot's issuing book (no
+cross-instance confiscation); book fee/recipient are write-once; bearer spend
+keys + work-committed receipts + holder-challenge window; the proven path runs the
+match in-circuit (SP1), committing the input-set commitment + fills. Owner is a
+TimelockController (C2); BFT custody hardened (C1). Live on Base Sepolia: on-chain
+job triggers (tick keepers), credit spend (G1), cross-operator attested batches
+(shared CLOB). Still open: contract audit (G6), slashing-backed redemption (G3),
+real SP1 proofs registered on-chain, USDC-rail bonding, and the dynamic registry
+reconciler — see `.evolve/critical-audit/2026-06-12T02:16:28Z/` and the audit
+memory for the gap list.
