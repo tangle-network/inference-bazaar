@@ -1,0 +1,126 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: rust (build · clippy · test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # rust-toolchain.toml pins the channel (1.91) + clippy/rustfmt components.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.91"
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all --check
+      # The core crates (kernel + EIP-712 mirror) are the trust surface re-run by
+      # peers and the zkVM guest — held to -D warnings.
+      - name: clippy (core crates)
+        run: cargo clippy -p surplus-orderbook -p surplus-settlement-core -p surplus-matcher -p surplus-settlement --all-targets -- -D warnings
+      - name: test (workspace)
+        run: cargo test --workspace
+      # Feature surfaces must still compile (chain submit + the PKI mesh transport).
+      - name: build (chain)
+        run: cargo build -p surplus-operator --features chain
+      - name: build (mesh)
+        run: cargo build -p surplus-operator --features mesh
+      # The matching kernel must keep building no_std (it runs in the SP1 guest).
+      - name: build (matcher no_std)
+        run: cargo build -p surplus-matcher --no-default-features
+
+  contracts:
+    name: contracts (forge)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: forge fmt
+        run: forge fmt --check
+      - name: forge build
+        run: forge build --sizes
+      - name: forge test
+        run: forge test -vvv
+
+  parity:
+    # The cross-stack EIP-712 pins: Rust and Solidity must derive identical
+    # digests. A one-sided change to a struct, domain, or typehash fails here —
+    # the gate that would have caught the SettlementBatch/bookId drift.
+    name: eip712 parity (rust ↔ solidity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.91"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      - name: rust parity pins
+        run: cargo test -p surplus-settlement --test parity
+      - name: solidity parity pins
+        working-directory: contracts
+        run: forge test --match-path "test/Eip712Parity.t.sol" -vvv
+
+  zk:
+    name: zk (host build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: zk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.91"
+      - uses: Swatinem/rust-cache@v2
+      # Host crates compile against the (changing) settlement-core + matcher
+      # without the heavy succinct toolchain. The full guest ELF build
+      # (`cargo prove build`) is exercised by a separate, optional job.
+      - name: build host (skip guest ELF)
+        env:
+          SP1_SKIP_PROGRAM_BUILD: "1"
+        run: cargo build --release
+
+  ts:
+    name: ts (packages + app)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: packages — install
+        run: pnpm install --frozen-lockfile
+      - name: packages — typecheck
+        run: pnpm -r typecheck
+      - name: packages — test
+        run: pnpm -r test
+      # The app is a separate workspace root.
+      - name: app — install
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+      - name: app — typecheck
+        working-directory: app
+        run: pnpm typecheck

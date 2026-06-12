@@ -98,6 +98,7 @@ pub enum Verdict {
 ///      reproduce the claimed `fillsHash`.
 ///   3. **Censorship** — every order this peer holds for the instrument must
 ///      appear in the proposer's set.
+///
 /// Only then co-sign `batch_digest(batch_nonce, fillsHash, domain)`.
 pub fn verify_proposal(
     proposal: &BatchProposal,
@@ -304,7 +305,7 @@ mod tests {
             order: victim_order.clone(),
         };
         let p = proposal_over(vec![honest.clone(), forged], 1);
-        let verdict = verify_proposal(&p, &[honest.clone()], 1, 1, &dom());
+        let verdict = verify_proposal(&p, std::slice::from_ref(&honest), 1, 1, &dom());
         assert_eq!(
             verdict,
             Verdict::Forged(vec![order_digest(&victim_order, &dom())])

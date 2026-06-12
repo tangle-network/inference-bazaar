@@ -333,7 +333,7 @@ mod tests {
         );
         assert!(verify_quorum(digest, &sigs, &addrs, 2));
         assert!(
-            !verify_quorum(digest, &sigs[..1].to_vec(), &addrs, 2),
+            !verify_quorum(digest, &sigs[..1], &addrs, 2),
             "below threshold"
         );
 
