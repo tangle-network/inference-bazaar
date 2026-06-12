@@ -10,11 +10,19 @@ name = "surplus_orderbook"
 path = "src/lib.rs"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-# Only for the BookClient location seam (object-safe async). The matching kernel
-# (NativeBook) stays sync, integer-only, and dependency-light on purpose — it is
-# the part peers re-execute and the SP1 circuit reproduces.
-async-trait = "0.1"
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+# Only for the BookClient location seam (object-safe async), which is a std-only
+# concern. The matching kernel (NativeBook) is no_std + integer-only on purpose:
+# it is the part peers re-execute and the SP1 circuit reproduces, so it must
+# build in the zkVM guest with no std and no allocator surprises.
+async-trait = { version = "0.1", optional = true }
+
+[features]
+default = ["std"]
+# `std` pulls in the async BookClient location seam (LocalBook) and std error
+# integration. The matcher + SP1 guest depend on this crate with
+# default-features = false to get only the no_std matching kernel.
+std = ["serde/std", "dep:async-trait"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

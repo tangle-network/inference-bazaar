@@ -1,3 +1,5 @@
+use alloc::string::String;
+use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 /// Order side. `Buy` lifts asks; `Sell` hits bids.
@@ -86,8 +88,8 @@ pub enum MatchError {
     DuplicateId(String),
 }
 
-impl std::fmt::Display for MatchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for MatchError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             MatchError::WrongInstrument { expected, got } => {
                 write!(f, "order for {got} sent to book {expected}")
@@ -100,4 +102,6 @@ impl std::fmt::Display for MatchError {
     }
 }
 
-impl std::error::Error for MatchError {}
+// `core::error::Error` is stable since Rust 1.81 (toolchain pins 1.91), so the
+// error integration holds in no_std too.
+impl core::error::Error for MatchError {}

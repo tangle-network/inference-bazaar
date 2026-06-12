@@ -17,14 +17,29 @@
 //! Matching reuses the same integer-only [`NativeBook`] engine the venue runs
 //! (one matching truth): sells (the liquidity providers) rest cheapest-ask-first,
 //! buys then lift highest-bid-first at the maker's ask.
+//!
+//! The matching kernel ([`match_epoch`], [`orders_commitment`]) is `no_std` and
+//! depends only on the no_std orderbook + EIP-712 core, so the SP1 guest imports
+//! it and proves the **match itself** in-circuit (`settleBatchProven`) — not just
+//! that the fills were signed. The [`consensus`] layer (std) is the off-chain
+//! attested path the operator runs.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+#[cfg(feature = "std")]
 pub mod consensus;
 
+#[cfg(feature = "std")]
 pub use consensus::{
     aggregate_attestation, elect_proposer, verify_proposal, Attestation, BatchProposal, Verdict,
 };
 
-use std::collections::{HashMap, HashSet};
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use surplus_orderbook::{MatchingEngine, NativeBook, Order as BookOrder, Side as BookSide};
 use surplus_settlement_core::{
@@ -71,7 +86,7 @@ pub fn match_epoch(
 
     // Canonicalize the SET: keep valid orders for this instrument, dedup by
     // identity, compute the digest used as the unique deterministic tiebreak.
-    let mut seen: HashSet<B256> = HashSet::new();
+    let mut seen: BTreeSet<B256> = BTreeSet::new();
     let mut canon: Vec<CanonOrder> = Vec::new();
     for o in orders {
         if o.instrument != want_instrument {
@@ -105,7 +120,7 @@ pub fn match_epoch(
     // position, so within-price FIFO follows the canonical (digest) order, not a
     // clock. Sells first (they become the resting makers), then buys lift them.
     let mut book = NativeBook::new(instrument_id, tick_size, min_qty);
-    let mut by_id: HashMap<String, SignedOrder> = HashMap::new();
+    let mut by_id: BTreeMap<String, SignedOrder> = BTreeMap::new();
     let mut fills: Vec<BatchFill> = Vec::new();
     for (pos, c) in sells.into_iter().chain(buys).enumerate() {
         let id = format!("o{pos}");
@@ -150,6 +165,11 @@ pub fn match_epoch(
     let fills_hash = fills_hash(&fills);
     EpochBatch { fills, fills_hash }
 }
+
+/// The input-set commitment for the proven path. Re-exported from
+/// [`surplus_settlement_core`] so the guest, the host prover, and the contract's
+/// watchers all derive it identically. See its docs for the trust boundary.
+pub use surplus_settlement_core::orders_commitment;
 
 #[cfg(test)]
 mod tests {

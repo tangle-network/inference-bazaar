@@ -10,9 +10,20 @@ name = "surplus_matcher"
 path = "src/lib.rs"
 
 [dependencies]
-surplus-orderbook = { path = "../orderbook" }
-surplus-settlement-core = { path = "../settlement-core" }
-# SignedOrder (order + trader signature). The attested settlement path does NOT
-# verify trader signatures on-chain — the quorum vouches for them — so proposals
-# carry signatures and verify_proposal checks every one. Light: no chain feature.
-surplus-settlement = { path = "../settlement" }
+# The matching kernel reuses the no_std orderbook engine and the no_std EIP-712
+# core, so `match_epoch` itself builds in the SP1 zkVM guest (proven path runs
+# the match in-circuit).
+surplus-orderbook = { path = "../orderbook", default-features = false }
+surplus-settlement-core = { path = "../settlement-core", default-features = false }
+# The consensus module (proposal/verify/aggregate) is std-only: it carries full
+# SignedOrders (order + trader signature) and runs off-chain on the operator.
+# The attested settlement path does NOT verify trader signatures on-chain — the
+# quorum vouches for them — so verify_proposal checks every one. Light: no chain.
+surplus-settlement = { path = "../settlement", optional = true }
+
+[features]
+default = ["std"]
+# `std` enables the consensus layer (proposer election, peer verification,
+# attestation aggregation) the operator runs. The matching kernel + the input-set
+# commitment are no_std so the SP1 guest can import this crate directly.
+std = ["dep:surplus-settlement", "surplus-orderbook/std", "surplus-settlement-core/std"]

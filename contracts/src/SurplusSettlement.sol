@@ -35,18 +35,23 @@ import { ISP1Verifier } from "./interfaces/ISP1Verifier.sol";
 /// Two settlement paths share one fill-application core:
 ///  - `settleFills`: full orders + signatures, contract verifies everything.
 ///    Trustless; the default path.
-///  - `settleBatch*`: signature-free fills, signature validity vouched by an
-///    attester quorum (`Attested`) or an SP1 proof of the same statement
-///    (`Proven`, public values `(domainSeparator, bookId, batchNonce,
-///    fillsHash)`). Everything except signature validity (limits, crossing,
+///  - `settleBatchAttested`: signature-free fills, signature validity vouched by
+///    an attester quorum. Everything except signature validity (limits, crossing,
 ///    cumulative fill caps, balance/collateral invariants) is still enforced
 ///    here, so the quorum cannot invent balances. But be precise about what it
 ///    CAN do: "vouch for signatures that were never made" IS the power to forge
 ///    any order from any funded trader (drain their cash into a lot, or round-
 ///    trip a rival issuer's collateral via claimDefault). The attested path's
-///    entire authenticity rests on quorum honesty; the proven path replaces that
-///    trust with a proof. Redemption attestation is bound to the lot's own
-///    issuing book (`lotBook`) so no foreign quorum can confiscate a credit.
+///    authenticity rests on quorum honesty; peers re-run the match and refuse to
+///    co-sign a censored/wrong batch (off-chain completeness).
+///  - `settleBatchProven`: the SP1 proof runs the match IN-CIRCUIT, committing
+///    `(domainSeparator, bookId, batchNonce, ordersCommitment, fillsHash)`. So it
+///    replaces quorum trust with math: the fills are provably the canonical match
+///    of an authentically-signed order set — no forgery, no pairing/exec-price
+///    discretion. `ordersCommitment` is emitted for off-chain completeness audit.
+///
+/// Redemption attestation is bound to the lot's own issuing book (`lotBook`) so
+/// no foreign quorum can confiscate a credit.
 contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -197,7 +202,12 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         bytes32 lotId
     );
     event BatchSettled(
-        bytes32 indexed bookId, uint64 indexed batchNonce, bytes32 fillsHash, uint256 fillCount, bool proven
+        bytes32 indexed bookId,
+        uint64 indexed batchNonce,
+        bytes32 fillsHash,
+        uint256 fillCount,
+        bool proven,
+        bytes32 ordersCommitment
     );
     event RedemptionRequested(
         bytes32 indexed redemptionId,
@@ -372,25 +382,38 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         bytes32 fillsHash = keccak256(abi.encode(fills));
         bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(BATCH_TYPEHASH, bookId, book.nonce, fillsHash)));
         _verifyQuorum(book, digest, sigs);
-        _applyBatch(bookId, book, fills, fillsHash, false);
+        // Attested completeness is enforced off-chain: peers recompute the match
+        // and refuse to co-sign a censored/wrong batch (verify_proposal). No
+        // input-set commitment is recorded on-chain for this path.
+        _applyBatch(bookId, book, fills, fillsHash, false, bytes32(0));
     }
 
-    /// Compressed path, proof-vouched signatures. The SP1 program re-derives every
-    /// order digest under this domain separator, recovers each signer, and commits
-    /// (domainSeparator, bookId, batchNonce, fillsHash) as public values — so a
-    /// proof binds to exactly this contract on exactly this chain, this book, at
-    /// this nonce, for these fills. The book+nonce binding stops a proof from
-    /// being replayed under another (e.g. higher-fee) book or re-submitted after
-    /// the book's nonce advances (a partial-fill proof would otherwise replay).
-    function settleBatchProven(bytes32 bookId, BatchFill[] calldata fills, bytes calldata proof) external {
+    /// Compressed path, proof-vouched MATCH. The SP1 program verifies every order
+    /// in the gossiped set is signed, runs `match_epoch` in-circuit, and commits
+    /// (domainSeparator, bookId, batchNonce, ordersCommitment, fillsHash) — so the
+    /// proof attests these fills are the CANONICAL MATCH of exactly that
+    /// authentically-signed set, not merely that some chosen fills were signed.
+    /// The prover therefore has no pairing/exec-price/within-set-omission
+    /// discretion. The book+nonce binding stops a proof from being replayed under
+    /// another (e.g. higher-fee) book or re-submitted after the nonce advances.
+    /// `ordersCommitment` is recorded on-chain so any watcher can check the
+    /// matched set against the gossiped set (completeness/censorship audit).
+    function settleBatchProven(
+        bytes32 bookId,
+        bytes32 ordersCommitment,
+        BatchFill[] calldata fills,
+        bytes calldata proof
+    )
+        external
+    {
         if (address(sp1Verifier) == address(0)) revert ProvenPathDisabled();
         Book storage book = _books[bookId];
         if (book.threshold == 0) revert UnknownBook(bookId);
         bytes32 fillsHash = keccak256(abi.encode(fills));
         sp1Verifier.verifyProof(
-            batchProgramVKey, abi.encode(_domainSeparatorV4(), bookId, book.nonce, fillsHash), proof
+            batchProgramVKey, abi.encode(_domainSeparatorV4(), bookId, book.nonce, ordersCommitment, fillsHash), proof
         );
-        _applyBatch(bookId, book, fills, fillsHash, true);
+        _applyBatch(bookId, book, fills, fillsHash, true, ordersCommitment);
     }
 
     function _applyBatch(
@@ -398,7 +421,8 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         Book storage book,
         BatchFill[] calldata fills,
         bytes32 fillsHash,
-        bool proven
+        bool proven,
+        bytes32 ordersCommitment
     )
         internal
     {
@@ -416,7 +440,7 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
                 bookId
             );
         }
-        emit BatchSettled(bookId, book.nonce, fillsHash, fills.length, proven);
+        emit BatchSettled(bookId, book.nonce, fillsHash, fills.length, proven, ordersCommitment);
         book.nonce++;
     }
 

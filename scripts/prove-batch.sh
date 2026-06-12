@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Reproducible SP1 batch-proving runbook for settleBatchProven.
 #
-# The proving HALF is validated locally end to end (the guest commits exactly
-# abi.encode(domainSeparator, fillsHash) — what the contract recomputes). What
-# remains to satisfy shared-clob.md Phase-C acceptance #3 is FUNDED on-chain ops:
-# register the vkey against the real SP1 gateway and submit one real proof. Both
-# are spelled out at the bottom; this script does everything that does NOT need
-# a funded Base Sepolia owner key.
+# The proving HALF is validated locally end to end: the guest runs match_epoch
+# IN-CIRCUIT over the signed order set and commits abi.encode(domainSeparator,
+# bookId, batchNonce, ordersCommitment, fillsHash) — exactly what the contract
+# recomputes. So "proven" attests the fills are the canonical match of the set,
+# not merely that some chosen fills were signed. What remains is FUNDED on-chain
+# ops: register the vkey against the real SP1 gateway and submit one real proof.
+# Both are spelled out at the bottom; this script does everything that does NOT
+# need a funded Base Sepolia owner key.
 #
 # Usage:
 #   scripts/prove-batch.sh execute              # validate the guest (no proof)
@@ -32,12 +34,16 @@ case "$MODE" in
     exit 0
     ;;
   execute|groth16)
-    echo "→ generating a real mutually-signed crossing pair…"
+    BOOK_ID="${SURPLUS_CLOB_BOOK:-0x0000000000000000000000000000000000000000000000000000000000000000}"
+    INSTRUMENT="${SURPLUS_INSTRUMENT:-anthropic/claude-opus-4-8:output}"
+    echo "→ generating a real mutually-signed crossing order set…"
     cargo run -q -p surplus-settlement --example sign_fixture -- \
-      --chain-id "$CHAIN_ID" --contract "$CONTRACT" > /tmp/surplus-fills.json
-    echo "→ $MODE…"
-    SP1_PROVER=cpu "$PROVE" --fills /tmp/surplus-fills.json \
-      --chain-id "$CHAIN_ID" --contract "$CONTRACT" --mode "$MODE" --out /tmp/surplus-proof.json
+      --chain-id "$CHAIN_ID" --contract "$CONTRACT" > /tmp/surplus-orders.json
+    echo "→ $MODE (guest matches the set in-circuit)…"
+    SP1_PROVER=cpu "$PROVE" --orders /tmp/surplus-orders.json \
+      --instrument "$INSTRUMENT" --tick 1 --min-qty 1 \
+      --chain-id "$CHAIN_ID" --contract "$CONTRACT" --book-id "$BOOK_ID" \
+      --mode "$MODE" --out /tmp/surplus-proof.json
     ;;
   *) echo "unknown mode: $MODE (execute|groth16|vkey)"; exit 1 ;;
 esac

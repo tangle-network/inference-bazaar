@@ -2207,6 +2207,7 @@ dependencies = [
  "serde",
  "sp1-zkvm",
  "surplus-batch-types",
+ "surplus-matcher",
  "surplus-settlement-core",
 ]
 
@@ -2216,6 +2217,21 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "surplus-settlement-core",
+]
+
+[[package]]
+name = "surplus-matcher"
+version = "0.1.0"
+dependencies = [
+ "surplus-orderbook",
+ "surplus-settlement-core",
+]
+
+[[package]]
+name = "surplus-orderbook"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

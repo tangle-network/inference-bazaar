@@ -43,7 +43,7 @@ sol! {
 
         function settleFills(FillInput[] calldata fills) external;
         function settleBatchAttested(bytes32 bookId, BatchFill[] calldata fills, bytes[] calldata sigs) external;
-        function settleBatchProven(bytes32 bookId, BatchFill[] calldata fills, bytes calldata proof) external;
+        function settleBatchProven(bytes32 bookId, bytes32 ordersCommitment, BatchFill[] calldata fills, bytes calldata proof) external;
         function deposit(uint256 amount) external;
         function depositFor(address account, uint256 amount) external;
         function depositCollateral(uint256 amount) external;
@@ -421,13 +421,14 @@ impl SettlementClient {
     pub async fn settle_batch_proven(
         &self,
         book_id: B256,
+        orders_commitment: B256,
         batch: &Batch,
         proof: Vec<u8>,
     ) -> anyhow::Result<B256> {
         let fills: Vec<_> = batch.batch_fills().iter().map(to_batch_fill).collect();
         let receipt = self
             .contract
-            .settleBatchProven(book_id, fills, proof.into())
+            .settleBatchProven(book_id, orders_commitment, fills, proof.into())
             .send()
             .await?
             .get_receipt()

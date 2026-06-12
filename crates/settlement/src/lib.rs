@@ -10,8 +10,8 @@
 pub use surplus_settlement_core as core;
 pub use surplus_settlement_core::{
     batch_digest, batch_public_values, cost_micro, domain, fills_hash, instrument_hash,
-    order_digest, receipt_digest, recover_signer, validate_pair, verify_order, BatchFill,
-    Eip712Domain, Order, PairError, SIDE_BUY, SIDE_SELL,
+    order_digest, orders_commitment, receipt_digest, recover_signer, validate_pair, verify_order,
+    BatchFill, Eip712Domain, Order, PairError, SIDE_BUY, SIDE_SELL,
 };
 
 use alloy_primitives::{keccak256, Address, B256};

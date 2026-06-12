@@ -42,7 +42,8 @@ contract SurplusBSM is BlueprintServiceManagerBase {
         if (defaultChallenged[defaultId]) revert AlreadyChallenged(defaultId);
         defaultChallenged[defaultId] = true;
         (address issuer, uint128 amountMicro, bytes32 redemptionId) = settlement.getDefault(defaultId);
-        bytes32 evidence = keccak256(abi.encode("surplus_redemption_default", defaultId, issuer, amountMicro, redemptionId));
+        bytes32 evidence =
+            keccak256(abi.encode("surplus_redemption_default", defaultId, issuer, amountMicro, redemptionId));
         slashId = ITangleSlashing(tangleCore).proposeSlash(serviceId, issuer, DEFAULT_SLASH_BPS, evidence);
         emit DefaultChallenged(defaultId, serviceId, issuer, slashId);
     }

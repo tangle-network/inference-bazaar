@@ -49,7 +49,7 @@ contract Deploy is Script {
         console.log("SurplusBSM:", address(bsm));
 
         if (vm.envOr("DEPLOY_DEV_VERIFIER", uint256(0)) == 1) {
-            require(block.chainid == 31337, "dev verifier only on anvil");
+            require(block.chainid == 31_337, "dev verifier only on anvil");
             SP1MockVerifierStrict verifier = new SP1MockVerifierStrict();
             console.log("SP1MockVerifierStrict:", address(verifier));
         }

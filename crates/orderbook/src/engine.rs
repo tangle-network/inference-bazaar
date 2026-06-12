@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use crate::types::{BookSnapshot, MatchError, Order, PlaceOutcome};
 
 /// The matching-engine seam: a single instrument's price-time-priority book.
