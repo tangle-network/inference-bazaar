@@ -80,7 +80,7 @@ async function bestQuote(
         (a.venue.latencyMs ?? 1e9) - (b.venue.latencyMs ?? 1e9),
   )
 
-  // Anti-stickiness (privacy): spread acquisitions across operators so a seller's
+  // Anti-stickiness (privacy): spread acquisitions across operators so a consumer's
   // eventual redemption footprint isn't concentrated where one operator can
   // correlate it. Only among quotes within tolerance of the best price.
   if (antiStickyIdentity && privacyOn() && valid.length > 1) {

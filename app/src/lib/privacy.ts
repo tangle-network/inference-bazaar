@@ -1,16 +1,20 @@
 /**
- * Sell-side privacy: a Tor preference + anti-sticky operator selection.
+ * Consumer-side privacy: a Tor preference + anti-sticky operator selection.
  *
- * Two separable problems (see ARCHITECTURE.md "Privacy"):
- *  - NETWORK anonymity: hide the seller's IP from the fulfilling operator. That
+ * The operator is the SELLER (it issues lots and serves the model); the party
+ * who needs privacy is the CONSUMER — the buyer/holder who redeems a lot — and
+ * the privacy is *from* the operators. Two separable problems (see
+ * ARCHITECTURE.md "Privacy"):
+ *  - NETWORK anonymity: hide the consumer's IP from the fulfilling operator. That
  *    is Tor's job — when privacy is on, the app dials the operator's `.onion`
  *    (via `endpointFor` in venues.ts). A plain browser cannot SOCKS-proxy fetch,
  *    so effective anonymity requires Tor Browser / a system Tor proxy (or the
  *    Node SDK's TorRedemptionClient). This module only records the preference.
- *  - ANTI-STICKINESS: which operator a seller ACQUIRES credits from. Tor can't
- *    decide that; left naive, a seller's flow concentrates on a few operators who
- *    can correlate it. `pickAntiSticky` weights acquisition away from recently-
- *    used operators, persisting the recent list per identity in localStorage.
+ *  - ANTI-STICKINESS: which operator a consumer ACQUIRES credits from (a lot can
+ *    only be redeemed against its own issuer, so acquisition is the lever). Left
+ *    naive, a consumer's flow concentrates on a few operators who can correlate
+ *    it. `pickAntiSticky` weights acquisition away from recently-used operators,
+ *    persisting the recent list per identity in localStorage.
  *
  * Ported from `@surplus/router-bridge` (selectOperators + OperatorMemory); the
  * app is a separate workspace and cannot import it directly. Keep in sync.

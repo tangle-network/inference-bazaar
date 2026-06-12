@@ -315,26 +315,30 @@ makes the batch uncommittable.
 
 ---
 
-## Privacy: Tor (via Arti) on the sell side
+## Privacy: Tor (via Arti) for the consumer
 
-> *The ask:* when people sell unused tokens, preserve their privacy so the
-> router doesn't keep routing them to the same operators, which would let those
-> operators correlate and de-anonymize the seller.
+> *The ask:* preserve the **consumer's** privacy when they spend credits on
+> inference, so the operators serving them can't keep seeing the same client and
+> correlate + de-anonymize them over time.
+>
+> Note on roles: the **operator is the seller** (it issues lots and serves the
+> model). The party who needs privacy is the **consumer** — the buyer (or resale
+> holder) who *redeems* a lot — and the privacy is *from* the operators.
 
 A shielded credit account hides *identity on-chain*. It does **not** hide the
-*fulfillment path*: redeeming surplus inference is the seller's CLIENT dialing an
+*fulfillment path*: redeeming a credit is the consumer's CLIENT dialing an
 operator's `/redeem` — the operator sees the source IP at that moment and, if
 always the same operator, can correlate timing + volume across redemptions and
-re-link the seller. The leak is on the **inbound** leg, so the fix lives on the
+re-link the consumer. The leak is on the **inbound** leg, so the fix lives on the
 **redemption client**, not the operator (which is the server there and cannot
 anonymize its own inbound peers). Two separable problems, two layers:
 
 ### 1. Network anonymity → Tor, via Arti (not hand-rolled), on the client
 
 We do **not** roll our own onion crypto. Network-layer anonymity is delegated to
-**Tor** through **Arti** (`arti-client`). The seller's redemption client reaches
+**Tor** through **Arti** (`arti-client`). The consumer's redemption client reaches
 operators as Tor **onion services** (`http://<...>.onion`) or clearnet via a Tor
-exit, so the operator never learns the seller's IP. This requires operators to
+exit, so the operator never learns the consumer's IP. This requires operators to
 **publish `.onion` endpoints** in the venue registry (deploy work).
 
 Wired today:
@@ -348,14 +352,14 @@ Wired today:
   network anonymity is real only when the user runs a **Tor Browser / system Tor**
   (or the Node SDK below). The app guarantees the right *destination* (`.onion`);
   the transport is the user's.
-- **Programmatic sellers (Node)** use `@surplus/router-bridge` `TorRedemptionClient`
+- **Programmatic consumers (Node)** use `@surplus/router-bridge` `TorRedemptionClient`
   — an HTTP transport tunneling through Arti's SOCKS5 (`.onion` resolves inside
   Tor; default listener 9150), tested against a real in-process SOCKS5 exchange.
 - **Operator outbound** (`PRIVACY_MODE=tor`): when the operator is itself an
   outbound client (remote backend, or redemption client to another operator),
   `operator/src/inference.rs` routes through Arti's SOCKS5 (`socks5h`,
   `SURPLUS_TOR_SOCKS`). This protects the operator's own calls; it does not (and
-  cannot) anonymize sellers dialing it.
+  cannot) anonymize consumers dialing it.
 
 Still operator-deploy work: actually **running Arti and exposing `/redeem` as a
 Tor onion service** (so `SURPLUS_ONION_URL` is real). Until an operator does
@@ -363,10 +367,10 @@ that, privacy mode falls back to its clearnet URL.
 
 ### 2. Operator-selection anti-stickiness → ours (Tor can't do it)
 
-Tor anonymizes the pipe; it does **not** decide *which operator* a seller's flow
+Tor anonymizes the pipe; it does **not** decide *which operator* a consumer's flow
 concentrates on. A redemption must go to the lot's own issuer, so the lever is at
-**acquisition**: which operator's lots a seller buys. Left naive, a seller keeps
-buying from (and so later redeeming against) the same few operators, who can
+**acquisition**: which operator's lots a consumer buys. Left naive, a consumer
+keeps buying from (and so later redeeming against) the same few operators, who can
 correlate volume + timing. So buy-side selection weights **away** from
 recently-used operators:
 
@@ -428,7 +432,7 @@ The operator who *sells* tokens **is** an inference operator. Reuse, don't reinv
 - Buyers spend through the router's OpenAI-compatible API (Rail 1). The
   marketplace settles the discount.
 - Privacy is Tor via Arti: operators run as onion services / behind Arti, the
-  seller reaches them through `TorTransport`. **transport + anti-stickiness
+  consumer reaches them through `TorTransport`. **transport + anti-stickiness
   selection built; running Arti + publishing operator `.onion`s is
   operator-service work.**
 

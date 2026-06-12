@@ -75,7 +75,7 @@ export interface Venue {
   operator: Address
   url: string
   /** The operator's Tor onion endpoint, self-reported via /health, if it runs
-   * one. Privacy-mode clients dial this so the operator never sees the seller's
+   * one. Privacy-mode clients dial this so the operator never sees the consumer's
    * IP (requires the browser/SDK to route .onion through Tor — see endpointFor). */
   onion: string | null
   healthy: boolean
