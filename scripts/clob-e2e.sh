@@ -58,6 +58,7 @@ start_operator() { # port key
   SURPLUS_CLOB_THRESHOLD=2 \
   SURPLUS_CLOB_EPOCH_SECS=5 \
   SURPLUS_RL_CAPACITY=100000 SURPLUS_RL_REFILL=10000 \
+  SURPLUS_INFERENCE_URL="http://127.0.0.1:1" \
   SURPLUS_SIDECAR_URL="http://127.0.0.1:1" \
   ./target/debug/surplus-operator-lite &
   OP_PIDS+=($!)
@@ -74,4 +75,4 @@ echo "operators up on :$PORT_A (A) and :$PORT_B (B)"
 
 RPC="$RPC" SETTLEMENT="$SETTLEMENT" USD="$USD" \
 NODE_A="http://127.0.0.1:$PORT_A" NODE_B="http://127.0.0.1:$PORT_B" \
-node scripts/clob-e2e.mjs
+node "${CLOB_DRIVER:-scripts/clob-e2e.mjs}"

@@ -82,6 +82,13 @@ pub fn order_digest(order: &Order, domain: &Eip712Domain) -> B256 {
     order.eip712_signing_hash(domain)
 }
 
+/// The EIP-712 STRUCT hash of an order — `hashOrder(o)` on-chain, which is the
+/// key the contract's `filled` and `cancelled` mappings use (NOT the signing
+/// digest). Off-chain settlement pre-checks must read those mappings by this.
+pub fn order_struct_hash(order: &Order) -> B256 {
+    order.eip712_hash_struct()
+}
+
 pub fn receipt_digest(
     redemption_id: B256,
     served_tokens: u64,
