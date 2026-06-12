@@ -13,9 +13,15 @@
 //! `RedemptionRequested` event) is not enough to burn the holder's quota or
 //! read their completions, and a captured authorization cannot be replayed.
 //!
-//! HTTP surface (feature `chain` + `SURPLUS_ROUTER_API_KEY`):
-//!   POST /redeem          { redemptionId, messages, maxTokens?, auth } → completion + receipt digest
-//!   POST /redeem/receipt  { redemptionId, servedTokens, signature } → settle tx
+//! The receipt commits the served WORK (`workCommitment = keccak256(modelIdHash,
+//! messagesHash, outputHash)`), not just the token count — `/redeem` returns it
+//! plus its parts so the holder reproduces `outputHash` from the served content
+//! before signing. "tokens served" with no proof of WHAT was served was the
+//! authenticity gap.
+//!
+//! HTTP surface (feature `chain` + a configured backend):
+//!   POST /redeem          { redemptionId, messages, maxTokens?, auth } → completion + workCommitment + receipt digest
+//!   POST /redeem/receipt  { redemptionId, servedTokens, workCommitment, signature } → settle tx
 
 use crate::venue::{Venue, VenueError};
 use serde::Deserialize;
@@ -56,7 +62,9 @@ pub struct RedeemServeBody {
 pub struct RedeemReceiptBody {
     pub redemption_id: String,
     pub served_tokens: u64,
-    /// Holder's signature over `receiptDigest(redemptionId, servedTokens)`.
+    /// The work commitment the holder signed over (returned by /redeem).
+    pub work_commitment: String,
+    /// Holder's signature over `receiptDigest(redemptionId, servedTokens, workCommitment)`.
     pub signature: String,
 }
 
@@ -96,6 +104,27 @@ pub fn serve_digest(
     out.extend_from_slice(domain_separator.as_slice());
     out.extend_from_slice(struct_hash.as_slice());
     keccak256(&out)
+}
+
+/// Canonical hash of the SERVED output — the part of the completion the holder
+/// actually receives and can reproduce. Deliberately hashes only the assistant
+/// message content(s), NOT the full completion JSON, whose `id`/`created`/
+/// `system_fingerprint` are nondeterministic and would make an honest holder's
+/// recomputation diverge. Concatenated in choice order.
+pub fn output_hash(completion: &Value) -> B256 {
+    let mut buf: Vec<u8> = Vec::new();
+    if let Some(choices) = completion.get("choices").and_then(Value::as_array) {
+        for ch in choices {
+            if let Some(content) = ch
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(Value::as_str)
+            {
+                buf.extend_from_slice(content.as_bytes());
+            }
+        }
+    }
+    keccak256(&buf)
 }
 
 impl Venue {
@@ -242,15 +271,24 @@ impl Venue {
             .unwrap_or(0);
         let served_now = used.min(remaining);
         let total = already + served_now;
+
+        // Proof of WHAT was served: the work commitment binds the model, the
+        // exact request, and the served output into the receipt the holder signs.
+        // outputHash is the served content the holder also sees, so they can
+        // reproduce the commitment before signing.
+        let model_id_hash = keccak256(inst.model_id.as_bytes());
+        let out_hash = output_hash(&completion);
+        let work = surplus_settlement::work_commitment(model_id_hash, messages_hash, out_hash);
+
         {
             let mut redeem = self.redeem.lock().unwrap();
             redeem.entry(body.redemption_id.clone()).or_default().served = total;
         }
+        self.persist_redeem();
 
-        let digest = client
-            .receipt_digest(rid, total)
-            .await
-            .map_err(|e| VenueError::Chain(e.to_string()))?;
+        // Digest computed locally from the canonical core (no chain round-trip):
+        // drift would be a fund-loss bug, pinned by the parity fixture.
+        let digest = surplus_settlement::receipt_digest(rid, total, work, &ctx.domain);
 
         Ok(json!({
             "completion": completion,
@@ -259,10 +297,14 @@ impl Venue {
             "servedTokens": served_now,
             "totalServedTokens": total,
             "remainingQuota": r.qtyTokens - total,
+            "workCommitment": format!("{work:#x}"),
+            "modelIdHash": format!("{model_id_hash:#x}"),
+            "messagesHash": format!("{messages_hash:#x}"),
+            "outputHash": format!("{out_hash:#x}"),
             "receiptDigest": format!("{digest:#x}"),
             "holder": format!("{:#x}", r.holder),
             "deadline": r.deadline,
-            "hint": "sign receiptDigest with the holder key and POST /redeem/receipt",
+            "hint": "verify outputHash over the served content, sign receiptDigest, POST /redeem/receipt with workCommitment",
         }))
     }
 
@@ -280,6 +322,10 @@ impl Venue {
             .redemption_id
             .parse()
             .map_err(|_| VenueError::Rejected("redemptionId is not bytes32".into()))?;
+        let work: B256 = body
+            .work_commitment
+            .parse()
+            .map_err(|_| VenueError::Rejected("workCommitment is not bytes32".into()))?;
         let sig = hex::decode(body.signature.trim_start_matches("0x"))
             .map_err(|_| VenueError::Rejected("signature is not hex".into()))?;
 
@@ -287,10 +333,11 @@ impl Venue {
             .await
             .map_err(|e| VenueError::Chain(e.to_string()))?;
         client
-            .settle_redemption(rid, body.served_tokens, sig)
+            .settle_redemption(rid, body.served_tokens, work, sig)
             .await
             .map_err(|e| VenueError::Chain(e.to_string()))?;
         self.redeem.lock().unwrap().remove(&body.redemption_id);
+        self.persist_redeem();
 
         Ok(
             json!({ "ok": true, "redemptionId": body.redemption_id, "servedTokens": body.served_tokens }),
@@ -315,8 +362,51 @@ impl Venue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use surplus_settlement::core::recover_signer;
     use surplus_settlement::Signer;
+
+    #[test]
+    fn output_hash_ignores_nondeterministic_fields() {
+        // Same served content, different volatile metadata → identical hash, so
+        // an honest holder reproduces the commitment from the content alone.
+        let a = json!({
+            "id": "chatcmpl-aaa", "created": 1, "system_fingerprint": "fp_1",
+            "choices": [{ "message": { "role": "assistant", "content": "hello world" } }],
+            "usage": { "completion_tokens": 2 }
+        });
+        let b = json!({
+            "id": "chatcmpl-zzz", "created": 999, "system_fingerprint": "fp_9",
+            "choices": [{ "message": { "role": "assistant", "content": "hello world" } }],
+            "usage": { "completion_tokens": 2 }
+        });
+        assert_eq!(output_hash(&a), output_hash(&b));
+
+        // Different served content → different hash.
+        let c = json!({ "choices": [{ "message": { "content": "different" } }] });
+        assert_ne!(output_hash(&a), output_hash(&c));
+    }
+
+    #[test]
+    fn work_commitment_binds_all_three_inputs() {
+        let m = keccak256(b"anthropic/claude-opus-4-8:output");
+        let msg = keccak256(br#"[{"role":"user","content":"hi"}]"#);
+        let out = output_hash(&json!({ "choices": [{ "message": { "content": "ok" } }] }));
+        let base = surplus_settlement::work_commitment(m, msg, out);
+        // Perturbing any input changes the commitment.
+        assert_ne!(
+            base,
+            surplus_settlement::work_commitment(keccak256(b"other"), msg, out)
+        );
+        assert_ne!(
+            base,
+            surplus_settlement::work_commitment(m, keccak256(b"other"), out)
+        );
+        assert_ne!(
+            base,
+            surplus_settlement::work_commitment(m, msg, keccak256(b"other"))
+        );
+    }
 
     #[test]
     fn serve_digest_signs_and_recovers() {

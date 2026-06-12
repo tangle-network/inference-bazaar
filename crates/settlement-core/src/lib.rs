@@ -44,10 +44,14 @@ sol! {
         uint64 execPriceMicroPerM;
     }
 
+    /// `workCommitment = keccak256(modelIdHash, messagesHash, outputHash)` binds
+    /// the receipt to the exact model, request, and output served — proof of
+    /// WHAT was served, not just how many tokens.
     #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     struct RedemptionReceipt {
         bytes32 redemptionId;
         uint64 servedTokens;
+        bytes32 workCommitment;
     }
 
     /// What an attester quorum signs. `bookId` is the matching domain — one
@@ -78,12 +82,30 @@ pub fn order_digest(order: &Order, domain: &Eip712Domain) -> B256 {
     order.eip712_signing_hash(domain)
 }
 
-pub fn receipt_digest(redemption_id: B256, served_tokens: u64, domain: &Eip712Domain) -> B256 {
+pub fn receipt_digest(
+    redemption_id: B256,
+    served_tokens: u64,
+    work_commitment: B256,
+    domain: &Eip712Domain,
+) -> B256 {
     RedemptionReceipt {
         redemptionId: redemption_id,
         servedTokens: served_tokens,
+        workCommitment: work_commitment,
     }
     .eip712_signing_hash(domain)
+}
+
+/// `workCommitment = keccak256(modelIdHash ‖ messagesHash ‖ outputHash)` — the
+/// receipt's proof of WHAT was served. `modelIdHash = keccak256(model_id)`,
+/// `messagesHash = keccak256(exact request bytes)`, `outputHash = keccak256(the
+/// served output bytes)`. Both holder and issuer derive it identically.
+pub fn work_commitment(model_id_hash: B256, messages_hash: B256, output_hash: B256) -> B256 {
+    let mut buf = [0u8; 96];
+    buf[..32].copy_from_slice(model_id_hash.as_slice());
+    buf[32..64].copy_from_slice(messages_hash.as_slice());
+    buf[64..].copy_from_slice(output_hash.as_slice());
+    keccak256(buf)
 }
 
 pub fn batch_digest(

@@ -12,6 +12,7 @@ contract SettlementTestBase is Test {
 
     uint64 internal constant CREDIT_TTL = 30 days;
     uint64 internal constant REDEMPTION_WINDOW = 6 hours;
+    uint64 internal constant CHALLENGE_WINDOW = 1 hours;
     uint16 internal constant PENALTY_BPS = 500; // 5%
     uint16 internal constant FEE_BPS = 200; // 2%
 
@@ -33,7 +34,7 @@ contract SettlementTestBase is Test {
     function setUp() public virtual {
         usd = new MockUSD();
         settlement = new SurplusSettlement(
-            IERC20(address(usd)), CREDIT_TTL, REDEMPTION_WINDOW, PENALTY_BPS, FEE_BPS, feeRecipient
+            IERC20(address(usd)), CREDIT_TTL, REDEMPTION_WINDOW, CHALLENGE_WINDOW, PENALTY_BPS, FEE_BPS, feeRecipient
         );
         buyer = vm.addr(buyerKey);
         seller = vm.addr(sellerKey);

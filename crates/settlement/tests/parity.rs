@@ -11,6 +11,8 @@ use surplus_settlement::{
 
 const CHAIN_ID: u64 = 3799; // Tangle testnet
 const VERIFYING: Address = address!("1111111111111111111111111111111111111111");
+// A fixed work commitment for the receipt parity fixture (shared with Solidity).
+const WORK: B256 = b256!("0000000000000000000000000000000000000000000000000000000000000077");
 
 fn fixture_buy() -> Order {
     Order {
@@ -55,7 +57,7 @@ fn print_fixture_values() {
     println!("fillsHash:       {}", fills_hash(&fills));
     println!(
         "receiptDigest:   {}",
-        receipt_digest(B256::with_last_byte(0x01), 20_000, &dom)
+        receipt_digest(B256::with_last_byte(0x01), 20_000, WORK, &dom)
     );
     println!(
         "batchDigest:     {}",
@@ -96,8 +98,8 @@ fn pinned_digests_match() {
         "fills hash drifted"
     );
     assert_eq!(
-        receipt_digest(B256::with_last_byte(0x01), 20_000, &dom),
-        b256!("fdd98e90c60c3ff8de5ea5b9b3f80fb9bfaddd19c4829c2eed440e883a33b6b7"),
+        receipt_digest(B256::with_last_byte(0x01), 20_000, WORK, &dom),
+        b256!("a6a5e6031cf2233a6c6a25b2b61a1ce8984703e76bbb577dc5812a0fef97644f"),
         "receipt digest drifted"
     );
     assert_eq!(

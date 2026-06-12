@@ -8,8 +8,10 @@ import { SurplusSettlement } from "../src/SurplusSettlement.sol";
 /// per-fill nonce: the cumulative `filled` map IS the replay guard for fills,
 /// and terminal redemption/lot states guard the lifecycle paths.
 contract ReplayTest is SettlementTestBase {
+    bytes32 internal constant WORK = keccak256("served-work-commitment");
+
     function signReceipt(uint256 key, bytes32 redemptionId, uint64 served) internal view returns (bytes memory) {
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, settlement.receiptDigest(redemptionId, served));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, settlement.receiptDigest(redemptionId, served, WORK));
         return abi.encodePacked(r, s, v);
     }
 
@@ -139,10 +141,10 @@ contract ReplayTest is SettlementTestBase {
         vm.prank(buyer);
         bytes32 id = settlement.requestRedemption(lotId, 50_000);
         bytes memory sig = signReceipt(buyerKey, id, 50_000);
-        settlement.settleRedemption(id, 50_000, sig);
+        settlement.settleRedemption(id, 50_000, WORK, sig);
 
         vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.RedemptionNotOpen.selector, id));
-        settlement.settleRedemption(id, 50_000, sig);
+        settlement.settleRedemption(id, 50_000, WORK, sig);
     }
 
     function test_receiptCrossRedemptionReplayReverts() public {
@@ -156,10 +158,10 @@ contract ReplayTest is SettlementTestBase {
         // Receipt digest binds redemptionId: A's receipt cannot settle B.
         bytes memory sigA = signReceipt(buyerKey, idA, 50_000);
         vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.BadReceipt.selector, idB));
-        settlement.settleRedemption(idB, 50_000, sigA);
+        settlement.settleRedemption(idB, 50_000, WORK, sigA);
 
         // Same signature is valid where it belongs.
-        settlement.settleRedemption(idA, 50_000, sigA);
+        settlement.settleRedemption(idA, 50_000, WORK, sigA);
     }
 
     function test_claimDefaultReplayReverts() public {

@@ -82,8 +82,10 @@ pub struct Venue {
 /// Serve-side state of one open redemption: how much has been served (pending
 /// the holder's signed receipt) and which serve authorizations were already
 /// consumed — a captured `ServeRequest` signature cannot be replayed to burn
-/// the holder's quota twice.
-#[derive(Default)]
+/// the holder's quota twice. Persisted to DATA_DIR/redeem.json so a restart does
+/// NOT reset `served` to 0 (which would re-open the full quota) nor forget the
+/// consumed authorizations.
+#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct RedeemProgress {
     pub served: u64,
     pub used_auths: HashSet<surplus_settlement::core::alloy_primitives::B256>,
@@ -110,6 +112,27 @@ impl Venue {
             .and_then(SettleCtx::operator_address_hex)
             .unwrap_or_else(|| MM_OWNER.to_string());
         let inference = crate::inference::InferenceBackend::from_env(&cfg.router_url);
+
+        // Fail closed: a BONDED ISSUER (it can sign sell orders that mint lots AND
+        // participates in a CLOB book) must serve the model it sold from its own
+        // backend — managed vLLM or a configured OpenAI-compat URL. Router-proxy
+        // mode resells a third party's inference, which the lot does not bond, so
+        // a node that can issue must never boot in "router" mode. Dev/chainless
+        // venues (no signer, no book) keep the router fallback.
+        let is_bonded_issuer = settle
+            .as_ref()
+            .and_then(|s| s.operator_address_hex())
+            .is_some()
+            && std::env::var("SURPLUS_CLOB_OPERATORS")
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false);
+        if is_bonded_issuer && inference.mode() == "router" {
+            panic!(
+                "bonded issuer must serve its own model: set SURPLUS_VLLM_MODEL or \
+                 SURPLUS_INFERENCE_URL. router-proxy mode is forbidden on an issuing \
+                 rail (a lot must be backed by inference this operator runs, not resold)."
+            );
+        }
         let venue = Venue {
             cfg,
             sidecar,
@@ -124,7 +147,42 @@ impl Venue {
         };
         venue.load_outbox();
         venue.load_refs();
+        venue.load_redeem();
         venue
+    }
+
+    /// Restore per-redemption serve progress (served counter + consumed serve
+    /// authorizations) from the journal. Without this, a restart resets `served`
+    /// to 0 — re-opening the full quota — and forgets used authorizations,
+    /// letting a holder re-consume the redemption for free.
+    fn load_redeem(&self) {
+        let Some(path) = redeem_path() else { return };
+        let Ok(raw) = std::fs::read(&path) else {
+            return;
+        };
+        let Ok(saved) = serde_json::from_slice::<HashMap<String, RedeemProgress>>(&raw) else {
+            tracing::warn!("redeem journal unreadable; starting empty");
+            return;
+        };
+        let n = saved.len();
+        *self.redeem.lock().unwrap() = saved;
+        if n > 0 {
+            tracing::info!(redemptions = n, "restored serve progress from journal");
+        }
+    }
+
+    /// Atomically journal the redeem map (tmp + rename). Called after every
+    /// mutation that must survive a restart (served update, receipt removal).
+    pub(crate) fn persist_redeem(&self) {
+        let Some(path) = redeem_path() else { return };
+        let snapshot = { self.redeem.lock().unwrap().clone() };
+        let tmp = path.with_extension("json.tmp");
+        let Ok(bytes) = serde_json::to_vec(&snapshot) else {
+            return;
+        };
+        if let Err(e) = std::fs::write(&tmp, &bytes).and_then(|()| std::fs::rename(&tmp, &path)) {
+            tracing::warn!("redeem journal write failed: {e}");
+        }
     }
 
     /// Restore journaled reference prices (see `set_ref`). Stale-by-a-restart
@@ -464,6 +522,12 @@ fn refs_path() -> Option<std::path::PathBuf> {
     std::env::var("DATA_DIR")
         .ok()
         .map(|d| std::path::Path::new(&d).join("refs.json"))
+}
+
+fn redeem_path() -> Option<std::path::PathBuf> {
+    std::env::var("DATA_DIR")
+        .ok()
+        .map(|d| std::path::Path::new(&d).join("redeem.json"))
 }
 
 fn persist_refs(refs: &HashMap<String, f64>) {

@@ -100,6 +100,13 @@ impl InferenceBackend {
         json!({ "mode": self.mode, "url": self.base_url })
     }
 
+    /// "managed-vllm" | "external" | "router". A bonded issuer must NOT be in
+    /// "router" mode — it would resell a third party's inference rather than
+    /// serve what it sold (enforced fail-closed at venue boot).
+    pub fn mode(&self) -> &str {
+        self.mode
+    }
+
     /// One OpenAI-compatible chat completion. Returns the upstream status and
     /// body verbatim — the caller meters `usage` and decides settlement.
     pub async fn chat_completion(

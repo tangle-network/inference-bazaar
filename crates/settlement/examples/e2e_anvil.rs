@@ -142,11 +142,18 @@ async fn main() -> anyhow::Result<()> {
     );
     println!("fill settled atomically: lot {lot1:#x}, buyer debited $0.70, liability $0.70");
 
-    // ── 2. Redemption happy path: holder receipt frees liability ─────────────
+    // ── 2. Redemption happy path: holder receipt (with work commitment) ──────
     let redemption = buyer_client.request_redemption(lot1, 50_000).await?;
-    let receipt_sig = buyer.sign_receipt(redemption, 50_000, &dom).to_vec();
+    let work = surplus_settlement::work_commitment(
+        surplus_settlement::core::alloy_primitives::keccak256(b"anthropic/claude-opus-4-8:output"),
+        surplus_settlement::core::alloy_primitives::keccak256(
+            br#"[{"role":"user","content":"hi"}]"#,
+        ),
+        surplus_settlement::core::alloy_primitives::keccak256(b"served output"),
+    );
+    let receipt_sig = buyer.sign_receipt(redemption, 50_000, work, &dom).to_vec();
     seller_client
-        .settle_redemption(redemption, 50_000, receipt_sig)
+        .settle_redemption(redemption, 50_000, work, receipt_sig)
         .await?;
     assert_eq!(operator.liability_of(seller.address()).await?, U256::ZERO);
     println!("redemption served + receipted: liability back to $0");

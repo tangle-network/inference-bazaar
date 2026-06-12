@@ -6,6 +6,7 @@ import { SurplusSettlement } from "../src/SurplusSettlement.sol";
 
 contract RedemptionTest is SettlementTestBase {
     bytes32 internal lotId;
+    bytes32 internal constant WORK = keccak256("served-work-commitment");
 
     function setUp() public override {
         super.setUp();
@@ -13,7 +14,7 @@ contract RedemptionTest is SettlementTestBase {
     }
 
     function signReceipt(uint256 key, bytes32 redemptionId, uint64 served) internal view returns (bytes memory) {
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, settlement.receiptDigest(redemptionId, served));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, settlement.receiptDigest(redemptionId, served, WORK));
         return abi.encodePacked(r, s, v);
     }
 
@@ -23,7 +24,7 @@ contract RedemptionTest is SettlementTestBase {
         (,,, uint64 locked,,,) = lotFields();
         assertEq(locked, 50_000, "qty locked while open");
 
-        settlement.settleRedemption(id, 50_000, signReceipt(buyerKey, id, 50_000));
+        settlement.settleRedemption(id, 50_000, WORK, signReceipt(buyerKey, id, 50_000));
         assertEq(settlement.liability(seller), 0, "liability extinguished");
         (address holder,,,,,,) = settlement.lots(lotId);
         assertEq(holder, address(0), "lot deleted when exhausted");
@@ -36,7 +37,7 @@ contract RedemptionTest is SettlementTestBase {
     function test_partialServe_remainderStaysRedeemable() public {
         vm.prank(buyer);
         bytes32 id = settlement.requestRedemption(lotId, 50_000);
-        settlement.settleRedemption(id, 20_000, signReceipt(buyerKey, id, 20_000));
+        settlement.settleRedemption(id, 20_000, WORK, signReceipt(buyerKey, id, 20_000));
 
         // debit = 750_000 * 20k / 50k = 300_000
         assertEq(settlement.liability(seller), 450_000);
@@ -51,13 +52,67 @@ contract RedemptionTest is SettlementTestBase {
     }
 
     /// A lot minted through a BOOK batch records that book, so its own quorum may
-    /// attest service in the dispute path.
+    /// attest service — but the attestation now opens a challenge window and only
+    /// finalizes after it passes unchallenged.
     function test_attestedSettle_disputePath() public {
         bytes32 bookLot = settleBatchMint();
         vm.prank(buyer);
         bytes32 id = settlement.requestRedemption(bookLot, 50_000);
-        bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000));
-        settlement.settleRedemptionAttested(BOOK, id, 50_000, sigs);
+        bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000, WORK));
+        settlement.settleRedemptionAttested(BOOK, id, 50_000, WORK, sigs);
+        // Not yet final — within the challenge window finalize reverts.
+        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.ChallengeWindowOpen.selector, id));
+        settlement.finalizeAttested(id);
+        // After the window, anyone finalizes the unchallenged attestation.
+        uint256 liabBefore = settlement.liability(seller);
+        vm.warp(block.timestamp + CHALLENGE_WINDOW + 1);
+        settlement.finalizeAttested(id);
+        // The batch lot (notional 750_000) is extinguished; the setUp lot remains.
+        assertEq(settlement.liability(seller), liabBefore - 750_000, "batch lot liability extinguished");
+    }
+
+    /// The holder contests a bogus attestation within the window: it voids,
+    /// returning the redemption to Open so a default becomes claimable.
+    function test_attestedSettle_holderChallengeVoids() public {
+        bytes32 bookLot = settleBatchMint();
+        vm.prank(buyer);
+        bytes32 id = settlement.requestRedemption(bookLot, 50_000);
+        bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000, WORK));
+        settlement.settleRedemptionAttested(BOOK, id, 50_000, WORK, sigs);
+
+        vm.prank(buyer);
+        settlement.challengeAttested(id);
+
+        // Voided: finalize no longer possible, and after the redemption deadline
+        // the holder claims a default (the issuer never proved real service).
+        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.RedemptionNotContested.selector, id));
+        settlement.finalizeAttested(id);
+        vm.warp(block.timestamp + REDEMPTION_WINDOW + 1);
+        uint256 payout = settlement.claimDefault(id);
+        assertGt(payout, 0, "holder made whole on default after challenge");
+    }
+
+    function test_challengeAfterWindowReverts() public {
+        bytes32 bookLot = settleBatchMint();
+        vm.prank(buyer);
+        bytes32 id = settlement.requestRedemption(bookLot, 50_000);
+        bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000, WORK));
+        settlement.settleRedemptionAttested(BOOK, id, 50_000, WORK, sigs);
+        vm.warp(block.timestamp + CHALLENGE_WINDOW + 1);
+        vm.prank(buyer);
+        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.ChallengeWindowClosed.selector, id));
+        settlement.challengeAttested(id);
+    }
+
+    function test_onlyHolderChallenges() public {
+        bytes32 bookLot = settleBatchMint();
+        vm.prank(buyer);
+        bytes32 id = settlement.requestRedemption(bookLot, 50_000);
+        bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000, WORK));
+        settlement.settleRedemptionAttested(BOOK, id, 50_000, WORK, sigs);
+        vm.prank(seller);
+        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.NotLotHolder.selector, bookLot));
+        settlement.challengeAttested(id);
     }
 
     /// THE confiscation regression: a `settleFills`-minted lot has no issuing
@@ -66,11 +121,11 @@ contract RedemptionTest is SettlementTestBase {
     function test_attestedSettle_revertsForBooklessLot() public {
         vm.prank(buyer);
         bytes32 id = settlement.requestRedemption(lotId, 50_000); // lotId is a settleFills lot
-        bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000));
+        bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000, WORK));
         vm.expectRevert(
             abi.encodeWithSelector(SurplusSettlement.RedemptionBookMismatch.selector, settlement.NO_BOOK(), BOOK)
         );
-        settlement.settleRedemptionAttested(BOOK, id, 50_000, sigs);
+        settlement.settleRedemptionAttested(BOOK, id, 50_000, WORK, sigs);
     }
 
     /// Cross-instance confiscation is blocked: a DIFFERENT registered book's
@@ -87,9 +142,9 @@ contract RedemptionTest is SettlementTestBase {
         bytes32 bookLot = settleBatchMint(); // minted under BOOK
         vm.prank(buyer);
         bytes32 id = settlement.requestRedemption(bookLot, 50_000);
-        bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000));
+        bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000, WORK));
         vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.RedemptionBookMismatch.selector, BOOK, OTHER));
-        settlement.settleRedemptionAttested(OTHER, id, 50_000, sigs);
+        settlement.settleRedemptionAttested(OTHER, id, 50_000, WORK, sigs);
     }
 
     function test_wrongReceiptSignerReverts() public {
@@ -97,7 +152,7 @@ contract RedemptionTest is SettlementTestBase {
         bytes32 id = settlement.requestRedemption(lotId, 50_000);
         bytes memory badSig = signReceipt(sellerKey, id, 50_000);
         vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.BadReceipt.selector, id));
-        settlement.settleRedemption(id, 50_000, badSig);
+        settlement.settleRedemption(id, 50_000, WORK, badSig);
     }
 
     function test_claimDefault_paysHolderFromCollateralPlusPenalty() public {
@@ -131,7 +186,7 @@ contract RedemptionTest is SettlementTestBase {
         vm.warp(block.timestamp + REDEMPTION_WINDOW + 1);
         bytes memory sig = signReceipt(buyerKey, id, 50_000);
         vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.RedemptionDeadlinePassed.selector, id));
-        settlement.settleRedemption(id, 50_000, sig);
+        settlement.settleRedemption(id, 50_000, WORK, sig);
     }
 
     function test_oneOpenRedemptionPerLot() public {

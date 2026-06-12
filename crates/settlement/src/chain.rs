@@ -48,7 +48,10 @@ sol! {
         function depositFor(address account, uint256 amount) external;
         function depositCollateral(uint256 amount) external;
         function requestRedemption(bytes32 lotId, uint64 qty) external returns (bytes32);
-        function settleRedemption(bytes32 redemptionId, uint64 servedTokens, bytes calldata holderSig) external;
+        function settleRedemption(bytes32 redemptionId, uint64 servedTokens, bytes32 workCommitment, bytes calldata holderSig) external;
+        function settleRedemptionAttested(bytes32 bookId, bytes32 redemptionId, uint64 servedTokens, bytes32 workCommitment, bytes[] calldata sigs) external;
+        function finalizeAttested(bytes32 redemptionId) external;
+        function challengeAttested(bytes32 redemptionId) external;
         function claimDefault(bytes32 redemptionId) external returns (uint256);
         function registerBook(bytes32 bookId, address[] calldata signers, uint16 threshold, uint16 bookFeeBps, address bookFeeRecipient) external;
         function rotateAttesters(bytes32 bookId, address[] calldata signers, uint16 threshold) external;
@@ -68,9 +71,10 @@ sol! {
             uint64 qtyTokens, uint64 lockedTokens, uint64 expiry, uint128 notionalMicro
         );
         function redemptions(bytes32 redemptionId) external view returns (
-            bytes32 lotId, address holder, uint64 qtyTokens, uint64 deadline, uint8 state
+            bytes32 lotId, address holder, uint64 qtyTokens, uint64 deadline, uint8 state,
+            uint64 challengeDeadline, uint64 attestedServed, bytes32 attestedWork
         );
-        function receiptDigest(bytes32 redemptionId, uint64 servedTokens) external view returns (bytes32);
+        function receiptDigest(bytes32 redemptionId, uint64 servedTokens, bytes32 workCommitment) external view returns (bytes32);
         function freeCollateral(address issuer) external view returns (uint256);
         function defaultPenaltyBps() external view returns (uint16);
 
@@ -264,10 +268,15 @@ impl SettlementClient {
         Ok(self.contract.lots(lot_id).call().await?)
     }
 
-    pub async fn receipt_digest(&self, redemption_id: B256, served: u64) -> anyhow::Result<B256> {
+    pub async fn receipt_digest(
+        &self,
+        redemption_id: B256,
+        served: u64,
+        work_commitment: B256,
+    ) -> anyhow::Result<B256> {
         Ok(self
             .contract
-            .receiptDigest(redemption_id, served)
+            .receiptDigest(redemption_id, served, work_commitment)
             .call()
             .await?)
     }
@@ -276,11 +285,12 @@ impl SettlementClient {
         &self,
         redemption_id: B256,
         served: u64,
+        work_commitment: B256,
         holder_sig: Vec<u8>,
     ) -> anyhow::Result<()> {
         let r = self
             .contract
-            .settleRedemption(redemption_id, served, holder_sig.into())
+            .settleRedemption(redemption_id, served, work_commitment, holder_sig.into())
             .send()
             .await?
             .get_receipt()
