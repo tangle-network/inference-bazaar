@@ -30,13 +30,15 @@ function VenueStatus() {
   )
 }
 
+// Outcome-led: the buyer's two verbs first (get cheaper inference, hold it),
+// then the engine room (books, sellers, operators, the on-chain trail).
 const NAV = [
-  { to: '/', label: 'Markets', icon: 'i-ph:chart-line-up', end: true },
-  { to: '/buy', label: 'Buy', icon: 'i-ph:lightning' },
+  { to: '/', label: 'Buy inference', icon: 'i-ph:lightning', end: true },
+  { to: '/portfolio', label: 'Portfolio', icon: 'i-ph:wallet' },
+  { to: '/markets', label: 'Order books', icon: 'i-ph:chart-line-up' },
   { to: '/sell', label: 'Sell', icon: 'i-ph:storefront' },
   { to: '/operators', label: 'Operators', icon: 'i-ph:hard-drives' },
   { to: '/activity', label: 'Activity', icon: 'i-ph:pulse' },
-  { to: '/portfolio', label: 'Portfolio', icon: 'i-ph:wallet' },
 ]
 
 function ThemeButton() {
