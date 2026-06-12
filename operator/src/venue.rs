@@ -74,6 +74,9 @@ pub struct Venue {
     /// and on demand by the RFQ path; `fetched_at == 0` means never fetched —
     /// quoting is then unbounded (legacy / chainless mode).
     pub(crate) chain_cache: Mutex<ChainCache>,
+    /// Where redemptions get their tokens: managed vLLM, any OpenAI-compat
+    /// URL, or the Tangle Router (legacy default). See `inference.rs`.
+    pub(crate) inference: crate::inference::InferenceBackend,
 }
 
 /// Serve-side state of one open redemption: how much has been served (pending
@@ -106,6 +109,7 @@ impl Venue {
             .as_ref()
             .and_then(SettleCtx::operator_address_hex)
             .unwrap_or_else(|| MM_OWNER.to_string());
+        let inference = crate::inference::InferenceBackend::from_env(&cfg.router_url);
         let venue = Venue {
             cfg,
             sidecar,
@@ -116,6 +120,7 @@ impl Venue {
             mm_owner,
             redeem: Mutex::new(HashMap::new()),
             chain_cache: Mutex::new(ChainCache::default()),
+            inference,
         };
         venue.load_outbox();
         venue.load_refs();
@@ -233,7 +238,7 @@ impl Venue {
                 })
             })
             .collect();
-        json!({ "ok": true, "instruments": instruments })
+        json!({ "ok": true, "instruments": instruments, "inference": self.inference.target() })
     }
 
     #[allow(clippy::too_many_arguments)]

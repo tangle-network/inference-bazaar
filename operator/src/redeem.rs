@@ -109,8 +109,6 @@ impl Venue {
             (Some(r), Some(k)) => (r, k),
             _ => return Err(VenueError::SettlementUnconfigured("rpc + operator key")),
         };
-        let api_key = std::env::var("SURPLUS_ROUTER_API_KEY")
-            .map_err(|_| VenueError::SettlementUnconfigured("SURPLUS_ROUTER_API_KEY"))?;
 
         let rid: B256 = body
             .redemption_id
@@ -208,38 +206,26 @@ impl Venue {
             ));
         }
 
-        // Serve REAL inference through the Tangle Router with the issuer's key.
+        // Serve REAL inference from the issuer's configured backend — its own
+        // managed vLLM, any OpenAI-compatible endpoint, or the Tangle Router
+        // (legacy default). The lot is a claim on THIS operator, so the tokens
+        // come from whatever this operator actually runs.
         let cap = body.max_tokens.unwrap_or(1024).min(8192);
-        let resp = reqwest::Client::new()
-            .post(format!("{}/v1/chat/completions", self.cfg.router_url))
-            .bearer_auth(&api_key)
-            .json(&json!({
-                "model": inst.model_id,
-                "messages": body.messages,
-                "max_tokens": cap,
-            }))
-            .timeout(std::time::Duration::from_secs(120))
-            .send()
-            .await;
-        let resp = match resp {
-            Ok(r) => r,
+        let (status, completion) = match self
+            .inference
+            .chat_completion(&inst.model_id, &body.messages, cap)
+            .await
+        {
+            Ok(out) => out,
             Err(e) => {
                 release_auth();
-                return Err(VenueError::Chain(format!("router: {e}")));
-            }
-        };
-        let status = resp.status();
-        let completion: Value = match resp.json().await {
-            Ok(v) => v,
-            Err(e) => {
-                release_auth();
-                return Err(VenueError::Chain(format!("router body: {e}")));
+                return Err(VenueError::Chain(e));
             }
         };
         if !status.is_success() {
             release_auth();
             return Err(VenueError::Rejected(format!(
-                "router {status}: {completion}"
+                "inference backend {status}: {completion}"
             )));
         }
 
