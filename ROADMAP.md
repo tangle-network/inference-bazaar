@@ -159,9 +159,16 @@ to the phase that delivers it.
 - [x] **Validator-attested batch.** N fills batched; validator quorum attests;
   one settlement. **Done:** Batch.t.sol — a 2-of-3 quorum settles a 2-fill
   batch; below-threshold, non-attester, duplicate-signer, and replayed
-  attestations all revert; limits still bind under attestation. (Live-chain
-  exercise lands with the shared-CLOB matcher, docs/specs/shared-clob.md
-  Phase B, which settles exclusively through this path.)
+  attestations all revert; limits still bind under attestation.
+- [x] **Shared CLOB live on the attested path (Phase C).** Two operators,
+  one shared book: signed orders gossiped between services 3+4, the elected
+  epoch proposer runs the set-deterministic matcher kernel, the peer
+  independently re-verifies (trader sigs + exact match recompute + censorship)
+  and co-signs, 2-of-2 quorum settles `settleBatchAttested`. **Done live
+  2026-06-11:** batchNonce 0→1 on `0x1cD49739…`, sell entered at service 3
+  and buy at service 4,
+  <https://sepolia.basescan.org/tx/0x388f4408a4cd25de682facf15826e2c170397dc8ed5c93446a930d60435eed96>.
+  Rehearsable e2e: `scripts/clob-e2e.sh` (anvil) and `scripts/clob-e2e-live.mjs`.
 - [ ] **SP1 batch proof.** Swap quorum attestation for a SuccinctVM validity
   proof of the matching circuit. **Done when:** the settlement contract verifies
   a real proof and rejects a forged one. *(toolchain present: `~/.sp1`.)*

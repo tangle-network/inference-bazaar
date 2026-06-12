@@ -131,16 +131,28 @@ What's missing is the matcher role and its protocol:
   instrument; user limit orders rest in it; the dealer RFQ path remains as
   the take-liquidity fast path.
 
-**Why not now:** Phase C needs the gossip mesh between operator runtimes and
-the epoch-rotation schedule — runtime work, not contract work. The contract
-surface (batch verification, cancels, caps) is already deployed and tested.
-Phases A/B deliver the aggregated market experience while C matures.
+**Status (2026-06-11):** LIVE on the attested path. The matcher kernel
+(`crates/matcher`, set-deterministic — a pure function of the order set, so
+peers recompute the batch bit-for-bit), the consensus layer (election,
+`verify_proposal` checking trader-signature authenticity + match recomputation
++ censorship, attestation quorum), and the epoch service (`operator/src/clob.rs`:
+HTTP gossip, epoch driver, co-sign round, `settleBatchAttested` submit) are
+deployed on services 3 + 4. One refinement over the spec sketch: matching is
+**set-deterministic, not price-time** — intra-epoch priority is price then
+order-digest, never arrival order, so the proposer has zero sequencing
+discretion and "peers re-execute" is exact rather than trust-the-claimed-order.
+Transport is HTTP between configured peers (`SURPLUS_CLOB_OPERATORS`);
+blueprint-networking gossip + BSM fraud-claim wiring remain open.
 
 **Acceptance (Phase C):**
-- [ ] Two operators run the matcher rotation; a resting limit order from a
-  third-party wallet fills against incoming flow in an epoch batch.
-- [ ] A batch settles via quorum attestation on Base Sepolia; a tampered
-  batch is rejected.
+- [x] Two operators run the matcher rotation; a third-party wallet's limit
+  order fills against flow entered at a DIFFERENT operator in an epoch batch
+  (live 2026-06-11: batchNonce 0→1 on `0x1cD49739…`, tx
+  `0x388f4408a4cd25de682facf15826e2c170397dc8ed5c93446a930d60435eed96`).
+- [x] A batch settles via quorum attestation on Base Sepolia (same tx);
+  tampered batches are rejected — on-chain by `_verifyQuorum` (Batch.t.sol),
+  off-chain by peers (forged order / wrong fillsHash / impersonated proposer
+  all refused, operator/tests/clob_e2e.rs).
 - [ ] The same batch settles via `settleBatchProven` with a real SP1 proof
   (Succinct prover network), and a forged proof is rejected.
 
