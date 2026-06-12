@@ -19,10 +19,10 @@
 //!
 //! Trust model: peers never trust the proposer (set-determinism lets them
 //! recompute the batch bit-for-bit), and the proposer never trusts peers (the
-//! contract re-verifies the quorum). Proposal requests are unauthenticated by
-//! design for now: an impersonated "proposal" still has to carry honestly signed
-//! orders and a reproducible match to collect signatures, so impersonation can
-//! only produce an honest batch (griefing is bounded by the rate limiter).
+//! contract re-verifies the quorum). Proposals are authenticated: each carries
+//! the elected proposer's signature over the claimed batch digest, verified
+//! with one ecrecover before any expensive work — co-sign side effects (pool
+//! prune, settled marking) are only reachable by the epoch's real proposer.
 //!
 //! Failure mode is liveness, never safety: orders touched by a co-signed batch
 //! leave the pool (re-matching a filled order would overfill and revert the next
@@ -49,8 +49,8 @@ use surplus_matcher::{
     aggregate_attestation, elect_proposer, match_epoch, verify_proposal, Attestation,
     BatchProposal, Verdict,
 };
-use surplus_settlement::core::alloy_primitives::{Address, B256};
-use surplus_settlement::core::{batch_digest, order_digest, BatchFill, Order};
+use surplus_settlement::core::alloy_primitives::{keccak256, Address, B256, U256};
+use surplus_settlement::core::{batch_digest, order_digest, recover_signer, BatchFill, Order};
 use surplus_settlement::SignedOrder;
 
 use crate::config::Instrument;
@@ -62,11 +62,55 @@ use crate::venue::Venue;
 const EXPIRY_MARGIN_SECS: u64 = 30;
 /// Pool cap — a gossip-spam bound, not a market parameter.
 const MAX_POOL: usize = 10_000;
+/// How long a cancel for an order we have NOT seen is remembered. A cancel must
+/// outlive the order it kills; once the order is in hand we extend to its exact
+/// expiry. Two days bounds the unseen-order case without growing the set.
+const CANCEL_TTL_SECS: u64 = 2 * 24 * 3600;
+
+// EIP-712 `SurplusCancel/1`, domain-separated from every other Surplus signature
+// (settlement orders, serve auths) so a cancel can never be replayed as anything
+// else. Mirrors the on-chain `cancelOrder` authority (msg.sender == trader) with
+// a portable signature the gossip layer can carry.
+const CANCEL_DOMAIN_NAME: &[u8] = b"SurplusCancel";
+const CANCEL_TYPE: &[u8] = b"OrderCancel(bytes32 orderHash)";
+
+/// keccak256(\x19\x01 ‖ domainSeparator ‖ structHash) for an order cancel.
+/// Public so clients (the app) can build the signature a [`WireCancel`] carries.
+pub fn cancel_digest(chain_id: U256, settlement: Address, order_hash: B256) -> B256 {
+    let mut dom = Vec::with_capacity(160);
+    dom.extend_from_slice(
+        keccak256(
+            b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
+        )
+        .as_slice(),
+    );
+    dom.extend_from_slice(keccak256(CANCEL_DOMAIN_NAME).as_slice());
+    dom.extend_from_slice(keccak256(b"1").as_slice());
+    dom.extend_from_slice(&chain_id.to_be_bytes::<32>());
+    dom.extend_from_slice(&[0u8; 12]);
+    dom.extend_from_slice(settlement.as_slice());
+    let domain_separator = keccak256(&dom);
+
+    let mut st = Vec::with_capacity(64);
+    st.extend_from_slice(keccak256(CANCEL_TYPE).as_slice());
+    st.extend_from_slice(order_hash.as_slice());
+    let struct_hash = keccak256(&st);
+
+    let mut out = Vec::with_capacity(66);
+    out.extend_from_slice(b"\x19\x01");
+    out.extend_from_slice(domain_separator.as_slice());
+    out.extend_from_slice(struct_hash.as_slice());
+    keccak256(&out)
+}
 
 // ─────────────────────────────── Config ──────────────────────────────────────
 
 #[derive(Clone, Debug)]
 pub struct ClobConfig {
+    /// The matching domain (contract `Book`) this fleet settles through —
+    /// `SURPLUS_CLOB_BOOK`, 0x-hex bytes32. Must be registered on-chain via
+    /// `registerBook` with exactly this operator set. Default: the zero book.
+    pub book_id: B256,
     pub epoch_secs: u64,
     /// Quorum size — must equal the contract's `attesterThreshold`.
     pub threshold: usize,
@@ -80,32 +124,59 @@ pub struct ClobConfig {
 impl ClobConfig {
     /// `SURPLUS_CLOB_OPERATORS="0xabc..=http://h1:9500,0xdef..=http://h2:9400"`
     /// plus `SURPLUS_CLOB_THRESHOLD` (default 2) and `SURPLUS_CLOB_EPOCH_SECS`
-    /// (default 10). Returns None when unset — the shared CLOB is opt-in.
-    pub fn from_env() -> Option<Self> {
-        let raw = std::env::var("SURPLUS_CLOB_OPERATORS").ok()?;
+    /// (default 10). `Ok(None)` when unset — the shared CLOB is opt-in. A SET
+    /// but malformed value is an ERROR, never a silent skip: a node that boots
+    /// green while quietly not participating also stalls every peer that needs
+    /// its co-signature for quorum.
+    pub fn from_env() -> anyhow::Result<Option<Self>> {
+        let Ok(raw) = std::env::var("SURPLUS_CLOB_OPERATORS") else {
+            return Ok(None);
+        };
         let mut operators = Vec::new();
         for entry in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-            let (addr, url) = entry.split_once('=')?;
-            let addr: Address = addr.trim().parse().ok()?;
+            let (addr, url) = entry.split_once('=').ok_or_else(|| {
+                anyhow::anyhow!("SURPLUS_CLOB_OPERATORS entry '{entry}' is not 0xaddr=url")
+            })?;
+            let addr: Address = addr.trim().parse().map_err(|_| {
+                anyhow::anyhow!("SURPLUS_CLOB_OPERATORS entry '{entry}' has a bad address")
+            })?;
             operators.push((addr, url.trim().trim_end_matches('/').to_string()));
         }
-        if operators.is_empty() {
-            return None;
-        }
-        let threshold = std::env::var("SURPLUS_CLOB_THRESHOLD")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(2);
-        let epoch_secs = std::env::var("SURPLUS_CLOB_EPOCH_SECS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .filter(|v: &u64| *v >= 2)
-            .unwrap_or(10);
-        Some(ClobConfig {
+        anyhow::ensure!(
+            !operators.is_empty(),
+            "SURPLUS_CLOB_OPERATORS is set but lists no operators"
+        );
+        let threshold = match std::env::var("SURPLUS_CLOB_THRESHOLD") {
+            Ok(v) => v
+                .parse()
+                .map_err(|_| anyhow::anyhow!("SURPLUS_CLOB_THRESHOLD '{v}' is not a number"))?,
+            Err(_) => 2,
+        };
+        let epoch_secs = match std::env::var("SURPLUS_CLOB_EPOCH_SECS") {
+            Ok(v) => {
+                let secs: u64 = v.parse().map_err(|_| {
+                    anyhow::anyhow!("SURPLUS_CLOB_EPOCH_SECS '{v}' is not a number")
+                })?;
+                anyhow::ensure!(
+                    secs >= 2,
+                    "SURPLUS_CLOB_EPOCH_SECS must be >= 2, got {secs}"
+                );
+                secs
+            }
+            Err(_) => 10,
+        };
+        let book_id = match std::env::var("SURPLUS_CLOB_BOOK") {
+            Ok(v) => v
+                .parse()
+                .map_err(|_| anyhow::anyhow!("SURPLUS_CLOB_BOOK '{v}' is not bytes32 hex"))?,
+            Err(_) => B256::ZERO,
+        };
+        Ok(Some(ClobConfig {
+            book_id,
             epoch_secs,
             threshold,
             operators,
-        })
+        }))
     }
 
     fn addresses(&self) -> Vec<Address> {
@@ -127,6 +198,10 @@ pub trait ClobNet: Send + Sync {
     /// Best-effort one-hop fanout of an admitted order. Loss surfaces as a
     /// censorship verdict at verification time, never as silent divergence.
     fn gossip_order(&self, w: &WireOrder);
+
+    /// Best-effort fanout of a signed cancel — same path as orders, so a cancel
+    /// reaches every pool before the next epoch matches the order.
+    fn gossip_cancel(&self, c: &WireCancel);
 
     /// Broadcast a proposal and collect peer co-signatures over `digest` until
     /// `want` arrive or the transport's deadline passes. Self-attestation is
@@ -204,6 +279,22 @@ impl ClobNet for HttpNet {
         }
     }
 
+    fn gossip_cancel(&self, c: &WireCancel) {
+        for (addr, url) in &self.operators {
+            if *addr == self.me {
+                continue;
+            }
+            let http = self.http.clone();
+            let url = format!("{url}/clob/cancel-gossip");
+            let body = c.clone();
+            tokio::spawn(async move {
+                if let Err(e) = http.post(&url).json(&body).send().await {
+                    tracing::warn!(%url, "cancel relay failed: {e}");
+                }
+            });
+        }
+    }
+
     async fn collect_attestations(
         &self,
         wire: &WireProposal,
@@ -248,6 +339,12 @@ pub struct Clob {
     /// whole batch on the contract's `filled` cap: a liveness grief. This set
     /// makes settlement final at admission; it self-bounds by order expiry.
     settled: Mutex<HashMap<B256, u64>>,
+    /// orderHash → (trader, gc-expiry) for every order a signed cancel has
+    /// killed. An order in this set cannot be (re-)admitted, so a cancelled
+    /// order never enters a batch — which would revert `OrderIsCancelled`
+    /// on-chain and grief the whole batch. Survives a cancel that races ahead of
+    /// the order it cancels (pre-order cancel), self-bounds by expiry.
+    cancelled: Mutex<HashMap<B256, (Address, u64)>>,
     /// Last epoch this node ran as proposer (idempotence for the driver loop).
     last_epoch: AtomicU64,
     net: Arc<dyn ClobNet>,
@@ -301,6 +398,7 @@ impl Clob {
             me,
             pool: Mutex::new(HashMap::new()),
             settled: Mutex::new(HashMap::new()),
+            cancelled: Mutex::new(HashMap::new()),
             last_epoch: AtomicU64::new(0),
             net,
         })
@@ -314,12 +412,93 @@ impl Clob {
         Ok(out)
     }
 
+    /// Cancel an order locally and fan the signed cancel out to peers. The one
+    /// entry point for client cancel flow.
+    pub fn submit_cancel(&self, c: WireCancel) -> Result<Value, (StatusCode, String)> {
+        let out = self.admit_cancel(c.clone())?;
+        self.net.gossip_cancel(&c);
+        Ok(out)
+    }
+
+    /// (chainId, settlement) — the EIP-712 context cancels are bound to.
+    fn cancel_ctx(&self) -> (U256, Address) {
+        let ctx = self.venue.settle.as_ref().expect("checked in new()");
+        (ctx.domain.chain_id.unwrap_or_default(), ctx.contract)
+    }
+
+    /// Verify a signed cancel (recovers to the order's trader), record it, and
+    /// drop the order from the pool if held. Idempotent. A cancel for an order
+    /// not yet seen is remembered so the order is refused on arrival.
+    pub(crate) fn admit_cancel(&self, c: WireCancel) -> Result<Value, (StatusCode, String)> {
+        let sig = surplus_settlement::core::hex::decode(c.signature.trim_start_matches("0x"))
+            .map_err(|_| {
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "signature is not hex".into(),
+                )
+            })?;
+        let (chain_id, contract) = self.cancel_ctx();
+        let digest = cancel_digest(chain_id, contract, c.order_hash);
+        let signer = recover_signer(digest, &sig).ok_or((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unrecoverable cancel signature".to_string(),
+        ))?;
+        if signer != c.trader {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "cancel is not signed by the order's trader".into(),
+            ));
+        }
+
+        let mut pool = self.pool.lock().unwrap();
+        // If the order is in hand, the cancel only binds when it really is this
+        // trader's order; extend the TTL to the order's own expiry.
+        let (removed, ttl) = match pool.get(&c.order_hash) {
+            Some(e) if e.signed.order.trader == c.trader => (true, e.signed.order.expiry),
+            Some(_) => {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    "cancel trader does not own this order".into(),
+                ))
+            }
+            None => (false, now_unix() + CANCEL_TTL_SECS),
+        };
+        if removed {
+            pool.remove(&c.order_hash);
+        }
+        self.cancelled
+            .lock()
+            .unwrap()
+            .insert(c.order_hash, (c.trader, ttl));
+        Ok(json!({
+            "orderHash": format!("{:#x}", c.order_hash),
+            "cancelled": true,
+            "removedFromPool": removed,
+        }))
+    }
+
+    /// Is this order known-cancelled by THIS node? Used as the co-sign safety
+    /// net so a batch can never include a cancelled order.
+    fn is_cancelled(&self, order_hash: B256, trader: Address) -> bool {
+        let now = now_unix();
+        let mut cancelled = self.cancelled.lock().unwrap();
+        cancelled.retain(|_, (_, exp)| *exp >= now);
+        cancelled
+            .get(&order_hash)
+            .map(|(t, _)| *t == trader)
+            .unwrap_or(false)
+    }
+
     pub fn current_epoch(&self) -> u64 {
         now_unix() / self.cfg.epoch_secs
     }
 
     pub(crate) fn domain(&self) -> &surplus_settlement::Eip712Domain {
         &self.venue.settle.as_ref().expect("checked in new()").domain
+    }
+
+    pub(crate) fn book_id(&self) -> B256 {
+        self.cfg.book_id
     }
 
     fn signer(&self) -> &surplus_settlement::Signer {
@@ -370,6 +549,11 @@ impl Clob {
                     "order was settled in a prior batch".into(),
                 ));
             }
+        }
+        // A cancelled order can never (re-)enter the pool — a cancel may have
+        // arrived before the order, or be replayed after it.
+        if self.is_cancelled(digest, signed.order.trader) {
+            return Err((StatusCode::CONFLICT, "order was cancelled".into()));
         }
         let mut pool = self.pool.lock().unwrap();
         if pool.len() >= MAX_POOL && !pool.contains_key(&digest) {
@@ -457,18 +641,23 @@ impl Clob {
         }
 
         let batch_nonce = self.read_batch_nonce().await?;
-        let digest = batch_digest(batch_nonce, batch.fills_hash, &domain);
+        let digest = batch_digest(self.cfg.book_id, batch_nonce, batch.fills_hash, &domain);
 
-        // Self-attest, then collect peer co-signatures over the transport.
+        // One signature, two jobs: it is the proposer's attestation AND the
+        // proposal's transport authentication (peers verify it recovers to the
+        // elected proposer before doing any expensive verification).
+        let self_sig = self.signer().sign_digest(digest);
         let mut attestations = vec![Attestation {
             attester: self.me,
-            signature: self.signer().sign_digest(digest).to_vec(),
+            signature: self_sig.to_vec(),
         }];
         let wire = WireProposal {
             epoch,
+            book_id: self.cfg.book_id,
             batch_nonce,
             instrument_id: inst.id.clone(),
             proposer: self.me,
+            proposer_sig: format!("0x{}", surplus_settlement::core::hex::encode(self_sig)),
             orders: snapshot,
             fills_hash: batch.fills_hash,
         };
@@ -523,7 +712,7 @@ impl Clob {
     async fn read_batch_nonce(&self) -> anyhow::Result<u64> {
         #[cfg(feature = "chain")]
         if let Some(client) = self.chain_client().await? {
-            return client.batch_nonce().await;
+            return client.book_nonce(self.cfg.book_id).await;
         }
         Ok(0)
     }
@@ -531,7 +720,9 @@ impl Clob {
     async fn submit(&self, fills: &[BatchFill], sigs: Vec<Vec<u8>>) -> anyhow::Result<String> {
         #[cfg(feature = "chain")]
         if let Some(client) = self.chain_client().await? {
-            let tx = client.settle_batch_fills_attested(fills, sigs).await?;
+            let tx = client
+                .settle_batch_fills_attested(self.cfg.book_id, fills, sigs)
+                .await?;
             return Ok(format!("{tx:#x}"));
         }
         tracing::info!(
@@ -571,6 +762,16 @@ impl Clob {
                 json!({ "verdict": "stale-epoch", "current": current, "proposed": wire.epoch }),
             ));
         }
+        if wire.book_id != self.cfg.book_id {
+            return Err((
+                StatusCode::FORBIDDEN,
+                json!({
+                    "verdict": "foreign-book",
+                    "ours": format!("{:#x}", self.cfg.book_id),
+                    "proposed": format!("{:#x}", wire.book_id),
+                }),
+            ));
+        }
         let elected = elect_proposer(&self.cfg.addresses(), wire.epoch);
         if elected != Some(wire.proposer) {
             return Err((
@@ -581,6 +782,23 @@ impl Clob {
                 }),
             ));
         }
+        // Transport authentication: the proposal must carry the elected
+        // proposer's signature over the batch digest it claims. Without this,
+        // anyone could replay public gossip data as a "proposal" and trigger
+        // this node's co-sign side effects (pool prune + settled marking) —
+        // stranding orders with no key — and burn a full match_epoch per
+        // request. One ecrecover, before any expensive work.
+        let domain = self.domain().clone();
+        let claimed_digest = batch_digest(wire.book_id, wire.batch_nonce, wire.fills_hash, &domain);
+        let proposer_sig =
+            surplus_settlement::core::hex::decode(wire.proposer_sig.trim_start_matches("0x"))
+                .unwrap_or_default();
+        if recover_signer(claimed_digest, &proposer_sig) != Some(wire.proposer) {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                json!({ "verdict": "unauthenticated-proposer" }),
+            ));
+        }
         let Some(inst) = self.instrument(&wire.instrument_id) else {
             return Err((
                 StatusCode::NOT_FOUND,
@@ -588,10 +806,10 @@ impl Clob {
             ));
         };
 
-        let domain = self.domain().clone();
         let my_orders = self.snapshot(&wire.instrument_id);
         let proposal = BatchProposal {
             epoch: wire.epoch,
+            book_id: wire.book_id,
             batch_nonce: wire.batch_nonce,
             instrument_id: wire.instrument_id,
             proposer: wire.proposer,
@@ -599,18 +817,26 @@ impl Clob {
             fills_hash: wire.fills_hash,
         };
         match verify_proposal(&proposal, &my_orders, inst.tick_size, inst.min_qty, &domain) {
-            Verdict::Sign(digest) => {
+            Verdict::Sign { digest, batch } => {
+                // Co-sign safety net: never vouch for a batch that includes an
+                // order this node knows is cancelled — the contract would revert
+                // OrderIsCancelled and grief the whole batch. (verify_proposal is
+                // pure and chain-unaware; the cancel set is this node's view.)
+                if let Some(o) = proposal
+                    .orders
+                    .iter()
+                    .find(|o| self.is_cancelled(o.digest(&domain), o.order.trader))
+                {
+                    return Err((
+                        StatusCode::CONFLICT,
+                        json!({ "verdict": "cancelled", "order": format!("{:#x}", o.digest(&domain)) }),
+                    ));
+                }
                 // Final for this node: prune what the batch fills so the next
-                // epoch cannot re-match (and overfill) settled orders.
-                let inner: Vec<Order> = proposal.orders.iter().map(|s| s.order.clone()).collect();
-                let recomputed = match_epoch(
-                    &proposal.instrument_id,
-                    inst.tick_size,
-                    inst.min_qty,
-                    &domain,
-                    &inner,
-                );
-                self.prune_filled(&recomputed.fills);
+                // epoch cannot re-match (and overfill) settled orders. The
+                // verified batch came back with the verdict — no second
+                // match_epoch run.
+                self.prune_filled(&batch.fills);
                 Ok(WireAttestation {
                     attester: self.me,
                     signature: format!(
@@ -683,13 +909,32 @@ impl From<WireOrder> for SignedOrderBody {
     }
 }
 
+/// A signed order cancel. `signature` is the trader's EIP-712 `SurplusCancel`
+/// signature over `orderHash` (`cancel_digest`), the off-chain analogue of the
+/// contract's `cancelOrder` (msg.sender == trader).
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireCancel {
+    pub order_hash: B256,
+    pub trader: Address,
+    /// 65-byte r||s||v signature, 0x-hex.
+    pub signature: String,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WireProposal {
     pub epoch: u64,
+    /// The matching domain (contract `Book`) — peers refuse foreign books.
+    pub book_id: B256,
     pub batch_nonce: u64,
     pub instrument_id: String,
     pub proposer: Address,
+    /// The proposer's 65-byte signature over `batch_digest(batchNonce,
+    /// fillsHash)`, 0x-hex — the same signature it self-attests with. Proves
+    /// the proposal really comes from the elected proposer; peers refuse
+    /// co-sign side effects without it.
+    pub proposer_sig: String,
     /// The matched order set, trader signatures included (`SignedOrder`
     /// serializes its signature as 0x-hex).
     pub orders: Vec<SignedOrder>,
@@ -710,6 +955,8 @@ pub fn router(clob: SharedClob) -> Router {
     Router::new()
         .route("/clob/order", post(clob_order))
         .route("/clob/gossip", post(clob_gossip))
+        .route("/clob/cancel", post(clob_cancel))
+        .route("/clob/cancel-gossip", post(clob_cancel_gossip))
         .route("/clob/propose", post(clob_propose))
         .route("/clob/run-epoch", post(clob_run_epoch))
         .route("/clob/status", get(clob_status))
@@ -725,6 +972,23 @@ async fn clob_order(State(c): State<SharedClob>, Json(b): Json<WireOrder>) -> im
 
 async fn clob_gossip(State(c): State<SharedClob>, Json(b): Json<WireOrder>) -> impl IntoResponse {
     match c.admit(b.into()) {
+        Ok(val) => Json(val).into_response(),
+        Err((status, msg)) => (status, msg).into_response(),
+    }
+}
+
+async fn clob_cancel(State(c): State<SharedClob>, Json(b): Json<WireCancel>) -> impl IntoResponse {
+    match c.submit_cancel(b) {
+        Ok(val) => Json(val).into_response(),
+        Err((status, msg)) => (status, msg).into_response(),
+    }
+}
+
+async fn clob_cancel_gossip(
+    State(c): State<SharedClob>,
+    Json(b): Json<WireCancel>,
+) -> impl IntoResponse {
+    match c.admit_cancel(b) {
         Ok(val) => Json(val).into_response(),
         Err((status, msg)) => (status, msg).into_response(),
     }
@@ -770,7 +1034,7 @@ async fn clob_status(State(c): State<SharedClob>) -> impl IntoResponse {
 /// ops endpoints — mounted in both transports; in mesh mode the fanout simply
 /// rides the mesh instead of peer URLs).
 pub fn start_from_env(venue: Arc<Venue>) -> anyhow::Result<Option<(SharedClob, Router)>> {
-    let Some(cfg) = ClobConfig::from_env() else {
+    let Some(cfg) = ClobConfig::from_env()? else {
         return Ok(None);
     };
     #[cfg(feature = "mesh")]

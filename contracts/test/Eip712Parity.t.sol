@@ -17,7 +17,7 @@ contract Eip712ParityTest is Test {
     bytes32 constant SELL_DIGEST_PIN = 0x68a403f61ba389d67aaeb883f03a9e441dc347b3b0ec9f47dca89cb5be0fc2aa;
     bytes32 constant FILLS_HASH_PIN = 0x54d57a43d09d15471f4f864443bc63e10a0d05a12fa203f81941d036aa5ad334;
     bytes32 constant RECEIPT_DIGEST_PIN = 0xfdd98e90c60c3ff8de5ea5b9b3f80fb9bfaddd19c4829c2eed440e883a33b6b7;
-    bytes32 constant BATCH_DIGEST_PIN = 0x7b3f2b76aed2378fb153dc192f874e31a06a10f5a9cadb35eea164ba1ec9b102;
+    bytes32 constant BATCH_DIGEST_PIN = 0xbf7f321f498636d52728a1ea71a7fac4116795252c2299103f4d989278b36dbd;
 
     uint64 constant CHAIN_ID = 3799; // Tangle testnet
     address constant VERIFYING = 0x1111111111111111111111111111111111111111;
@@ -27,7 +27,8 @@ contract Eip712ParityTest is Test {
     function setUp() public {
         vm.chainId(CHAIN_ID);
         // The Rust fixture pins verifyingContract = 0x1111…; deploy there.
-        SurplusSettlement impl = new SurplusSettlement(IERC20(address(0xDEAD)), 30 days, 6 hours, 500, 200, address(0xFEE));
+        SurplusSettlement impl =
+            new SurplusSettlement(IERC20(address(0xDEAD)), 30 days, 6 hours, 500, 200, address(0xFEE));
         vm.etch(VERIFYING, address(impl).code);
         settlement = SurplusSettlement(VERIFYING);
         // EIP712 caches the domain separator with the ORIGINAL deploy address;
@@ -63,10 +64,7 @@ contract Eip712ParityTest is Test {
     function fills() internal pure returns (SurplusSettlement.BatchFill[] memory f) {
         f = new SurplusSettlement.BatchFill[](1);
         f[0] = SurplusSettlement.BatchFill({
-            buy: buyOrder(),
-            sell: sellOrder(),
-            qtyTokens: 50_000,
-            execPriceMicroPerM: 15_000_000
+            buy: buyOrder(), sell: sellOrder(), qtyTokens: 50_000, execPriceMicroPerM: 15_000_000
         });
     }
 
@@ -92,7 +90,7 @@ contract Eip712ParityTest is Test {
             abi.encodePacked(
                 "\x19\x01",
                 settlement.domainSeparator(),
-                keccak256(abi.encode(settlement.BATCH_TYPEHASH(), uint64(0), FILLS_HASH_PIN))
+                keccak256(abi.encode(settlement.BATCH_TYPEHASH(), bytes32(0), uint64(0), FILLS_HASH_PIN))
             )
         );
         assertEq(digest, BATCH_DIGEST_PIN);

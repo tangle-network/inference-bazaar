@@ -22,7 +22,10 @@ contract MockTangleCore {
         address operator,
         uint16 slashBps,
         bytes32 evidence
-    ) external returns (uint64 slashId) {
+    )
+        external
+        returns (uint64 slashId)
+    {
         proposals.push(Proposed(serviceId, operator, slashBps, evidence));
         return nextSlashId++;
     }

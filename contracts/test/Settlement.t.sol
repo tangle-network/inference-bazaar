@@ -16,8 +16,15 @@ contract SettlementTest is SettlementTestBase {
         assertEq(settlement.balances(feeRecipient), fee, "fee accrued");
         assertEq(settlement.liability(seller), 750_000, "issuer liability = paid value");
 
-        (address holder, address issuer, bytes32 instrument, uint64 qty, uint64 locked, uint64 expiry, uint128 notional)
-        = settlement.lots(lotId);
+        (
+            address holder,
+            address issuer,
+            bytes32 instrument,
+            uint64 qty,
+            uint64 locked,
+            uint64 expiry,
+            uint128 notional
+        ) = settlement.lots(lotId);
         assertEq(holder, buyer);
         assertEq(issuer, seller);
         assertEq(instrument, INSTRUMENT);
@@ -29,10 +36,10 @@ contract SettlementTest is SettlementTestBase {
 
     function test_notionalRoundsHalfUp() public {
         // price 1_000, qty 1_500 => raw 1_500_000 / 1e6 with +500_000 => 2 micro (1.5 rounds up)
-        SurplusSettlement.Order memory b = buyOrder(1_000, 1_500_000);
-        SurplusSettlement.Order memory s = sellOrder(1_000, 1_500_000);
+        SurplusSettlement.Order memory b = buyOrder(1000, 1_500_000);
+        SurplusSettlement.Order memory s = sellOrder(1000, 1_500_000);
         uint256 before = settlement.balances(buyer);
-        settlement.settleFills(fillInput(b, s, 1_500, 1_000));
+        settlement.settleFills(fillInput(b, s, 1500, 1000));
         assertEq(before - settlement.balances(buyer), 2, "half-up rounding");
     }
 
@@ -42,9 +49,9 @@ contract SettlementTest is SettlementTestBase {
         settlement.settleFills(fillInput(b, s, 30_000, 15_000_000));
         settlement.settleFills(fillInput(b, s, 20_000, 15_000_000));
         assertEq(settlement.filled(settlement.hashOrder(b)), 50_000);
-        SurplusSettlement.FillInput[] memory overfill = fillInput(b, s, 1_000, 15_000_000);
+        SurplusSettlement.FillInput[] memory overfill = fillInput(b, s, 1000, 15_000_000);
         bytes32 buyHash = settlement.hashOrder(b);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.Overfill.selector, buyHash, 0, 1_000));
+        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.Overfill.selector, buyHash, 0, 1000));
         settlement.settleFills(overfill);
     }
 

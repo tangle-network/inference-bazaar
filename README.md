@@ -13,11 +13,25 @@ modal-inference** blueprints for the sell side.
 ## What's here
 
 ```
+contracts/         SurplusSettlement (custody, lots, attested/proven batches) + BSM — live on Base Sepolia
+crates/
+  orderbook/       the deterministic integer matching engine (NativeBook) + BookClient seam
+  matcher/         set-deterministic epoch matcher + consensus (election, verification, quorum)
+  settlement/      EIP-712 signing, SignedFill batching, alloy chain client
+  settlement-core/ shared digest/types — byte-parity with the contract and the SP1 guest
+operator/          the venue: HTTP + Tangle blueprint runner, shared-CLOB epoch service,
+                   RFQ, redemption serving, inference backend seam
+zk/                SP1 program re-executing the batch for settleBatchProven
 packages/
   market-core/     orderbook · A–S quoting · risk gate · ledger · seeded simulator
   mm-loop/         the market-making LOOP, on @tangle-network/agent-runtime/loops
   router-bridge/   Tangle Router client · ShieldedCredits SpendAuth · Tor (Arti) privacy
+app/               the market UI (NBBO across venues, trading, lots) — Cloudflare Pages
 ```
+
+Current state: two operators live on Base Sepolia settle cross-operator epoch
+batches through a 2-of-2 attested quorum; credits redeem against real inference.
+`ROADMAP.md` is the source of truth for what is proven vs open.
 
 The **market-making loop** is the centerpiece: one market-making session is one
 `runLoop` run on the agent-runtime loops API. It runs in two modes through one
@@ -35,7 +49,9 @@ anonymity; we only choose which operator fulfills.
 
 ```bash
 pnpm install
-pnpm -r test           # 36 tests
+pnpm -r test           # TS suites
+cargo test --workspace # Rust: matcher, consensus, operator, clob e2e
+cd contracts && forge test  # settlement contract suite
 pnpm demo:mm           # market-making session against the simulator
 ```
 

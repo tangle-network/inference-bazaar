@@ -16,8 +16,13 @@ import { MockUSD, SP1MockVerifierStrict } from "../src/dev/Mocks.sol";
 ///   REDEMPTION_WINDOW — default 6 hours
 ///   PENALTY_BPS     — default 500 (5%)
 ///   FEE_BPS         — default 200 (2%)
-///   DEPLOY_DEV_VERIFIER — "1" => deploy SP1MockVerifierStrict (dev chains only;
-///                     live chains use the canonical SP1VerifierGateway)
+///   OWNER           — if set and != deployer, ownership is transferred to it
+///                     (Ownable2Step: the new owner must acceptOwnership()).
+///                     Use a TimelockController + multisig in production so no
+///                     single EOA can rotate attesters / set the SP1 verifier.
+///   DEPLOY_DEV_VERIFIER — "1" => deploy SP1MockVerifierStrict. HARD-GATED to
+///                     anvil (chainid 31337): a mock verifier whose expect() is
+///                     permissionless must never sit on a chain that holds value.
 contract Deploy is Script {
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
@@ -44,8 +49,15 @@ contract Deploy is Script {
         console.log("SurplusBSM:", address(bsm));
 
         if (vm.envOr("DEPLOY_DEV_VERIFIER", uint256(0)) == 1) {
+            require(block.chainid == 31337, "dev verifier only on anvil");
             SP1MockVerifierStrict verifier = new SP1MockVerifierStrict();
             console.log("SP1MockVerifierStrict:", address(verifier));
+        }
+
+        address owner = vm.envOr("OWNER", address(0));
+        if (owner != address(0) && owner != deployer) {
+            settlement.transferOwnership(owner);
+            console.log("ownership transfer initiated to:", owner);
         }
 
         vm.stopBroadcast();

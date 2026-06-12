@@ -213,8 +213,17 @@ impl BackgroundService for MarketVenueService {
                 tracing::info!("shared CLOB epoch service enabled");
             }
             Ok(None) => {}
-            Err(e) => tracing::error!("shared CLOB disabled: {e}"),
+            // Fail closed: a node that boots green while silently not
+            // participating in consensus also stalls every peer that needs its
+            // co-signature for quorum. Refusing to start is the kind option.
+            Err(e) => {
+                return Err(RunnerError::Other(
+                    format!("shared CLOB misconfigured: {e}").into(),
+                ));
+            }
         }
+        // Rate limiting wraps the MERGED app — `merge` does not propagate layers.
+        let app = http::rate_limited(app);
         let addr = self.addr.clone();
         tokio::spawn(async move {
             match tokio::net::TcpListener::bind(&addr).await {

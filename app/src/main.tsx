@@ -5,6 +5,7 @@ import 'virtual:uno.css'
 import './styles.css'
 import { Web3Provider } from '~/providers/web3'
 import { Shell } from '~/components/Shell'
+import HomePage from '~/pages/Home'
 import MarketsPage from '~/pages/Markets'
 import ModelMarketPage from '~/pages/ModelMarket'
 import BuyPage from '~/pages/Buy'
@@ -19,7 +20,8 @@ function withShell(node: React.ReactNode) {
 }
 
 const router = createBrowserRouter([
-  { path: '/', element: withShell(<MarketsPage />) },
+  { path: '/', element: withShell(<HomePage />) },
+  { path: '/markets', element: withShell(<MarketsPage />) },
   // Model ids contain a slash (e.g. anthropic/claude-opus-4-8) — match the rest.
   { path: '/m/*', element: withShell(<ModelMarketPage />) },
   { path: '/buy', element: withShell(<BuyPage />) },

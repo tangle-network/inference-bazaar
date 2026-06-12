@@ -197,10 +197,15 @@ impl Batch {
         fills_hash(&self.batch_fills())
     }
 
-    /// Digest an attester signs for `settleBatchAttested(fills, sigs)` at the
-    /// given on-chain `batchNonce`.
-    pub fn attestation_digest(&self, batch_nonce: u64, domain: &Eip712Domain) -> B256 {
-        batch_digest(batch_nonce, self.fills_hash(), domain)
+    /// Digest an attester signs for `settleBatchAttested(bookId, fills, sigs)`
+    /// at the given book's on-chain nonce.
+    pub fn attestation_digest(
+        &self,
+        book_id: B256,
+        batch_nonce: u64,
+        domain: &Eip712Domain,
+    ) -> B256 {
+        batch_digest(book_id, batch_nonce, self.fills_hash(), domain)
     }
 }
 
@@ -313,7 +318,7 @@ mod tests {
         let buy = taker.sign_order(&order(SIDE_BUY, 15_000_000, 50_000, taker.address()), &dom);
         batch.push(SignedFill::pair(sell, buy, 50_000, 1_900_000_000, &dom).unwrap());
 
-        let digest = batch.attestation_digest(0, &dom);
+        let digest = batch.attestation_digest(B256::ZERO, 0, &dom);
         let sigs = sort_quorum_sigs(
             digest,
             atts.iter()
@@ -331,7 +336,7 @@ mod tests {
         assert!(!verify_quorum(digest, &bad, &addrs, 1), "non-attester");
 
         // Different nonce, different digest: old sigs no longer verify.
-        let digest2 = batch.attestation_digest(1, &dom);
+        let digest2 = batch.attestation_digest(B256::ZERO, 1, &dom);
         assert!(
             !verify_quorum(digest2, &sigs, &addrs, 2),
             "nonce binds attestation"

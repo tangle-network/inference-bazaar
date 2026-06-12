@@ -19,7 +19,6 @@ use surplus_orderbook::Side;
 pub type Shared = Arc<Venue>;
 
 pub fn router(venue: Shared) -> Router {
-    let limiter = Arc::new(crate::ratelimit::RateLimiter::from_env());
     Router::new()
         .route("/health", get(health))
         .route("/instruments", get(instruments))
@@ -37,11 +36,20 @@ pub fn router(venue: Shared) -> Router {
         .route("/redeem/receipt", post(redeem_receipt))
         .route("/settlement/outbox", get(settlement_outbox))
         .route("/settlement/flush", post(settlement_flush))
-        .layer(axum::middleware::from_fn_with_state(
-            limiter,
-            crate::ratelimit::limit,
-        ))
         .with_state(venue)
+}
+
+/// Per-IP rate limiting for the WHOLE app. Must wrap the FINAL merged router:
+/// `Router::merge` does not propagate layers, so a limiter layered inside one
+/// sub-router silently leaves every merged route (e.g. `/clob/*`) unlimited —
+/// exactly the surface where an unauthenticated request used to buy a full
+/// match_epoch re-execution.
+pub fn rate_limited(app: Router) -> Router {
+    let limiter = Arc::new(crate::ratelimit::RateLimiter::from_env());
+    app.layer(axum::middleware::from_fn_with_state(
+        limiter,
+        crate::ratelimit::limit,
+    ))
 }
 
 /// Background settlement pump: flush the outbox (and refresh the on-chain

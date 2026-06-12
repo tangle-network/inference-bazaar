@@ -8,14 +8,28 @@
 
 use std::sync::Arc;
 
-use surplus_operator::clob::{Clob, ClobConfig, WireOrder, WireProposal};
+use surplus_operator::clob::{
+    cancel_digest, Clob, ClobConfig, WireCancel, WireOrder, WireProposal,
+};
 use surplus_operator::config::{
     Instrument, OperatorConfig, QuoteParams, RiskLimits, SettlementConfig,
 };
 use surplus_operator::Venue;
-use surplus_settlement::core::alloy_primitives::{Address, B256};
-use surplus_settlement::core::{instrument_hash, Order};
+use surplus_settlement::core::alloy_primitives::{Address, B256, U256};
+use surplus_settlement::core::{batch_digest, instrument_hash, order_digest, Order};
 use surplus_settlement::{Signer, SIDE_BUY, SIDE_SELL};
+
+/// The proposer's transport-auth signature over the claimed batch digest.
+fn proposer_sig(key: &str, batch_nonce: u64, fills_hash: B256) -> String {
+    let dom = surplus_settlement::domain(CHAIN_ID, CONTRACT.parse().unwrap());
+    let sig = Signer::from_hex(key).unwrap().sign_digest(batch_digest(
+        B256::ZERO,
+        batch_nonce,
+        fills_hash,
+        &dom,
+    ));
+    format!("0x{}", surplus_settlement::core::hex::encode(sig))
+}
 
 const INSTRUMENT: &str = "anthropic/claude-opus-4-8:output";
 const CONTRACT: &str = "0x00000000000000000000000000000000000000cc";
@@ -97,6 +111,47 @@ fn signed_wire(side: u8, price: u64, qty: u64, key: &str, salt: u8) -> WireOrder
     }
 }
 
+/// A trader's signed cancel for an order it placed — the off-chain analogue of
+/// the contract's `cancelOrder`.
+fn signed_cancel(w: &WireOrder, key: &str) -> WireCancel {
+    let signer = Signer::from_hex(key).unwrap();
+    let contract: Address = CONTRACT.parse().unwrap();
+    let dom = surplus_settlement::domain(CHAIN_ID, contract);
+    let order_hash = order_digest(&w.order, &dom);
+    let digest = cancel_digest(U256::from(CHAIN_ID), contract, order_hash);
+    WireCancel {
+        order_hash,
+        trader: signer.address(),
+        signature: format!(
+            "0x{}",
+            surplus_settlement::core::hex::encode(signer.sign_digest(digest))
+        ),
+    }
+}
+
+/// Poll every node's pool until it reaches `want` (gossip is async).
+async fn await_pool(http: &reqwest::Client, operators: &[(Address, String)], want: u64) {
+    for (_, url) in operators {
+        let mut size = u64::MAX;
+        for _ in 0..50 {
+            let s: serde_json::Value = http
+                .get(format!("{url}/clob/status"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            size = s["poolSize"].as_u64().unwrap();
+            if size == want {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(size, want, "pool != {want} at {url}");
+    }
+}
+
 /// Two clob nodes over real sockets. Epoch length is one hour so the elected
 /// proposer is stable for the whole test.
 async fn spawn_pair() -> (Vec<(Address, String)>, Vec<Arc<Clob>>) {
@@ -113,6 +168,7 @@ async fn spawn_pair() -> (Vec<(Address, String)>, Vec<Arc<Clob>>) {
         .map(|(k, u)| (Signer::from_hex(k).unwrap().address(), u.clone()))
         .collect();
     let cfg = ClobConfig {
+        book_id: B256::ZERO,
         epoch_secs: 3600,
         threshold: 2,
         operators: operators.clone(),
@@ -253,9 +309,11 @@ async fn forged_and_impersonated_proposals_rejected() {
 
     let proposal = WireProposal {
         epoch,
+        book_id: B256::ZERO,
         batch_nonce: 0,
         instrument_id: INSTRUMENT.into(),
         proposer: operators[leader].0,
+        proposer_sig: proposer_sig(OP_KEYS[leader], 0, batch.fills_hash),
         orders: orders.clone(),
         fills_hash: batch.fills_hash,
     };
@@ -269,21 +327,20 @@ async fn forged_and_impersonated_proposals_rejected() {
     let body: serde_json::Value = r.json().await.unwrap();
     assert_eq!(body["verdict"], "forged", "{body}");
 
-    // Impersonation: correct content, wrong proposer for the epoch → refused.
+    // Impersonation: correct content, wrong proposer for the epoch → refused
+    // even with that party's own valid signature.
+    let solo_hash =
+        surplus_matcher::match_epoch(INSTRUMENT, 1000, 1000, &dom, &[honest_sell.order.clone()])
+            .fills_hash;
     let impostor = WireProposal {
         epoch,
+        book_id: B256::ZERO,
         batch_nonce: 0,
         instrument_id: INSTRUMENT.into(),
         proposer: operators[1 - leader].0,
+        proposer_sig: proposer_sig(OP_KEYS[1 - leader], 0, solo_hash),
         orders: vec![to_signed(&honest_sell)],
-        fills_hash: surplus_matcher::match_epoch(
-            INSTRUMENT,
-            1000,
-            1000,
-            &dom,
-            &[honest_sell.order.clone()],
-        )
-        .fills_hash,
+        fills_hash: solo_hash,
     };
     let r = http
         .post(format!("{peer_url}/clob/propose"))
@@ -292,6 +349,29 @@ async fn forged_and_impersonated_proposals_rejected() {
         .await
         .unwrap();
     assert_eq!(r.status(), reqwest::StatusCode::FORBIDDEN);
+
+    // Unauthenticated: the ELECTED proposer is claimed, but the signature is
+    // someone else's — the replay-public-gossip attack. Refused before any
+    // verification work, and the peer's pool must be untouched.
+    let unauthenticated = WireProposal {
+        epoch,
+        book_id: B256::ZERO,
+        batch_nonce: 0,
+        instrument_id: INSTRUMENT.into(),
+        proposer: operators[leader].0,
+        proposer_sig: proposer_sig(SELLER_KEY, 0, batch.fills_hash),
+        orders,
+        fills_hash: batch.fills_hash,
+    };
+    let r = http
+        .post(format!("{peer_url}/clob/propose"))
+        .json(&unauthenticated)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let body: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(body["verdict"], "unauthenticated-proposer", "{body}");
 }
 
 #[tokio::test]
@@ -311,11 +391,15 @@ async fn tampered_fills_hash_rejected() {
     };
 
     // The proposer lies about the result (e.g., claims a different exec price).
+    // Its signature over the lying digest is genuine — authentication passes,
+    // recomputation catches the lie.
     let proposal = WireProposal {
         epoch,
+        book_id: B256::ZERO,
         batch_nonce: 0,
         instrument_id: INSTRUMENT.into(),
         proposer: operators[leader].0,
+        proposer_sig: proposer_sig(OP_KEYS[leader], 0, B256::repeat_byte(0xde)),
         orders: vec![to_signed(&sell), to_signed(&buy)],
         fills_hash: B256::repeat_byte(0xde),
     };
@@ -328,4 +412,82 @@ async fn tampered_fills_hash_rejected() {
     assert_eq!(r.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
     let body: serde_json::Value = r.json().await.unwrap();
     assert_eq!(body["verdict"], "fills-hash-mismatch", "{body}");
+}
+
+/// A signed cancel entered at one node propagates to every pool, removes the
+/// order, blocks its re-admission anywhere, and so removes it from the batch.
+#[tokio::test]
+async fn signed_cancel_propagates_and_blocks_rematch() {
+    let (operators, _clobs) = spawn_pair().await;
+    let http = reqwest::Client::new();
+
+    // A crossing pair enters at node 0; gossip carries both to node 1.
+    let sell = signed_wire(SIDE_SELL, 15_000_000, 10_000, SELLER_KEY, 7);
+    let buy = signed_wire(SIDE_BUY, 15_000_000, 10_000, BUYER_KEY, 8);
+    for w in [&sell, &buy] {
+        let r = http
+            .post(format!("{}/clob/order", operators[0].1))
+            .json(w)
+            .send()
+            .await
+            .unwrap();
+        assert!(r.status().is_success(), "{}", r.text().await.unwrap());
+    }
+    await_pool(&http, &operators, 2).await;
+
+    // The seller cancels — at a DIFFERENT node than entry. The cancel propagates.
+    let cancel = signed_cancel(&sell, SELLER_KEY);
+    let r = http
+        .post(format!("{}/clob/cancel", operators[1].1))
+        .json(&cancel)
+        .send()
+        .await
+        .unwrap();
+    assert!(r.status().is_success(), "{}", r.text().await.unwrap());
+    await_pool(&http, &operators, 1).await; // only the buy remains, everywhere
+
+    // The cancelled order cannot be re-admitted at any node (replay/grief-proof).
+    for (_, url) in &operators {
+        let r = http
+            .post(format!("{url}/clob/order"))
+            .json(&sell)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            r.status(),
+            reqwest::StatusCode::CONFLICT,
+            "cancelled order re-admitted at {url}"
+        );
+    }
+
+    // A cancel whose signature does not recover to the CLAIMED trader is refused
+    // (signed by the buyer's key, but lying that the seller authored it).
+    let mut forged = signed_cancel(&buy, BUYER_KEY);
+    forged.trader = Signer::from_hex(SELLER_KEY).unwrap().address();
+    let r = http
+        .post(format!("{}/clob/cancel", operators[0].1))
+        .json(&forged)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+    // The buy survived the forged cancel.
+    await_pool(&http, &operators, 1).await;
+
+    // With the sell gone nothing crosses: the epoch produces no batch.
+    let epoch = now() / 3600;
+    let leader = elected_index(&operators, epoch);
+    let report: serde_json::Value = http
+        .post(format!("{}/clob/run-epoch", operators[leader].1))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        report["batches"].as_array().unwrap().is_empty(),
+        "no cross after cancel: {report}"
+    );
 }

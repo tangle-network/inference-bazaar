@@ -13,7 +13,7 @@ import { usePublicClient } from 'wagmi'
 import { CHAIN, VENUE_URL } from './api'
 
 export const SETTLEMENT = {
-  address: '0x1cD49739e9CF48C4906aDb44021dd8cE0d8aBa64' as Address,
+  address: '0x3fa622488fD970ECdE23b8384a98de6fFa5A1763' as Address,
   usd: '0x14Ff9231D03Fd9AD75e553004585f13Ff51db630' as Address,
   /** Block the contracts deployed at — event scans start here. */
   fromBlock: 42716877n,
@@ -31,7 +31,7 @@ export const SERVE_DOMAIN = {
   name: 'SurplusServe',
   version: '1',
   chainId: 84532,
-  verifyingContract: '0x1cD49739e9CF48C4906aDb44021dd8cE0d8aBa64',
+  verifyingContract: '0x3fa622488fD970ECdE23b8384a98de6fFa5A1763',
 } as const
 
 export const SERVE_TYPES = {

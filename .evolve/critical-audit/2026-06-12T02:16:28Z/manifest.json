@@ -1,0 +1,11 @@
+{
+  "scope": ["contracts/src", "contracts/test", "crates/matcher", "crates/settlement", "crates/settlement-core", "operator/src", "operator/tests", "scripts", "docs", "app (product lens)"],
+  "head": "9ecbbc87e0c0438edf0916dc2a235262d1413038",
+  "base": null,
+  "project_type": ["rust", "solidity", "typescript"],
+  "flags": {"parallel": false, "personas": ["customer-buyer", "operator", "instance-payer"]},
+  "reviewers": ["A-security", "B-architecture", "C-standards-tests-docs", "D-product-personas(main)"],
+  "findings_count_by_severity": {"CRITICAL": 6, "HIGH": 11, "MEDIUM": 7, "LOW": 2},
+  "verdict": "REQUEST_CHANGES",
+  "scores": {"contract_arithmetic": 8, "kernel_consensus_design": 8, "system_architecture": 4.5, "test_quality": 6, "customer_ux": 3, "operator_ux": 2, "composite": 5}
+}

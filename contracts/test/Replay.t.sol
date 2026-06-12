@@ -28,7 +28,9 @@ contract ReplayTest is SettlementTestBase {
                 "\x19\x01",
                 settlement.domainSeparator(),
                 keccak256(
-                    abi.encode(settlement.BATCH_TYPEHASH(), settlement.batchNonce(), keccak256(abi.encode(fills)))
+                    abi.encode(
+                        settlement.BATCH_TYPEHASH(), BOOK, settlement.bookNonce(BOOK), keccak256(abi.encode(fills))
+                    )
                 )
             )
         );
@@ -65,10 +67,10 @@ contract ReplayTest is SettlementTestBase {
     function test_batchAllOrNothing_stateSnapshotUnchanged() public {
         uint256 buyer2Key = 0xB002;
         address buyer2 = vm.addr(buyer2Key);
-        usd.mint(buyer2, 1_000);
+        usd.mint(buyer2, 1000);
         vm.startPrank(buyer2);
         usd.approve(address(settlement), type(uint256).max);
-        settlement.deposit(1_000); // fill #2 costs 750_000 => guaranteed failure
+        settlement.deposit(1000); // fill #2 costs 750_000 => guaranteed failure
         vm.stopPrank();
 
         SurplusSettlement.Order memory b1 = buyOrder(15_000_000, 50_000);
@@ -112,7 +114,7 @@ contract ReplayTest is SettlementTestBase {
         uint256 sellerColl = settlement.collateral(seller);
         uint256 sellerLiab = settlement.liability(seller);
 
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.InsufficientBalance.selector, 1_000, 750_000));
+        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.InsufficientBalance.selector, 1000, 750_000));
         settlement.settleFills(fills);
 
         // Fill #1 must not have applied even though it was valid on its own.
@@ -247,14 +249,14 @@ contract ReplayTest is SettlementTestBase {
         SurplusSettlement.BatchFill[] memory fills = new SurplusSettlement.BatchFill[](1);
         fills[0] = SurplusSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 50_000, execPriceMicroPerM: 15_000_000 });
 
-        settlement.settleBatchAttested(fills, attest(fills));
-        assertEq(settlement.batchNonce(), 1);
+        settlement.settleBatchAttested(BOOK, fills, attest(fills));
+        assertEq(settlement.bookNonce(BOOK), 1);
 
         // Fresh quorum signatures over the new nonce: the attestation itself is
         // valid, but the orders are exhausted — the fill cap blocks the replay.
         bytes[] memory freshSigs = attest(fills);
         bytes32 buyHash = settlement.hashOrder(b);
         vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.Overfill.selector, buyHash, 0, 50_000));
-        settlement.settleBatchAttested(fills, freshSigs);
+        settlement.settleBatchAttested(BOOK, fills, freshSigs);
     }
 }

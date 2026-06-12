@@ -23,6 +23,8 @@ async fn main() -> anyhow::Result<()> {
         app = app.merge(clob_router);
         tracing::info!("shared CLOB epoch service enabled");
     }
+    // Rate limiting wraps the MERGED app — `merge` does not propagate layers.
+    let app = http::rate_limited(app);
 
     let addr = std::env::var("SURPLUS_OPERATOR_ADDR").unwrap_or_else(|_| "127.0.0.1:9100".into());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
