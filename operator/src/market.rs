@@ -299,6 +299,9 @@ impl Venue {
         side: Side,
         q: &crate::sidecar::Quote,
     ) -> Option<(String, SignedEntry)> {
+        if self.attester_only {
+            return None; // a quorum-only node signs no maker orders
+        }
         let ctx = self.settle.as_ref()?;
         let signer = ctx.signer.as_ref()?;
         let order = Order {
@@ -335,6 +338,11 @@ impl Venue {
         taker_side: Side,
         qty_tokens: u64,
     ) -> Result<Value, VenueError> {
+        if self.attester_only {
+            return Err(VenueError::Rejected(
+                "this node is attester-only (quorum member) and does not issue quotes".into(),
+            ));
+        }
         let ctx = self.settle_ctx()?;
         let signer = ctx
             .signer
