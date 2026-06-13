@@ -11,6 +11,7 @@ import { compactUsd, pct, pricePerM, tokens } from '~/lib/format'
 import { CHAIN, useCatalog, useInstruments } from '~/lib/api'
 import { STEP_LABEL, useFirmTrade, type TradeProgress, type TradeReceipt } from '~/lib/trade'
 import { useVenueRegistry, useAggBook } from '~/lib/venues'
+import { planRoute } from '~/lib/router'
 
 type Kind = 'output' | 'input'
 
@@ -209,7 +210,7 @@ function TradeTicket({
   kind: Kind
   listMicroPerM: number
   bestAsk: number | null
-  askDepth: { price: number; qty: number }[]
+  askDepth: { price: number; qty: number; operator: `0x${string}` }[]
   venues: import('~/lib/venues').Venue[]
   onFilled: () => void
 }) {
@@ -230,8 +231,32 @@ function TradeTicket({
     setError(null)
     setReceipt(null)
     try {
-      const r = await buyLeg(instrumentId, qtyTokens, setProgress, venues)
-      setReceipt(r)
+      // SOR: walk the merged NBBO ladder into a split plan, fill each venue's
+      // slice through the firm path (pin the operator with a single-venue set) —
+      // same pattern as Buy.tsx. Collapse the per-leg receipts into one blended
+      // summary for this single-receipt surface.
+      const route = planRoute({ asks: askDepth, bids: [] } as unknown as Parameters<typeof planRoute>[0], 'buy', qtyTokens)
+      const receipts: TradeReceipt[] = []
+      if (route.legs.length === 0) {
+        receipts.push(await buyLeg(instrumentId, qtyTokens, setProgress, venues))
+      } else {
+        for (const leg of route.legs) {
+          const venue = venues.find((v) => v.operator.toLowerCase() === leg.operator.toLowerCase())
+          if (!venue) continue
+          receipts.push(await buyLeg(instrumentId, leg.qtyTokens, setProgress, [venue]))
+        }
+      }
+      if (receipts.length === 0) throw new Error('no venue filled this order')
+      const totalQty = receipts.reduce((s, x) => s + x.qtyTokens, 0)
+      const totalCost = receipts.reduce((s, x) => s + x.costMicro, 0)
+      setReceipt({
+        instrumentId,
+        qtyTokens: totalQty,
+        priceMicroPerM: totalQty > 0 ? Math.round((totalCost * 1e6) / totalQty) : 0,
+        costMicro: totalCost,
+        settleTx: receipts[receipts.length - 1]?.settleTx ?? null,
+        operator: receipts[0]?.operator,
+      })
       onFilled()
     } catch (e) {
       setError(e instanceof Error ? e.message.split('\n')[0]! : String(e))
