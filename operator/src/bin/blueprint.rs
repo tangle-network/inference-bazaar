@@ -223,7 +223,8 @@ impl BackgroundService for MarketVenueService {
                 ));
             }
         }
-        // Spend-key rail: lots consumed as plain bearer API keys (OpenAI surface).
+        // Spend channel: lots consumed via a delegated session key over the OpenAI
+        // surface (the gateway signs vouchers; see docs/specs/spend-rail.md).
         let spend = Arc::new(surplus_operator::spend::SpendSvc::new(self.venue.clone()));
         surplus_operator::spend::spawn_spend_flush(spend.clone());
         app = app.merge(surplus_operator::spend::router(spend));

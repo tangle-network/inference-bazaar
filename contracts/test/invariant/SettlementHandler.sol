@@ -184,15 +184,16 @@ contract SettlementHandler is CommonBase, StdCheats, StdUtils {
         if (holder == address(0) || qty - locked == 0) return;
         uint256 hk = _keyFor(holder);
         if (hk == 0) return;
-        SurplusSettlement.SpendKeyAuth memory auth = SurplusSettlement.SpendKeyAuth({
-            lotId: lotId,
-            keyHash: keccak256(abi.encode(lotId, amount)),
-            maxTokens: qty,
-            expiry: uint64(block.timestamp + 1 days)
+        // A fresh session key the holder delegates; the gateway (here, us) signs
+        // the cumulative-served voucher with it. Keep the secret in secp256k1 range.
+        uint256 sk = (uint256(keccak256(abi.encode("session", lotId, amount))) % (type(uint128).max)) + 1;
+        SurplusSettlement.SpendPermit memory permit = SurplusSettlement.SpendPermit({
+            lotId: lotId, sessionKey: vm.addr(sk), maxTokens: qty, expiry: uint64(block.timestamp + 1 days)
         });
         uint64 served = uint64(bound(amount, 1, qty - locked));
-        bytes memory sig = _signDigest(hk, settlement.spendAuthDigest(auth));
-        try settlement.settleSpend(auth, served, sig) {
+        bytes memory holderSig = _signDigest(hk, settlement.spendPermitDigest(permit));
+        bytes memory voucherSig = _signDigest(sk, settlement.spendVoucherDigest(lotId, permit.sessionKey, served));
+        try settlement.settleSpend(permit, holderSig, served, voucherSig) {
             spendsSettled++;
         } catch { }
     }

@@ -1,26 +1,19 @@
-//! The spend-key rail: a credit lot consumed through a plain OpenAI-compatible
-//! API — `Authorization: Bearer sk-surplus-…`, vanilla SDKs, zero per-request
-//! crypto.
+//! The spend rail: a credit lot consumed through a plain OpenAI-compatible API,
+//! as a **one-way payment channel** (see docs/specs/spend-rail.md).
 //!
-//! The holder signs ONE EIP-712 `SpendKeyAuth { lotId, keyHash, maxTokens,
-//! expiry }` (under the settlement contract's own domain — the contract
-//! verifies the same digest in `settleSpend`). The key itself is generated
-//! client-side; only its keccak256 reaches this operator at registration, and
-//! the raw key is seen only inside TLS at request time, exactly like every
-//! hosted API key in existence.
+//! The holder signs ONE EIP-712 `SpendPermit { lotId, sessionKey, maxTokens,
+//! expiry }` delegating an ephemeral session key to draw down the lot. The
+//! consumer's gateway holds that session key and signs a `SpendVoucher`
+//! acknowledging the cumulative tokens served after each request. This operator
+//! serves request N+1 only once the gateway has acknowledged everything served
+//! through N (the voucher's monotone advance is the per-request possession proof,
+//! bounding this operator's exposure to a single unacknowledged request), and
+//! settles on-chain with the latest voucher.
 //!
-//! Serving: `POST /v1/chat/completions` resolves the bearer to its
-//! authorization, serves through the venue's [`InferenceBackend`], meters the
-//! lot's token kind, and accumulates a cumulative served counter (journaled —
-//! a restart must never forget what it already served, audit M1). A background
-//! flush presents `settleSpend(auth, servedCumulative, holderSig)` on-chain,
-//! debiting the lot. Cumulative semantics make the flush idempotent at any
-//! cadence; a missed flush past lot expiry is THIS operator's loss by design.
-//!
-//! Trust statement (same as the docs make to the dev): within the cap you
-//! authorized, you trust this issuer's metering — which is already true of
-//! every request served today — backed by its collateral and slashable bond.
-//! Revocation (`revokeSpendKey`) is the on-chain emergency brake.
+//! The security core lives in the contract: `settleSpend` settles only up to a
+//! `servedCumulative` the session key signed, so this operator — which does not
+//! hold the session key — CANNOT over-bill. Over-billing is impossible by
+//! construction, not merely detectable.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -39,28 +32,20 @@ use surplus_settlement::core::hex;
 
 use crate::venue::{Venue, VenueError};
 
-/// Never serve within this margin of the auth's or lot's expiry: the
+/// Never serve within this margin of the permit's or lot's expiry: the
 /// settlement transaction must still land before either clock runs out.
 const SPEND_EXPIRY_MARGIN_SECS: u64 = 120;
 /// Per-request completion cap, mirroring `/redeem`.
 const MAX_TOKENS_PER_REQUEST: u32 = 8192;
 
-// ─────────────────────────────── Digest ──────────────────────────────────────
+// ─────────────────────────────── Digests ─────────────────────────────────────
 
-const SPEND_TYPE: &[u8] =
-    b"SpendKeyAuth(bytes32 lotId,bytes32 keyHash,uint64 maxTokens,uint64 expiry)";
+const PERMIT_TYPE: &[u8] =
+    b"SpendPermit(bytes32 lotId,address sessionKey,uint64 maxTokens,uint64 expiry)";
+const VOUCHER_TYPE: &[u8] =
+    b"SpendVoucher(bytes32 lotId,address sessionKey,uint64 servedCumulative)";
 
-/// keccak256(\x19\x01 ‖ settlementDomainSeparator ‖ structHash) — byte-for-byte
-/// the contract's `spendAuthDigest`. Pinned cross-stack by
-/// `tests::digest_matches_contract_pin` against test/Spend.t.sol.
-pub fn spend_auth_digest(
-    chain_id: U256,
-    settlement: Address,
-    lot_id: B256,
-    key_hash: B256,
-    max_tokens: u64,
-    expiry: u64,
-) -> B256 {
+fn settlement_domain_separator(chain_id: U256, settlement: Address) -> B256 {
     let mut dom = Vec::with_capacity(160);
     dom.extend_from_slice(
         keccak256(
@@ -73,18 +58,10 @@ pub fn spend_auth_digest(
     dom.extend_from_slice(&chain_id.to_be_bytes::<32>());
     dom.extend_from_slice(&[0u8; 12]);
     dom.extend_from_slice(settlement.as_slice());
-    let domain_separator = keccak256(&dom);
+    keccak256(&dom)
+}
 
-    let mut st = Vec::with_capacity(160);
-    st.extend_from_slice(keccak256(SPEND_TYPE).as_slice());
-    st.extend_from_slice(lot_id.as_slice());
-    st.extend_from_slice(key_hash.as_slice());
-    st.extend_from_slice(&[0u8; 24]);
-    st.extend_from_slice(&max_tokens.to_be_bytes());
-    st.extend_from_slice(&[0u8; 24]);
-    st.extend_from_slice(&expiry.to_be_bytes());
-    let struct_hash = keccak256(&st);
-
+fn eip712(domain_separator: B256, struct_hash: B256) -> B256 {
     let mut out = Vec::with_capacity(66);
     out.extend_from_slice(b"\x19\x01");
     out.extend_from_slice(domain_separator.as_slice());
@@ -92,19 +69,63 @@ pub fn spend_auth_digest(
     keccak256(&out)
 }
 
+/// The digest the HOLDER signs once to delegate the session key — byte-for-byte
+/// the contract's `spendPermitDigest`. Pinned by `tests::digests_match_contract_pin`.
+pub fn spend_permit_digest(
+    chain_id: U256,
+    settlement: Address,
+    lot_id: B256,
+    session_key: Address,
+    max_tokens: u64,
+    expiry: u64,
+) -> B256 {
+    let mut st = Vec::with_capacity(160);
+    st.extend_from_slice(keccak256(PERMIT_TYPE).as_slice());
+    st.extend_from_slice(lot_id.as_slice());
+    st.extend_from_slice(&[0u8; 12]);
+    st.extend_from_slice(session_key.as_slice());
+    st.extend_from_slice(&U256::from(max_tokens).to_be_bytes::<32>());
+    st.extend_from_slice(&U256::from(expiry).to_be_bytes::<32>());
+    eip712(
+        settlement_domain_separator(chain_id, settlement),
+        keccak256(&st),
+    )
+}
+
+/// The digest the SESSION KEY signs per request to acknowledge cumulative served
+/// tokens — byte-for-byte the contract's `spendVoucherDigest`.
+pub fn spend_voucher_digest(
+    chain_id: U256,
+    settlement: Address,
+    lot_id: B256,
+    session_key: Address,
+    served_cumulative: u64,
+) -> B256 {
+    let mut st = Vec::with_capacity(160);
+    st.extend_from_slice(keccak256(VOUCHER_TYPE).as_slice());
+    st.extend_from_slice(lot_id.as_slice());
+    st.extend_from_slice(&[0u8; 12]);
+    st.extend_from_slice(session_key.as_slice());
+    st.extend_from_slice(&U256::from(served_cumulative).to_be_bytes::<32>());
+    eip712(
+        settlement_domain_separator(chain_id, settlement),
+        keccak256(&st),
+    )
+}
+
 // ─────────────────────────────── State ───────────────────────────────────────
 
-/// One registered key: the holder-signed authorization plus what this venue
+/// One registered channel: the holder-signed permit plus what this venue
 /// resolved about the lot at registration time.
 #[derive(Clone, Serialize, Deserialize)]
-pub struct StoredAuth {
+pub struct StoredPermit {
     pub lot_id: B256,
-    pub key_hash: B256,
+    pub session_key: Address,
     pub max_tokens: u64,
     pub expiry: u64,
-    /// Holder's 65-byte signature over the auth digest, 0x-hex — what
-    /// `settleSpend` re-verifies on-chain.
-    pub signature: String,
+    /// Holder's signature over the permit digest, 0x-hex — what `settleSpend`
+    /// re-verifies on-chain against the lot's CURRENT holder.
+    pub holder_sig: String,
     pub holder: Address,
     pub instrument_id: String,
     pub model_id: String,
@@ -113,12 +134,14 @@ pub struct StoredAuth {
 
 #[derive(Default, Serialize, Deserialize)]
 struct SpendJournal {
-    /// key hash (of the full bearer string) → authorization.
-    auths: HashMap<B256, StoredAuth>,
-    /// key hash → cumulative tokens served (the number settleSpend receives).
-    served: HashMap<B256, u64>,
-    /// key hash → cumulative tokens confirmed settled on-chain.
-    settled: HashMap<B256, u64>,
+    /// session key → permit.
+    permits: HashMap<Address, StoredPermit>,
+    /// session key → cumulative tokens this venue has metered as served.
+    served: HashMap<Address, u64>,
+    /// session key → the latest consumer-signed voucher (cumulative, 0x-hex sig).
+    voucher: HashMap<Address, (u64, String)>,
+    /// session key → cumulative tokens confirmed settled on-chain.
+    settled: HashMap<Address, u64>,
 }
 
 pub struct SpendSvc {
@@ -147,8 +170,9 @@ impl SpendSvc {
         }
     }
 
-    /// Persist on every mutation — served counters are money-shaped state: a
-    /// restart that forgot them would re-serve already-consumed quota.
+    /// Persist on every mutation — served/voucher counters are money-shaped state:
+    /// a restart that forgot them would re-serve already-consumed quota or lose a
+    /// settleable voucher.
     fn persist(&self, j: &SpendJournal) {
         let Some(path) = journal_path() else { return };
         if let Ok(bytes) = serde_json::to_vec_pretty(j) {
@@ -164,39 +188,39 @@ impl SpendSvc {
 
     // ───────────────────────── Registration ─────────────────────────────────
 
-    /// Verify the holder's authorization against on-chain truth and store it.
+    /// Verify the holder's permit against on-chain truth and store the channel.
     /// Without the `chain` feature (or RPC config) registration refuses — an
-    /// unverifiable key would be a fail-open.
+    /// unverifiable permit would be a fail-open.
     #[cfg(feature = "chain")]
     pub async fn register(&self, body: RegisterBody) -> Result<Value, VenueError> {
         use surplus_settlement::core::recover_signer;
 
         let ctx = self.venue.settle_ctx_pub()?;
-        let (rpc, op_key) = match (ctx.rpc_url.as_deref(), ctx.operator_key.as_deref()) {
+        let (rpc, op_key) = match (ctx.rpc_url.as_deref(), ctx.submitter_key()) {
             (Some(r), Some(k)) => (r, k),
             _ => return Err(VenueError::SettlementUnconfigured("rpc + operator key")),
         };
         let now = Self::now();
         if body.expiry <= now + SPEND_EXPIRY_MARGIN_SECS {
-            return Err(VenueError::Rejected("auth expiry too soon".into()));
+            return Err(VenueError::Rejected("permit expiry too soon".into()));
         }
         if body.max_tokens == 0 {
             return Err(VenueError::Rejected("maxTokens is zero".into()));
         }
 
         let chain_id = ctx.domain.chain_id.unwrap_or_default();
-        let digest = spend_auth_digest(
+        let digest = spend_permit_digest(
             chain_id,
             ctx.contract,
             body.lot_id,
-            body.key_hash,
+            body.session_key,
             body.max_tokens,
             body.expiry,
         );
-        let sig = hex::decode(body.signature.trim_start_matches("0x"))
-            .map_err(|_| VenueError::Rejected("signature is not hex".into()))?;
+        let sig = hex::decode(body.holder_sig.trim_start_matches("0x"))
+            .map_err(|_| VenueError::Rejected("holderSig is not hex".into()))?;
         let signer = recover_signer(digest, &sig)
-            .ok_or_else(|| VenueError::Rejected("unrecoverable auth signature".into()))?;
+            .ok_or_else(|| VenueError::Rejected("unrecoverable holder signature".into()))?;
 
         let client =
             surplus_settlement::chain::SettlementClient::connect(rpc, op_key, ctx.contract)
@@ -211,7 +235,7 @@ impl SpendSvc {
         }
         if lot.holder != signer {
             return Err(VenueError::Rejected(
-                "authorization is not from the lot holder".into(),
+                "permit is not from the lot holder".into(),
             ));
         }
         let me = ctx
@@ -222,8 +246,15 @@ impl SpendSvc {
                 "lot was not issued by this operator".into(),
             ));
         }
+        // Never let a permit outlive the lot's settlement window: serving past
+        // lot.expiry cannot be settled (settleSpend reverts), so we would eat it.
         if u64::from(lot.expiry) <= now + SPEND_EXPIRY_MARGIN_SECS {
             return Err(VenueError::Rejected("lot expires too soon".into()));
+        }
+        if body.expiry > u64::from(lot.expiry) {
+            return Err(VenueError::Rejected(
+                "permit expiry must not exceed the lot expiry".into(),
+            ));
         }
         let inst = self
             .venue
@@ -232,23 +263,23 @@ impl SpendSvc {
             .find(|i| surplus_settlement::instrument_hash(&i.id) == lot.instrument)
             .ok_or_else(|| VenueError::Rejected("unknown instrument hash on lot".into()))?;
 
-        let stored = StoredAuth {
+        let stored = StoredPermit {
             lot_id: body.lot_id,
-            key_hash: body.key_hash,
+            session_key: body.session_key,
             max_tokens: body.max_tokens,
             expiry: body.expiry,
-            signature: body.signature,
+            holder_sig: body.holder_sig,
             holder: signer,
             instrument_id: inst.id.clone(),
             model_id: inst.model_id.clone(),
             token_kind: inst.token_kind.clone(),
         };
         let mut j = self.state.lock().unwrap();
-        j.auths.insert(body.key_hash, stored);
+        j.permits.insert(body.session_key, stored);
         crate::metrics::inc(crate::metrics::names::SPEND_KEYS);
         self.persist(&j);
         Ok(json!({
-            "keyHash": format!("{:#x}", body.key_hash),
+            "sessionKey": format!("{:#x}", body.session_key),
             "model": inst.model_id,
             "instrumentId": inst.id,
             "maxTokens": body.max_tokens,
@@ -266,61 +297,116 @@ impl SpendSvc {
 
     // ───────────────────────── Serving ───────────────────────────────────────
 
-    /// One OpenAI-compatible chat completion billed to the bearer's lot.
+    /// One OpenAI-compatible chat completion billed to a spend channel. The
+    /// request carries the latest consumer-signed voucher; we serve only once the
+    /// voucher acknowledges everything previously served (so our exposure is one
+    /// request) and meter the new usage against the lot's token kind.
     pub async fn complete(
         &self,
-        bearer: &str,
+        voucher: VoucherHeader,
         body: ChatBody,
     ) -> Result<Value, (StatusCode, Value)> {
-        let key_hash = keccak256(bearer.as_bytes());
-        let (auth, already_served) = {
+        let ctx = self.venue.settle_ctx_pub().map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                oai_err("unconfigured", "settlement not configured"),
+            )
+        })?;
+        let chain_id = ctx.domain.chain_id.unwrap_or_default();
+
+        let (permit, already_served) = {
             let j = self.state.lock().unwrap();
-            let Some(auth) = j.auths.get(&key_hash).cloned() else {
+            let Some(p) = j.permits.get(&voucher.session_key).cloned() else {
                 return Err((
                     StatusCode::UNAUTHORIZED,
-                    oai_err("invalid_api_key", "Unknown API key."),
+                    oai_err("invalid_api_key", "Unknown session key."),
                 ));
             };
-            (auth.clone(), j.served.get(&key_hash).copied().unwrap_or(0))
+            (p, j.served.get(&voucher.session_key).copied().unwrap_or(0))
         };
 
+        // The voucher is the per-request possession proof AND the payment ack: it
+        // must be signed by the session key and acknowledge everything served so
+        // far. A replayed/stale voucher (cumulative < already-served) is refused,
+        // so only the session-key holder (the consumer's gateway) can advance.
+        let vsig = hex::decode(voucher.signature.trim_start_matches("0x")).map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                oai_err("bad_voucher", "voucher sig is not hex"),
+            )
+        })?;
+        let vdigest = spend_voucher_digest(
+            chain_id,
+            ctx.contract,
+            permit.lot_id,
+            permit.session_key,
+            voucher.cumulative,
+        );
+        let recovered = surplus_settlement::core::recover_signer(vdigest, &vsig);
+        if recovered != Some(permit.session_key) {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                oai_err("bad_voucher", "voucher not signed by the session key"),
+            ));
+        }
+        if voucher.cumulative > permit.max_tokens {
+            return Err((
+                StatusCode::PAYMENT_REQUIRED,
+                oai_err("cap_exceeded", "voucher exceeds the authorized cap"),
+            ));
+        }
+        if voucher.cumulative < already_served {
+            return Err((
+                StatusCode::CONFLICT,
+                oai_err(
+                    "stale_voucher",
+                    "voucher must acknowledge all previously served tokens",
+                ),
+            ));
+        }
+
         let now = Self::now();
-        if now + SPEND_EXPIRY_MARGIN_SECS > auth.expiry {
+        if now + SPEND_EXPIRY_MARGIN_SECS > permit.expiry {
             return Err((
                 StatusCode::UNAUTHORIZED,
                 oai_err("key_expired", "This API key has expired."),
             ));
         }
-        let remaining = auth.max_tokens.saturating_sub(already_served);
+        let remaining = permit.max_tokens.saturating_sub(already_served);
         if remaining == 0 {
             return Err((
                 StatusCode::PAYMENT_REQUIRED,
-                oai_err(
-                    "insufficient_quota",
-                    "This key's authorized quota is fully consumed.",
-                ),
+                oai_err("insufficient_quota", "Authorized quota consumed."),
             ));
         }
         if body.stream.unwrap_or(false) {
             return Err((
                 StatusCode::BAD_REQUEST,
-                oai_err(
-                    "unsupported",
-                    "stream=true is not supported yet; poll non-streaming.",
-                ),
+                oai_err("unsupported", "stream=true is not supported yet."),
             ));
         }
-        if !body.model.is_empty() && body.model != auth.model_id {
+        if !body.model.is_empty() && body.model != permit.model_id {
             return Err((
                 StatusCode::BAD_REQUEST,
                 oai_err(
                     "model_mismatch",
-                    &format!(
-                        "This key is bound to '{}'; set model accordingly.",
-                        auth.model_id
-                    ),
+                    &format!("This key is bound to '{}'.", permit.model_id),
                 ),
             ));
+        }
+
+        // Record the (advanced) voucher as the latest settleable proof BEFORE
+        // serving, so a crash after serving still settles what the consumer acked.
+        {
+            let mut j = self.state.lock().unwrap();
+            let entry = j
+                .voucher
+                .entry(permit.session_key)
+                .or_insert((0, String::new()));
+            if voucher.cumulative >= entry.0 {
+                *entry = (voucher.cumulative, voucher.signature.clone());
+            }
+            self.persist(&j);
         }
 
         let cap = body
@@ -331,7 +417,7 @@ impl SpendSvc {
         let (status, completion) = self
             .venue
             .inference
-            .chat_completion(&auth.model_id, &body.messages, cap)
+            .chat_completion(&permit.model_id, &body.messages, cap)
             .await
             .map_err(|e| (StatusCode::BAD_GATEWAY, oai_err("upstream", &e)))?;
         if !status.is_success() {
@@ -341,8 +427,7 @@ impl SpendSvc {
             ));
         }
 
-        // Meter the lot's token kind, never past the authorized remainder.
-        let usage_key = if auth.token_kind == "input" {
+        let usage_key = if permit.token_kind == "input" {
             "prompt_tokens"
         } else {
             "completion_tokens"
@@ -353,16 +438,95 @@ impl SpendSvc {
             .and_then(Value::as_u64)
             .unwrap_or(0)
             .min(remaining);
+        let total = already_served + used;
         {
             let mut j = self.state.lock().unwrap();
-            *j.served.entry(key_hash).or_insert(0) += used;
+            j.served.insert(permit.session_key, total);
             crate::metrics::inc_by(crate::metrics::names::SPEND_SERVED_TOKENS, used);
             self.persist(&j);
         }
-        Ok(completion)
+
+        // The gateway should now sign a voucher for `nextCumulative` so this
+        // request becomes settleable; until it does, this request is our exposure.
+        let mut out = completion;
+        if let Some(obj) = out.as_object_mut() {
+            obj.insert(
+                "surplus".into(),
+                json!({ "servedTokens": used, "nextCumulative": total }),
+            );
+        }
+        Ok(out)
     }
 
-    /// OpenAI-shape model list: what this venue can bill a spend key against.
+    /// Record a trailing voucher WITHOUT serving. The voucher rides on the next
+    /// chat request as a possession proof, so the operator's settleable voucher is
+    /// always one request behind what it served; the gateway calls this after each
+    /// response (and on shutdown) so the LAST request is settleable too. Without
+    /// it the operator would serve the final request of every channel for free.
+    pub fn ack(&self, voucher: VoucherHeader) -> Result<Value, (StatusCode, Value)> {
+        let ctx = self.venue.settle_ctx_pub().map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                oai_err("unconfigured", "settlement not configured"),
+            )
+        })?;
+        let chain_id = ctx.domain.chain_id.unwrap_or_default();
+
+        let (permit, already_served) = {
+            let j = self.state.lock().unwrap();
+            let Some(p) = j.permits.get(&voucher.session_key).cloned() else {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    oai_err("invalid_api_key", "Unknown session key."),
+                ));
+            };
+            (p, j.served.get(&voucher.session_key).copied().unwrap_or(0))
+        };
+        let vsig = hex::decode(voucher.signature.trim_start_matches("0x")).map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                oai_err("bad_voucher", "voucher sig is not hex"),
+            )
+        })?;
+        let vdigest = spend_voucher_digest(
+            chain_id,
+            ctx.contract,
+            permit.lot_id,
+            permit.session_key,
+            voucher.cumulative,
+        );
+        if surplus_settlement::core::recover_signer(vdigest, &vsig) != Some(permit.session_key) {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                oai_err("bad_voucher", "voucher not signed by the session key"),
+            ));
+        }
+        if voucher.cumulative > permit.max_tokens {
+            return Err((
+                StatusCode::PAYMENT_REQUIRED,
+                oai_err("cap_exceeded", "voucher exceeds the authorized cap"),
+            ));
+        }
+        // Never store a voucher that acknowledges more than we served: settling it
+        // would debit the holder's lot for tokens they never received.
+        if voucher.cumulative > already_served {
+            return Err((
+                StatusCode::CONFLICT,
+                oai_err("ahead_voucher", "voucher acknowledges more than served"),
+            ));
+        }
+        let mut j = self.state.lock().unwrap();
+        let entry = j
+            .voucher
+            .entry(permit.session_key)
+            .or_insert((0, String::new()));
+        if voucher.cumulative > entry.0 {
+            *entry = (voucher.cumulative, voucher.signature.clone());
+            self.persist(&j);
+        }
+        Ok(json!({ "acknowledged": voucher.cumulative }))
+    }
+
     pub fn models(&self) -> Value {
         let models: Vec<Value> = self
             .venue
@@ -375,28 +539,28 @@ impl SpendSvc {
 
     // ───────────────────────── Settlement flush ─────────────────────────────
 
-    /// Settle every key whose served counter is ahead of its settled counter.
-    /// Cumulative on-chain semantics make retries safe; failures stay queued
-    /// by construction (served > settled persists until a flush succeeds).
+    /// Settle every channel whose latest voucher is ahead of its settled total.
+    /// Cumulative on-chain semantics make retries safe; failures stay queued by
+    /// construction (voucher > settled persists until a flush succeeds).
     #[cfg(feature = "chain")]
     pub async fn flush(&self) -> Result<Value, VenueError> {
         let ctx = self.venue.settle_ctx_pub()?;
-        let (rpc, op_key) = match (ctx.rpc_url.as_deref(), ctx.operator_key.as_deref()) {
+        let (rpc, op_key) = match (ctx.rpc_url.as_deref(), ctx.submitter_key()) {
             (Some(r), Some(k)) => (r, k),
             _ => {
                 return Ok(
-                    json!({ "mode": "dry", "hint": "set SURPLUS_RPC_URL + SURPLUS_OPERATOR_KEY" }),
+                    json!({ "mode": "dry", "hint": "set SURPLUS_RPC_URL + SURPLUS_SUBMITTER_KEY" }),
                 )
             }
         };
-        let pending: Vec<(B256, StoredAuth, u64)> = {
+        let pending: Vec<(StoredPermit, u64, String)> = {
             let j = self.state.lock().unwrap();
-            j.auths
+            j.permits
                 .iter()
-                .filter_map(|(kh, a)| {
-                    let served = j.served.get(kh).copied().unwrap_or(0);
-                    let settled = j.settled.get(kh).copied().unwrap_or(0);
-                    (served > settled).then(|| (*kh, a.clone(), served))
+                .filter_map(|(sk, p)| {
+                    let (vcum, vsig) = j.voucher.get(sk).cloned().unwrap_or((0, String::new()));
+                    let settled = j.settled.get(sk).copied().unwrap_or(0);
+                    (vcum > settled && !vsig.is_empty()).then(|| (p.clone(), vcum, vsig))
                 })
                 .collect()
         };
@@ -409,34 +573,37 @@ impl SpendSvc {
                 .map_err(|e| VenueError::Chain(e.to_string()))?;
         let mut settled_count = 0usize;
         let mut failures = 0usize;
-        for (key_hash, auth, served) in pending {
-            let sig = match hex::decode(auth.signature.trim_start_matches("0x")) {
-                Ok(s) => s,
-                Err(_) => continue,
+        for (permit, vcum, vsig) in pending {
+            let (Ok(hsig), Ok(vsig_bytes)) = (
+                hex::decode(permit.holder_sig.trim_start_matches("0x")),
+                hex::decode(vsig.trim_start_matches("0x")),
+            ) else {
+                continue;
             };
             match client
                 .settle_spend(
-                    auth.lot_id,
-                    auth.key_hash,
-                    auth.max_tokens,
-                    auth.expiry,
-                    served,
-                    sig,
+                    permit.lot_id,
+                    permit.session_key,
+                    permit.max_tokens,
+                    permit.expiry,
+                    hsig,
+                    vcum,
+                    vsig_bytes,
                 )
                 .await
             {
                 Ok(tx) => {
                     let mut j = self.state.lock().unwrap();
-                    let delta = served - j.settled.get(&key_hash).copied().unwrap_or(0);
-                    j.settled.insert(key_hash, served);
+                    let delta = vcum - j.settled.get(&permit.session_key).copied().unwrap_or(0);
+                    j.settled.insert(permit.session_key, vcum);
                     crate::metrics::inc_by(crate::metrics::names::SPEND_SETTLED_TOKENS, delta);
                     self.persist(&j);
                     settled_count += 1;
-                    tracing::info!(lot = %format!("{:#x}", auth.lot_id), served, tx = %format!("{tx:#x}"), "spend settled");
+                    tracing::info!(lot = %format!("{:#x}", permit.lot_id), served = vcum, tx = %format!("{tx:#x}"), "spend settled");
                 }
                 Err(e) => {
                     failures += 1;
-                    tracing::warn!(lot = %format!("{:#x}", auth.lot_id), served, "settleSpend failed (will retry): {e}");
+                    tracing::warn!(lot = %format!("{:#x}", permit.lot_id), served = vcum, "settleSpend failed (will retry): {e}");
                 }
             }
         }
@@ -451,14 +618,15 @@ impl SpendSvc {
     fn status(&self) -> Value {
         let j = self.state.lock().unwrap();
         let unsettled: u64 = j
-            .auths
+            .permits
             .keys()
-            .map(|kh| {
-                j.served.get(kh).copied().unwrap_or(0) - j.settled.get(kh).copied().unwrap_or(0)
+            .map(|sk| {
+                j.voucher.get(sk).map(|v| v.0).unwrap_or(0)
+                    - j.settled.get(sk).copied().unwrap_or(0)
             })
             .sum();
         json!({
-            "keys": j.auths.len(),
+            "channels": j.permits.len(),
             "servedTokens": j.served.values().sum::<u64>(),
             "settledTokens": j.settled.values().sum::<u64>(),
             "unsettledTokens": unsettled,
@@ -477,16 +645,21 @@ fn oai_err(code: &str, message: &str) -> Value {
 #[serde(rename_all = "camelCase")]
 pub struct RegisterBody {
     pub lot_id: B256,
-    /// keccak256 of the FULL bearer string — the secret itself never arrives.
-    pub key_hash: B256,
+    pub session_key: Address,
     pub max_tokens: u64,
     pub expiry: u64,
-    /// Holder's EIP-712 signature over the SpendKeyAuth digest, 0x-hex.
+    /// Holder's EIP-712 signature over the SpendPermit digest, 0x-hex.
+    pub holder_sig: String,
+}
+
+/// The latest consumer-signed voucher, carried per request. The gateway sets
+/// these headers; a vanilla client never sees them.
+pub struct VoucherHeader {
+    pub session_key: Address,
+    pub cumulative: u64,
     pub signature: String,
 }
 
-/// The OpenAI request surface we bill: model + messages + max_tokens. Extra
-/// fields are accepted and ignored (SDKs send many).
 #[derive(Deserialize)]
 pub struct ChatBody {
     #[serde(default)]
@@ -503,6 +676,7 @@ pub fn router(svc: SharedSpend) -> Router {
     Router::new()
         .route("/v1/spend-keys", post(register_key))
         .route("/v1/chat/completions", post(chat))
+        .route("/v1/spend/ack", post(ack))
         .route("/v1/models", get(models))
         .route("/v1/spend/status", get(spend_status))
         .route("/v1/spend/flush", post(spend_flush))
@@ -519,26 +693,61 @@ async fn register_key(
     }
 }
 
+/// Parse the three voucher headers the gateway sets on chat and ack requests.
+fn voucher_from_headers(headers: &HeaderMap) -> Result<VoucherHeader, (StatusCode, Value)> {
+    let hdr = |k: &str| {
+        headers
+            .get(k)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    };
+    let (Some(sk), Some(cum), Some(sig)) = (
+        hdr("x-surplus-session"),
+        hdr("x-surplus-voucher-cum"),
+        hdr("x-surplus-voucher-sig"),
+    ) else {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            oai_err(
+                "missing_voucher",
+                "Use the surplus gateway; raw clients cannot drive a spend channel.",
+            ),
+        ));
+    };
+    let (Ok(session_key), Ok(cumulative)) = (sk.parse::<Address>(), cum.parse::<u64>()) else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            oai_err("bad_voucher", "bad session/voucher header"),
+        ));
+    };
+    Ok(VoucherHeader {
+        session_key,
+        cumulative,
+        signature: sig,
+    })
+}
+
 async fn chat(
     State(s): State<SharedSpend>,
     headers: HeaderMap,
     Json(b): Json<ChatBody>,
 ) -> impl IntoResponse {
-    let Some(bearer) = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-    else {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(oai_err(
-                "missing_api_key",
-                "Send Authorization: Bearer sk-surplus-…",
-            )),
-        )
-            .into_response();
+    let voucher = match voucher_from_headers(&headers) {
+        Ok(v) => v,
+        Err((status, body)) => return (status, Json(body)).into_response(),
     };
-    match s.complete(bearer.trim(), b).await {
+    match s.complete(voucher, b).await {
+        Ok(v) => Json(v).into_response(),
+        Err((status, body)) => (status, Json(body)).into_response(),
+    }
+}
+
+async fn ack(State(s): State<SharedSpend>, headers: HeaderMap) -> impl IntoResponse {
+    let voucher = match voucher_from_headers(&headers) {
+        Ok(v) => v,
+        Err((status, body)) => return (status, Json(body)).into_response(),
+    };
+    match s.ack(voucher) {
         Ok(v) => Json(v).into_response(),
         Err((status, body)) => (status, Json(body)).into_response(),
     }
@@ -559,8 +768,7 @@ async fn spend_flush(State(s): State<SharedSpend>) -> impl IntoResponse {
     }
 }
 
-/// Background settlement pump for served-but-unsettled spend, sharing the
-/// venue's flush cadence.
+/// Background settlement pump for vouchered-but-unsettled spend.
 pub fn spawn_spend_flush(svc: SharedSpend) {
     let interval = std::env::var("SURPLUS_FLUSH_INTERVAL_SECS")
         .ok()
@@ -573,9 +781,7 @@ pub fn spawn_spend_flush(svc: SharedSpend) {
         loop {
             tick.tick().await;
             match svc.flush().await {
-                Ok(report) if report["mode"] == "direct" => {
-                    tracing::info!(%report, "spend flush");
-                }
+                Ok(report) if report["mode"] == "direct" => tracing::info!(%report, "spend flush"),
                 Ok(_) => {}
                 Err(e) => tracing::warn!("spend flush failed: {e}"),
             }
@@ -587,24 +793,40 @@ pub fn spawn_spend_flush(svc: SharedSpend) {
 mod tests {
     use super::*;
 
-    /// Cross-stack pin against contracts/test/Spend.t.sol::test_spendDigestPin —
-    /// same fields, same domain (chain 3799, contract 0x1111…), same digest.
+    /// Cross-stack pin against contracts/test/Spend.t.sol::test_spendDigestPins —
+    /// same fields, same domain (chain 3799, contract 0x1111…), same digests.
     #[test]
-    fn digest_matches_contract_pin() {
-        let digest = spend_auth_digest(
+    fn digests_match_contract_pin() {
+        let settlement: Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        let session: Address = "0x2222222222222222222222222222222222222222"
+            .parse()
+            .unwrap();
+        let permit = spend_permit_digest(
             U256::from(3799u64),
-            "0x1111111111111111111111111111111111111111"
-                .parse()
-                .unwrap(),
+            settlement,
             keccak256(b"pin-lot"),
-            keccak256(b"pin-key"),
+            session,
             1_000_000,
             1_800_000_000,
         );
         assert_eq!(
-            format!("{digest:#x}"),
-            "0xa3d29fef51ab1cca2d7f1b9c763c6cca40d14f9dd9c9a967e217fbb844647d00",
-            "operator digest drifted from the contract's spendAuthDigest"
+            format!("{permit:#x}"),
+            "0xd72728151c11d0185dc7253e7463f04a3e0294ff367a2c6b56f90679aba68209",
+            "permit digest drifted from the contract's spendPermitDigest"
+        );
+        let voucher = spend_voucher_digest(
+            U256::from(3799u64),
+            settlement,
+            keccak256(b"pin-lot"),
+            session,
+            12_345,
+        );
+        assert_eq!(
+            format!("{voucher:#x}"),
+            "0xa75906fa000d678d16c687c32cb65cc2a65cd27e8809c56d9bdf092b92f7d0df",
+            "voucher digest drifted from the contract's spendVoucherDigest"
         );
     }
 }

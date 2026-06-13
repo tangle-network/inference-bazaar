@@ -43,11 +43,14 @@ export const SERVE_TYPES = {
   ],
 } as const
 
-/** One signature turns a lot into a bearer API key (see operator spend rail). */
-export const SPEND_TYPES = {
-  SpendKeyAuth: [
+/** One signature delegates a session key to draw down the lot (spend channel —
+ * see docs/specs/spend-rail.md). The session key (held by the gateway) then signs
+ * per-request vouchers; the operator can only settle a voucher the session key
+ * signed, so over-billing is impossible. Must match SPEND_PERMIT_TYPEHASH. */
+export const SPEND_PERMIT_TYPES = {
+  SpendPermit: [
     { name: 'lotId', type: 'bytes32' },
-    { name: 'keyHash', type: 'bytes32' },
+    { name: 'sessionKey', type: 'address' },
     { name: 'maxTokens', type: 'uint64' },
     { name: 'expiry', type: 'uint64' },
   ],

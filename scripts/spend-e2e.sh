@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Spend-rail e2e against anvil: ONE operator + a stub OpenAI upstream. Proves
-# the full consumption loop — buy a lot, mint a bearer API key with one wallet
-# signature, consume it with vanilla OpenAI-style requests (no wallet, no
-# shim), and watch the served tokens debit the lot on-chain via settleSpend.
+# the full consumption loop — buy a lot, delegate a session key with one wallet
+# signature, consume it with vanilla OpenAI-style requests (voucher in headers,
+# as the gateway sets), and watch the served tokens debit the lot via settleSpend.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

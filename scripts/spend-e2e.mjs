@@ -1,8 +1,11 @@
-// Spend-rail e2e driver (see spend-e2e.sh): buy a lot, mint a bearer API key
-// with ONE wallet signature, consume it with a VANILLA OpenAI-style request
-// (no wallet, no shim), and prove the served tokens debit the lot on-chain.
-import { createPublicClient, createWalletClient, http, parseAbi, parseAbiItem, keccak256, toBytes, toHex, zeroHash } from 'viem'
-import { privateKeyToAccount } from 'viem/accounts'
+// Spend-rail e2e driver (see spend-e2e.sh): buy a lot, delegate a session key
+// with ONE wallet signature, then consume it as a VANILLA OpenAI-style request
+// where a session-signed voucher (the thing the gateway signs invisibly) rides
+// in headers — and prove the served tokens debit the lot on-chain. The core
+// property under test: the operator can settle no more than the SESSION KEY
+// signed, so over-billing is impossible by construction.
+import { createPublicClient, createWalletClient, http, parseAbi, parseAbiItem, keccak256, toHex, zeroHash } from 'viem'
+import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts'
 import { anvil } from 'viem/chains'
 
 const RPC = process.env.RPC ?? 'http://127.0.0.1:8545'
@@ -19,8 +22,8 @@ const settlementAbi = parseAbi([
   'function deposit(uint256 amount)',
   'function depositCollateral(uint256 amount)',
   'function lots(bytes32) view returns (address holder, address issuer, bytes32 instrument, uint64 qtyTokens, uint64 lockedTokens, uint64 expiry, uint128 notionalMicro)',
-  'function spendSettled(bytes32 authDigest) view returns (uint64)',
-  'function spendAuthDigest((bytes32 lotId, bytes32 keyHash, uint64 maxTokens, uint64 expiry) a) view returns (bytes32)',
+  'function spendSettled(bytes32 permitDigest) view returns (uint64)',
+  'function spendPermitDigest((bytes32 lotId, address sessionKey, uint64 maxTokens, uint64 expiry) p) view returns (bytes32)',
 ])
 const usdAbi = parseAbi([
   'function mint(address to, uint256 amount)',
@@ -98,54 +101,97 @@ const lotId = fillLog.args.lotId
 const lot0 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'lots', args: [lotId] })
 console.log(`lot minted: ${lotId} — ${lot0[3]} tokens, holder ${lot0[0]}`)
 
-// ── 2. Mint the bearer key: ONE wallet signature, then it's just an API key ──
-const secret = crypto.getRandomValues(new Uint8Array(16))
-const payload = new Uint8Array([...toBytes(lotId), ...toBytes(operator.address), ...secret])
-const apiKey = 'sk-surplus-' + Buffer.from(payload).toString('base64url')
-const keyHash = keccak256(toBytes(apiKey))
+// ── 2. Delegate a session key: ONE wallet signature opens the spend channel ──
+const session = privateKeyToAccount(generatePrivateKey())
 const maxTokens = 500_000n
-const expiry = BigInt(Math.floor(Date.now() / 1000) + 7 * 24 * 3600)
+const expiry = BigInt(Math.min(Number(lot0[5]) - 300, Math.floor(Date.now() / 1000) + 7 * 24 * 3600))
 
-const spendTypes = { SpendKeyAuth: [
+const permitTypes = { SpendPermit: [
   { name: 'lotId', type: 'bytes32' },
-  { name: 'keyHash', type: 'bytes32' },
+  { name: 'sessionKey', type: 'address' },
   { name: 'maxTokens', type: 'uint64' },
   { name: 'expiry', type: 'uint64' },
 ]}
-const authSig = await bw.signTypedData({
-  domain, types: spendTypes, primaryType: 'SpendKeyAuth',
-  message: { lotId, keyHash, maxTokens, expiry },
+const voucherTypes = { SpendVoucher: [
+  { name: 'lotId', type: 'bytes32' },
+  { name: 'sessionKey', type: 'address' },
+  { name: 'servedCumulative', type: 'uint64' },
+]}
+const holderSig = await bw.signTypedData({
+  domain, types: permitTypes, primaryType: 'SpendPermit',
+  message: { lotId, sessionKey: session.address, maxTokens, expiry },
 })
 const reg = await post(`${VENUE}/v1/spend-keys`, {
-  lotId, keyHash, maxTokens: Number(maxTokens), expiry: Number(expiry), signature: authSig,
+  lotId, sessionKey: session.address, maxTokens: Number(maxTokens), expiry: Number(expiry), holderSig,
 })
-console.log(`key registered for ${reg.model} (cap ${reg.maxTokens} tokens)`)
+console.log(`session key delegated for ${reg.model} (cap ${reg.maxTokens} tokens)`)
 
-// ── 3. Consume with a VANILLA OpenAI-style call — no wallet, no shim ─────────
-const completion = await post(
-  `${VENUE}/v1/chat/completions`,
-  { model: reg.model, messages: [{ role: 'user', content: 'hello from the spend rail' }], max_tokens: 256 },
-  { authorization: `Bearer ${apiKey}` },
-)
-const served1 = completion.usage.completion_tokens
-if (!completion.choices?.[0]?.message?.content) throw new Error('no completion content')
-console.log(`served ${served1} tokens: "${completion.choices[0].message.content}"`)
+// The gateway's job, inlined: sign a voucher acknowledging cumulative served.
+// `signer` is the session key in the happy path; the negative test passes a
+// different account to prove a non-session voucher is refused.
+async function voucherSig(signer, servedCumulative) {
+  return wallet(signer).signTypedData({
+    domain, types: voucherTypes, primaryType: 'SpendVoucher',
+    message: { lotId, sessionKey: session.address, servedCumulative },
+  })
+}
+async function chat(content, cumulative) {
+  return post(
+    `${VENUE}/v1/chat/completions`,
+    { model: reg.model, messages: [{ role: 'user', content }], max_tokens: 256 },
+    {
+      'x-surplus-session': session.address,
+      'x-surplus-voucher-cum': String(cumulative),
+      'x-surplus-voucher-sig': await voucherSig(session, cumulative),
+    },
+  )
+}
+async function ack(cumulative) {
+  return post(`${VENUE}/v1/spend/ack`, {}, {
+    'x-surplus-session': session.address,
+    'x-surplus-voucher-cum': String(cumulative),
+    'x-surplus-voucher-sig': await voucherSig(session, cumulative),
+  })
+}
 
-// A wrong key must be a clean 401, not a served request.
-const bad = await fetch(`${VENUE}/v1/chat/completions`, {
+// ── 3. Consume: vanilla request body, voucher carried by the (gateway) headers ─
+let acked = 0
+const c1 = await chat('hello from the spend rail', acked)
+const served1 = c1.usage.completion_tokens
+if (!c1.choices?.[0]?.message?.content) throw new Error('no completion content')
+acked = c1.surplus.nextCumulative
+await ack(acked) // trailing ack makes THIS request settleable
+console.log(`served ${served1} tokens: "${c1.choices[0].message.content}"`)
+
+// Over-bill is impossible without the session key: a voucher signed by the
+// HOLDER (or anyone else) for the same cumulative must be refused.
+const forged = await fetch(`${VENUE}/v1/chat/completions`, {
   method: 'POST',
-  headers: { 'content-type': 'application/json', authorization: 'Bearer sk-surplus-bogus' },
+  headers: {
+    'content-type': 'application/json',
+    'x-surplus-session': session.address,
+    'x-surplus-voucher-cum': String(acked),
+    'x-surplus-voucher-sig': await voucherSig(buyer, acked),
+  },
+  body: JSON.stringify({ model: reg.model, messages: [{ role: 'user', content: 'forged' }] }),
+})
+if (forged.status !== 401) throw new Error(`forged voucher returned ${forged.status}, want 401`)
+
+// A raw client with no voucher at all is a clean 401, never a served request.
+const bare = await fetch(`${VENUE}/v1/chat/completions`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ model: reg.model, messages: [] }),
 })
-if (bad.status !== 401) throw new Error(`bad key returned ${bad.status}, want 401`)
+if (bare.status !== 401) throw new Error(`bare request returned ${bare.status}, want 401`)
 
 // ── 4. Flush and prove the on-chain debit ────────────────────────────────────
 const spendFlush = await post(`${VENUE}/v1/spend/flush`, {})
 if (spendFlush.settled !== 1) throw new Error(`spend flush: ${JSON.stringify(spendFlush)}`)
 
 const digest = await pub.readContract({
-  address: SETTLEMENT, abi: settlementAbi, functionName: 'spendAuthDigest',
-  args: [{ lotId, keyHash, maxTokens, expiry }],
+  address: SETTLEMENT, abi: settlementAbi, functionName: 'spendPermitDigest',
+  args: [{ lotId, sessionKey: session.address, maxTokens, expiry }],
 })
 const settled = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [digest] })
 const lot1 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'lots', args: [lotId] })
@@ -153,12 +199,10 @@ if (Number(settled) !== served1) throw new Error(`on-chain settled ${settled}, s
 if (Number(lot0[3]) - Number(lot1[3]) !== served1) throw new Error('lot quantity did not debit by served tokens')
 
 // ── 5. Second call proves cumulative settlement ──────────────────────────────
-const completion2 = await post(
-  `${VENUE}/v1/chat/completions`,
-  { model: reg.model, messages: [{ role: 'user', content: 'again' }] },
-  { authorization: `Bearer ${apiKey}` },
-)
-const served2 = completion2.usage.completion_tokens
+const c2 = await chat('again', acked)
+const served2 = c2.usage.completion_tokens
+acked = c2.surplus.nextCumulative
+await ack(acked)
 await post(`${VENUE}/v1/spend/flush`, {})
 const settledCum = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [digest] })
 const lot2 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'lots', args: [lotId] })
@@ -166,6 +210,7 @@ if (Number(settledCum) !== served1 + served2) throw new Error(`cumulative settle
 
 console.log('')
 console.log('=== SPEND RAIL PROVEN ===')
-console.log(`one wallet signature -> bearer key ${apiKey.slice(0, 24)}…`)
-console.log(`vanilla OpenAI calls served: ${served1} + ${served2} tokens, zero per-request crypto`)
+console.log(`one wallet signature -> session key ${session.address.slice(0, 10)}…`)
+console.log(`vanilla OpenAI calls served: ${served1} + ${served2} tokens, zero per-request user crypto`)
+console.log(`forged voucher (not the session key) refused; over-billing impossible by construction`)
 console.log(`on-chain: lot ${Number(lot0[3])} -> ${Number(lot2[3])} tokens, spendSettled = ${settledCum}`)

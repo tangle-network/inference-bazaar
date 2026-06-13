@@ -1,8 +1,10 @@
-// LIVE spend-key proof on Base Sepolia: take the freshest op-issued lot owned
-// by the e2e buyer, mint a bearer key with ONE signature, run a REAL inference
-// call through the vanilla OpenAI surface, and verify the on-chain debit.
-import { createPublicClient, createWalletClient, http, parseAbi, parseAbiItem, keccak256, toBytes } from 'viem'
-import { privateKeyToAccount } from 'viem/accounts'
+// LIVE spend-channel proof on Base Sepolia: take the freshest op-issued lot owned
+// by the e2e buyer, delegate a session key with ONE signature, run a REAL
+// inference call through the vanilla OpenAI surface (voucher carried in headers,
+// exactly as the gateway would), and verify the on-chain debit. Proves the
+// operator can settle no more than the session key signed.
+import { createPublicClient, createWalletClient, http, parseAbi, parseAbiItem } from 'viem'
+import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts'
 import { baseSepolia } from 'viem/chains'
 import fs from 'node:fs'
 
@@ -18,8 +20,18 @@ const wallet = createWalletClient({ account: buyer, chain: baseSepolia, transpor
 const abi = parseAbi([
   'function lots(bytes32) view returns (address holder, address issuer, bytes32 instrument, uint64 qtyTokens, uint64 lockedTokens, uint64 expiry, uint128 notionalMicro)',
   'function spendSettled(bytes32) view returns (uint64)',
-  'function spendAuthDigest((bytes32 lotId, bytes32 keyHash, uint64 maxTokens, uint64 expiry) a) view returns (bytes32)',
+  'function spendPermitDigest((bytes32 lotId, address sessionKey, uint64 maxTokens, uint64 expiry) p) view returns (bytes32)',
 ])
+
+const domain = { name: 'SurplusSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT }
+const permitTypes = { SpendPermit: [
+  { name: 'lotId', type: 'bytes32' }, { name: 'sessionKey', type: 'address' },
+  { name: 'maxTokens', type: 'uint64' }, { name: 'expiry', type: 'uint64' },
+]}
+const voucherTypes = { SpendVoucher: [
+  { name: 'lotId', type: 'bytes32' }, { name: 'sessionKey', type: 'address' },
+  { name: 'servedCumulative', type: 'uint64' },
+]}
 
 // Freshest lot held by the buyer.
 const fills = await pub.getLogs({
@@ -35,20 +47,14 @@ for (const f of fills.reverse()) {
 if (!lotId) throw new Error('no lot held by the e2e buyer')
 console.log(`lot ${lotId}: ${lot[3]} tokens, issuer ${lot[1]}`)
 
-// ONE signature -> bearer key.
-const secret = crypto.getRandomValues(new Uint8Array(16))
-const apiKey = 'sk-surplus-' + Buffer.from(new Uint8Array([...toBytes(lotId), ...toBytes(lot[1]), ...secret])).toString('base64url')
-const keyHash = keccak256(toBytes(apiKey))
+// ONE signature delegates an ephemeral session key for this lot.
+const session = privateKeyToAccount(generatePrivateKey())
+const sessionWallet = createWalletClient({ account: session, chain: baseSepolia, transport: http(RPC) })
 const maxTokens = BigInt(lot[3])
 const expiry = BigInt(Math.min(Number(lot[5]) - 300, Math.floor(Date.now() / 1000) + 7 * 86400))
-const signature = await wallet.signTypedData({
-  domain: { name: 'SurplusSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT },
-  types: { SpendKeyAuth: [
-    { name: 'lotId', type: 'bytes32' }, { name: 'keyHash', type: 'bytes32' },
-    { name: 'maxTokens', type: 'uint64' }, { name: 'expiry', type: 'uint64' },
-  ]},
-  primaryType: 'SpendKeyAuth',
-  message: { lotId, keyHash, maxTokens, expiry },
+const holderSig = await wallet.signTypedData({
+  domain, types: permitTypes, primaryType: 'SpendPermit',
+  message: { lotId, sessionKey: session.address, maxTokens, expiry },
 })
 
 async function post(url, body, headers = {}) {
@@ -58,22 +64,43 @@ async function post(url, body, headers = {}) {
   return JSON.parse(text)
 }
 
-const reg = await post(`${VENUE}/v1/spend-keys`, { lotId, keyHash, maxTokens: Number(maxTokens), expiry: Number(expiry), signature })
-console.log(`key registered: model ${reg.model}`)
+const reg = await post(`${VENUE}/v1/spend-keys`, {
+  lotId, sessionKey: session.address, maxTokens: Number(maxTokens), expiry: Number(expiry), holderSig,
+})
+console.log(`session key delegated: model ${reg.model}`)
 
-// REAL inference, vanilla OpenAI shape, bearer auth — zero crypto in the path.
+// The gateway's job, inlined: sign a voucher for the cumulative served, present
+// it in headers. A vanilla OpenAI body, zero crypto the developer ever sees.
+async function voucherHeaders(cumulative) {
+  const sig = await sessionWallet.signTypedData({
+    domain, types: voucherTypes, primaryType: 'SpendVoucher',
+    message: { lotId, sessionKey: session.address, servedCumulative: cumulative },
+  })
+  return {
+    'x-surplus-session': session.address,
+    'x-surplus-voucher-cum': String(cumulative),
+    'x-surplus-voucher-sig': sig,
+  }
+}
+
+let acked = 0
 const out = await post(
   `${VENUE}/v1/chat/completions`,
   { model: reg.model, messages: [{ role: 'user', content: 'In one short sentence: what is special about buying inference on a market?' }], max_tokens: 60 },
-  { authorization: `Bearer ${apiKey}` },
+  await voucherHeaders(acked),
 )
 const served = out.usage.completion_tokens
+acked = out.surplus.nextCumulative
+await post(`${VENUE}/v1/spend/ack`, {}, await voucherHeaders(acked)) // makes this request settleable
 console.log(`REAL completion (${served} tokens): "${out.choices[0].message.content.trim()}"`)
 
 // Flush and verify the on-chain debit.
 const flush = await post(`${VENUE}/v1/spend/flush`, {})
 if (flush.settled !== 1) throw new Error(`flush: ${JSON.stringify(flush)}`)
-const digest = await pub.readContract({ address: SETTLEMENT, abi, functionName: 'spendAuthDigest', args: [{ lotId, keyHash, maxTokens, expiry }] })
+const digest = await pub.readContract({
+  address: SETTLEMENT, abi, functionName: 'spendPermitDigest',
+  args: [{ lotId, sessionKey: session.address, maxTokens, expiry }],
+})
 // Public RPC is load-balanced; the settle tx may not be visible on the node
 // answering the read yet. Poll until it is.
 let settled = 0n, lotAfter = lot
@@ -86,6 +113,6 @@ if (Number(settled) !== served) throw new Error(`settled ${settled} != served ${
 if (Number(lot[3]) - Number(lotAfter[3]) !== served) throw new Error('lot did not debit by served tokens')
 
 console.log('')
-console.log('=== LIVE SPEND RAIL ON BASE SEPOLIA ===')
-console.log(`one signature -> ${apiKey.slice(0, 26)}…`)
+console.log('=== LIVE SPEND CHANNEL ON BASE SEPOLIA ===')
+console.log(`one signature -> session key ${session.address.slice(0, 12)}…`)
 console.log(`real inference served and settled: lot ${lot[3]} -> ${lotAfter[3]} tokens, spendSettled=${settled}`)

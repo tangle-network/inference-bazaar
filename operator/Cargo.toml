@@ -27,6 +27,13 @@ name = "surplus-operator"
 path = "src/bin/blueprint.rs"
 required-features = ["blueprint"]
 
+# The consumer-side spend gateway: an OpenAI-compatible proxy that holds the
+# session key and signs spend-channel vouchers invisibly. Run locally for zero
+# trust in Surplus, or hosted for convenience.
+[[bin]]
+name = "surplus-gateway"
+path = "src/bin/gateway.rs"
+
 [dependencies]
 surplus-orderbook = { path = "../crates/orderbook" }
 surplus-settlement = { path = "../crates/settlement" }
