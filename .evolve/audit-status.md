@@ -14,15 +14,18 @@ Disposition of every finding from `.evolve/critical-audit/2026-06-12T02:16:28Z/`
 - **H1** ✅ finality persistence — `settled`/`cancelled` journal to
   `clob-finality.json`, restored on boot.
 - **H2** ✅ (merged) `settleRedemptionAttested` bound to `lotBook` + proof-of-service receipt.
-- **H3** ⏳ **deferred, by design.** `_applyBatch` is all-or-nothing and
-  `verify_proposal` is chain-state-free, so a fill that reverts on-chain
-  (withdrawn balance, lost lot) loses the whole epoch's batch — stranding the
-  GOOD orders in it until expiry. The correct fix is **finality-on-observed-
-  settlement** (today prune/settled fires on co-sign) plus a pre-submit
-  `eth_call` dry-run that drops only the doomed fills. That changes consensus
-  finality semantics across the live 3-node fleet and must be its own focused PR
-  with multi-node tests — NOT a sweep commit. Bounded today: safety holds
-  (`batchNonce` + `filled` cap), and griefing self-limits by order expiry.
+- **H3** ✅ (PR #9, merged) pre-match simulation. `_applyBatch` is
+  all-or-nothing and `verify_proposal` is chain-state-free, so a fill that
+  reverts on-chain (withdrawn balance, lost lot, cancel, overfill, expiry) lost
+  the whole epoch's batch and stranded the GOOD orders in it. Fix: before
+  broadcasting, the proposer replays each fill's on-chain preconditions against
+  live state (`simulate_doomed`), evicts the doomed orders, and re-matches the
+  survivors — bounded to 3 passes; checks are conservative (never false-positive
+  a fundable order, so it can drop a doomed fill but never censor). Safety was
+  already total (`batchNonce` + `filled` cap); H3 turns the liveness failure
+  into a no-op. Proven adversarially on anvil (`scripts/clob-presim.mjs`):
+  buyer withdraws after resting, the unfundable buy is evicted, `bookNonce`
+  unchanged, seller's order survives.
 - **H4** ✅ serial collection (parallel `join_all`) + body-size cliff (16MB
   limit; digest-pull is the scale redesign).
 - **H5** ✅ fail-closed config · **H6** ✅ metrics + QoS · **H7** ✅ transport
@@ -33,11 +36,14 @@ Disposition of every finding from `.evolve/critical-audit/2026-06-12T02:16:28Z/`
 - **M1** ✅ (merged) redeem `used_auths` persistence · **M2** ✅ (merged) proven
   publics bind book+nonce · **M3** ✅ deterministic expiry filter · **M5** ✅ dep
   pins · **M6** ✅ docs · **M7** ✅ epoch-scaled attest deadline.
-- **M4** ⏳ **deferred.** `Venue` is a 7-mutex god-object and `clob.rs` is ~1.3k
-  lines (pool + transport + driver + submitter + handlers). A clean extraction
-  (`clob/{pool,driver,submit,http}.rs`, a typed `Attester`) is worth doing but
-  is a pure-quality refactor that adds churn/conflict surface — its own PR, not
-  bundled into a security sweep where it would obscure the diffs.
+- **M4** ✅ (PR #10) `clob.rs` (~1.4k lines, seven concerns in one `impl Clob`)
+  split into a `clob/` module — `config` / `net` / `wire` / `pool` / `driver` /
+  `peer` / `http` / `mod`. Pure move, zero behavior change: only the handful of
+  cross-module `Clob` methods went private→`pub(crate)`; the public surface is
+  re-exported unchanged so `mesh.rs` and the integration tests are untouched.
+  Both anvil e2e proofs (happy-path settle + H3 grief) pass byte-for-byte
+  against the refactored binary. The typed `Attester` newtype was left out as a
+  follow-up (it ripples into `mesh.rs` + test fixtures, obscuring the move).
 
 ## LOW — all closed
 - **L1** ✅ e2e keys moved to a gitignored `.keys/` with ownership/mode checks;
@@ -49,9 +55,10 @@ Buyer funnel (P1, partially addressed by the spend rail + front door), instance
 economics (P2), permissionless onboarding (P3) are product/economics decisions,
 tracked separately.
 
-## The two open engineering items, restated
-1. **H3 / finality-on-settlement** — the one real consensus change left; needs a
-   dedicated PR + multi-node tests. Highest-value remaining HIGH.
-2. **M4 / module split** — quality refactor, own PR.
-
-Everything else from the audit is closed and (where live) proven on Base Sepolia.
+## Status: fully swept
+Every CRITICAL / HIGH / MEDIUM / LOW from the audit is now closed — H3 (PR #9,
+merged) and M4 (PR #10) were the last two reasoned deferrals and are both done.
+The only remaining items are non-engineering: the C2 live-close (a Gnosis Safe
+signer set — Drew's ownership decision) and the PRODUCT P1–P3 economics, both
+tracked separately. Everything is closed and (where live) proven on Base
+Sepolia.
