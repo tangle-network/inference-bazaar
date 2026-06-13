@@ -53,6 +53,11 @@ jobs:
         with:
           submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
+      # Deps are soldeer (foundry.toml `[dependencies]`), not git submodules, so
+      # `submodules: recursive` does not fetch them — install explicitly or every
+      # forge build/test fails on a missing OpenZeppelin/forge-std import.
+      - name: install solidity dependencies (soldeer)
+        run: forge soldeer install
       - name: forge fmt
         run: forge fmt --check
       - name: forge build
@@ -75,6 +80,10 @@ jobs:
           toolchain: "1.91"
       - uses: foundry-rs/foundry-toolchain@v1
       - uses: Swatinem/rust-cache@v2
+      # Soldeer deps (see contracts job) — needed for the Solidity half below.
+      - name: install solidity dependencies (soldeer)
+        working-directory: contracts
+        run: forge soldeer install
       - name: rust parity pins
         run: cargo test -p surplus-settlement --test parity
       - name: solidity parity pins
@@ -93,6 +102,10 @@ jobs:
         with:
           toolchain: "1.91"
       - uses: Swatinem/rust-cache@v2
+      # `sp1-prover-types` builds protobuf in its build script; the runner has no
+      # protoc by default, so the host build fails before touching our code.
+      - name: install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       # Host crates compile against the (changing) settlement-core + matcher
       # without the heavy succinct toolchain. The full guest ELF build
       # (`cargo prove build`) is exercised by a separate, optional job.
