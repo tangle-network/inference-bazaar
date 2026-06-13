@@ -18,7 +18,9 @@ path = "src/bin/vkey.rs"
 sp1-sdk = { version = "6.1.0", features = ["blocking"] }
 surplus-settlement-core = { workspace = true }
 surplus-batch-types = { path = "../lib" }
-surplus-settlement = { path = "../../crates/settlement" }
+# `chain` enables the optional --submit path: connect + settleBatchProven the
+# freshly generated proof, so the prover both PRODUCES and SUBMITS a batch.
+surplus-settlement = { path = "../../crates/settlement", features = ["chain"] }
 # Host runs the same match_epoch the guest proves, to compute the expected public
 # values + the BatchFill[] calldata the submitter needs.
 surplus-matcher = { path = "../../crates/matcher" }
@@ -26,6 +28,8 @@ serde = { workspace = true }
 serde_json = "1"
 anyhow = "1"
 hex = "0.4"
+# Async runtime for the optional on-chain submit (proof generation stays blocking).
+tokio = { version = "1", features = ["rt-multi-thread"] }
 
 [build-dependencies]
 sp1-helper = "6.1.0"

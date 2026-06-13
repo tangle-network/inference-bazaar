@@ -39,9 +39,20 @@ contract SurplusBSM is BlueprintServiceManagerBase {
 
     /// Restake slashed per redemption default, in basis points of exposed stake.
     uint16 public constant DEFAULT_SLASH_BPS = 500;
+    /// After an operator leaves, their stake is still exposed through the exit
+    /// queue, so a default they caused stays slashable for this long past their
+    /// exit — closing the "leave between default and challenge" dodge. Matches the
+    /// protocol's default exitQueueDuration (BlueprintServiceManagerBase: 7 days).
+    uint64 public constant SLASH_GRACE_WINDOW = 7 days;
 
     SurplusSettlement public settlement;
     mapping(uint256 => bool) public defaultChallenged;
+    /// slashId (from proposeSlash) => the defaultId it was raised for — lets
+    /// governance map a disputed/cancelled core slash back to its challenge.
+    mapping(uint64 => uint256) public slashToDefault;
+    /// serviceId => operator => unix time until which a departed operator remains
+    /// slashable (set on leave/termination; current members are always slashable).
+    mapping(uint64 => mapping(address => uint64)) public slashableUntil;
 
     /// One service instance's membership. The EnumerableSet lets us both check
     /// membership in O(1) (slashing guard) and enumerate it (off-chain projection
@@ -72,13 +83,18 @@ contract SurplusBSM is BlueprintServiceManagerBase {
     event JobCalled(uint64 indexed serviceId, uint8 indexed job, uint64 jobCallId);
     event JobResulted(uint64 indexed serviceId, uint8 indexed job, uint64 jobCallId, address indexed operator);
     event DefaultChallenged(
-        uint256 indexed defaultId, uint64 indexed serviceId, address indexed issuer, uint64 slashId
+        uint256 indexed defaultId, uint64 indexed serviceId, address indexed issuer, uint64 slashId, uint16 exposureBps
     );
+    /// The Tangle core opened the dispute window on a slash (queued, not applied).
+    event SlashWindowOpened(uint64 indexed serviceId, bytes offender, uint8 slashPercent);
+    /// The Tangle core finalized and applied a slash.
+    event SlashApplied(uint64 indexed serviceId, bytes offender, uint8 slashPercent);
+    /// Governance cleared a consumed challenge so its default can be re-challenged.
+    event ChallengeReset(uint256 indexed defaultId);
 
     error SettlementAlreadySet();
     error SettlementNotSet();
     error AlreadyChallenged(uint256 defaultId);
-    error ServiceNotActive(uint64 serviceId);
     error NotServiceOperator(uint64 serviceId, address operator);
 
     function setSettlement(SurplusSettlement _settlement) external onlyBlueprintOwner {
@@ -155,10 +171,13 @@ contract SurplusBSM is BlueprintServiceManagerBase {
     {
         Service storage s = _services[serviceId];
         s.active = false;
+        uint64 until = uint64(block.timestamp) + SLASH_GRACE_WINDOW;
         while (s.operators.length() > 0) {
             address op = s.operators.at(0);
             s.operators.remove(op);
-            delete operatorExposureBps[serviceId][op];
+            // Keep them slashable through the exit window; exposure stays as the
+            // slash-context telemetry until then.
+            slashableUntil[serviceId][op] = until;
         }
         emit ServiceTerminated(serviceId);
     }
@@ -185,7 +204,9 @@ contract SurplusBSM is BlueprintServiceManagerBase {
 
     function onOperatorLeft(uint64 serviceId, address operator) external override onlyFromTangle {
         _services[serviceId].operators.remove(operator);
-        delete operatorExposureBps[serviceId][operator];
+        // Stay slashable through the exit window — a default caused before leaving
+        // must remain challengeable. Exposure is retained as slash-context telemetry.
+        slashableUntil[serviceId][operator] = uint64(block.timestamp) + SLASH_GRACE_WINDOW;
         emit OperatorLeft(serviceId, operator);
     }
 
@@ -224,19 +245,51 @@ contract SurplusBSM is BlueprintServiceManagerBase {
     // ═══════════════════════════════════ Slashing ════════════════════════════════
 
     /// Permissionless: the default record is on-chain fact. One slash per default,
-    /// and only against an operator that is actually a member of `serviceId` — so
-    /// a caller cannot point a default's slash at an address outside the service.
+    /// and only against an operator that belongs (or recently belonged, within the
+    /// exit grace window) to `serviceId` — so a caller cannot point a default's
+    /// slash at an address outside the service, and an operator cannot dodge it by
+    /// leaving between the default and the challenge.
     function challengeDefault(uint64 serviceId, uint256 defaultId) external returns (uint64 slashId) {
         if (address(settlement) == address(0)) revert SettlementNotSet();
         if (defaultChallenged[defaultId]) revert AlreadyChallenged(defaultId);
         (address issuer, uint128 amountMicro, bytes32 redemptionId) = settlement.getDefault(defaultId);
-        if (!_services[serviceId].active) revert ServiceNotActive(serviceId);
-        if (!_services[serviceId].operators.contains(issuer)) revert NotServiceOperator(serviceId, issuer);
+        bool member = _services[serviceId].operators.contains(issuer);
+        bool inGrace = block.timestamp <= slashableUntil[serviceId][issuer];
+        if (!member && !inGrace) revert NotServiceOperator(serviceId, issuer);
         defaultChallenged[defaultId] = true;
         bytes32 evidence =
             keccak256(abi.encode("surplus_redemption_default", defaultId, issuer, amountMicro, redemptionId));
         slashId = ITangleSlashing(tangleCore).proposeSlash(serviceId, issuer, DEFAULT_SLASH_BPS, evidence);
-        emit DefaultChallenged(defaultId, serviceId, issuer, slashId);
+        slashToDefault[slashId] = defaultId;
+        emit DefaultChallenged(defaultId, serviceId, issuer, slashId, operatorExposureBps[serviceId][issuer]);
+    }
+
+    /// Slash-lifecycle attribution: the Tangle core opens a dispute window, then
+    /// either applies or (off-hook) cancels the slash. We record both so off-chain
+    /// watchers can reconcile a default-slash with its outcome. `offender` is the
+    /// core's operator encoding, emitted raw to avoid assuming its layout.
+    function onUnappliedSlash(
+        uint64 serviceId,
+        bytes calldata offender,
+        uint8 slashPercent
+    )
+        external
+        override
+        onlyFromTangle
+    {
+        emit SlashWindowOpened(serviceId, offender, slashPercent);
+    }
+
+    function onSlash(uint64 serviceId, bytes calldata offender, uint8 slashPercent) external override onlyFromTangle {
+        emit SlashApplied(serviceId, offender, slashPercent);
+    }
+
+    /// Governance recovery: the core has no manager hook for a cancelled/disputed
+    /// slash, so a challenge whose proposal was thrown out would otherwise stay
+    /// permanently consumed. The blueprint owner can clear it to allow a re-challenge.
+    function resetChallenge(uint256 defaultId) external onlyBlueprintOwner {
+        defaultChallenged[defaultId] = false;
+        emit ChallengeReset(defaultId);
     }
 
     // ═══════════════════════════════════ Views ═══════════════════════════════════

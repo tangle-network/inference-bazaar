@@ -150,8 +150,10 @@ contract BsmTest is SettlementTestBase {
         vm.prank(address(tangle));
         bsm.onOperatorLeft(SVC, newOp);
         assertFalse(bsm.isServiceOperator(SVC, newOp));
-        assertEq(bsm.operatorExposureBps(SVC, newOp), 0);
         assertEq(bsm.serviceOperatorCount(SVC), 1);
+        // Exposure + a grace deadline are retained so a pre-exit default stays slashable.
+        assertEq(bsm.operatorExposureBps(SVC, newOp), 750, "exposure retained as slash telemetry");
+        assertGt(bsm.slashableUntil(SVC, newOp), block.timestamp);
     }
 
     function test_canJoinAndLeaveAreOpen() public view {
@@ -176,14 +178,61 @@ contract BsmTest is SettlementTestBase {
         bsm.challengeDefault(9, defaultId);
     }
 
-    function test_challengeDefault_revertsAfterTermination() public {
+    function test_challengeDefault_stillWorksWithinGraceAfterTermination() public {
         uint256 defaultId = recordDefault();
         vm.prank(address(tangle));
         bsm.onServiceTermination(SVC, blueprintOwner);
         assertFalse(bsm.isServiceActive(SVC));
         assertFalse(bsm.isServiceOperator(SVC, seller));
-        vm.expectRevert(abi.encodeWithSelector(SurplusBSM.ServiceNotActive.selector, SVC));
+        // Within the exit grace window the departed issuer is still slashable.
+        uint64 slashId = bsm.challengeDefault(SVC, defaultId);
+        assertEq(slashId, 1);
+        assertEq(tangle.proposalCount(), 1);
+    }
+
+    function test_challengeDefault_revertsAfterGraceExpires() public {
+        uint256 defaultId = recordDefault();
+        vm.prank(address(tangle));
+        bsm.onOperatorLeft(SVC, seller);
+        vm.warp(block.timestamp + bsm.SLASH_GRACE_WINDOW() + 1);
+        vm.expectRevert(abi.encodeWithSelector(SurplusBSM.NotServiceOperator.selector, SVC, seller));
         bsm.challengeDefault(SVC, defaultId);
+    }
+
+    function test_challengeDefault_worksAfterLeaveWithinGrace() public {
+        uint256 defaultId = recordDefault();
+        vm.prank(address(tangle));
+        bsm.onOperatorLeft(SVC, seller);
+        assertFalse(bsm.isServiceOperator(SVC, seller));
+        uint64 slashId = bsm.challengeDefault(SVC, defaultId); // still in grace
+        assertEq(slashId, 1);
+        assertEq(bsm.slashToDefault(slashId), defaultId);
+    }
+
+    function test_resetChallenge_allowsReChallenge() public {
+        uint256 defaultId = recordDefault();
+        bsm.challengeDefault(SVC, defaultId);
+        // A second challenge is blocked until governance clears the consumed one-shot.
+        vm.expectRevert(abi.encodeWithSelector(SurplusBSM.AlreadyChallenged.selector, defaultId));
+        bsm.challengeDefault(SVC, defaultId);
+        vm.expectRevert(); // not the blueprint owner
+        bsm.resetChallenge(defaultId);
+        vm.prank(blueprintOwner);
+        bsm.resetChallenge(defaultId);
+        uint64 slashId = bsm.challengeDefault(SVC, defaultId);
+        assertEq(slashId, 2, "re-challenge proposes a fresh slash");
+    }
+
+    function test_slashLifecycleHooksEmit() public {
+        bytes memory offender = abi.encode(seller);
+        vm.expectEmit(true, false, false, true, address(bsm));
+        emit SurplusBSM.SlashWindowOpened(SVC, offender, 5);
+        vm.prank(address(tangle));
+        bsm.onUnappliedSlash(SVC, offender, 5);
+        vm.expectEmit(true, false, false, true, address(bsm));
+        emit SurplusBSM.SlashApplied(SVC, offender, 5);
+        vm.prank(address(tangle));
+        bsm.onSlash(SVC, offender, 5);
     }
 
     function test_onJobResult_emitsAttribution() public {

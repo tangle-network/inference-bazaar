@@ -119,14 +119,37 @@ fn err_status(e: &VenueError) -> StatusCode {
 }
 
 async fn health() -> impl IntoResponse {
-    // Publish the operator's Tor onion endpoint (if it runs one) so discovery can
-    // surface it and privacy-mode clients dial it instead of the clearnet URL.
-    // The operator runs `/redeem` as an onion service and sets SURPLUS_ONION_URL.
-    let onion = std::env::var("SURPLUS_ONION_URL")
+    Json(
+        serde_json::json!({ "ok": true, "onion": onion_url(), "privacy": std::env::var("PRIVACY_MODE").ok() }),
+    )
+}
+
+/// The operator's Tor onion endpoint (if it runs Arti as an onion service),
+/// published over /health so discovery surfaces it and privacy-mode clients dial
+/// it instead of the clearnet URL. Two sources, in order:
+///   - SURPLUS_ONION_URL: a fixed onion endpoint.
+///   - SURPLUS_ONION_FILE: a path Arti's sidecar writes the freshly-generated
+///     `<hash>.onion` hostname to — read live so the operator publishes it as
+///     soon as Arti bootstraps, no restart needed (see deploy/hetzner/arti.toml).
+/// The scheme is normalized to http:// (the onion forwards to the venue's port).
+fn onion_url() -> Option<String> {
+    let normalize = |s: String| -> Option<String> {
+        let s = s.trim().trim_end_matches('/').to_string();
+        if s.is_empty() {
+            None
+        } else if s.starts_with("http://") || s.starts_with("https://") {
+            Some(s)
+        } else {
+            Some(format!("http://{s}"))
+        }
+    };
+    if let Some(u) = std::env::var("SURPLUS_ONION_URL").ok().and_then(&normalize) {
+        return Some(u);
+    }
+    std::env::var("SURPLUS_ONION_FILE")
         .ok()
-        .filter(|s| !s.is_empty());
-    let privacy = std::env::var("PRIVACY_MODE").ok();
-    Json(serde_json::json!({ "ok": true, "onion": onion, "privacy": privacy }))
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(normalize)
 }
 
 /// Prometheus exposition for ops scraping (audit H6).

@@ -1,0 +1,18 @@
+# Arti (Rust Tor) config — runs the venue as a Tor onion service so consumers
+# can reach the operator without learning its IP. Arti generates a stable
+# <hash>.onion and forwards onion port 80 to the local venue HTTP port.
+#
+#   arti -c /opt/surplus/arti.toml proxy
+#
+# The generated hostname lives under <state_dir>/.../hostname; publish-onion.sh
+# copies it to /opt/surplus/onion-hostname, which the operator reads via
+# SURPLUS_ONION_FILE and publishes over /health.
+
+[storage]
+state_dir = "/opt/surplus/arti/state"
+cache_dir = "/opt/surplus/arti/cache"
+
+[onion_services."surplus-venue"]
+# Onion :80 → the local venue API (op #1 clearnet port). Change the target to
+# match SURPLUS_OPERATOR_ADDR on this host.
+proxy_ports = [["80", "127.0.0.1:9400"]]

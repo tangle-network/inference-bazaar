@@ -7,9 +7,10 @@ import { Panel, Slider } from '~/components/ui'
 import { ProviderLogo } from '~/lib/logos'
 import { cn } from '~/lib/cn'
 import { compactUsd, pct, pricePerM, tokens } from '~/lib/format'
-import { CHAIN, useBook, useCatalog, useInstruments, type BookLevel } from '~/lib/api'
+import { CHAIN, useCatalog, useInstruments } from '~/lib/api'
 import { STEP_LABEL, useFirmTrade, type TradeProgress, type TradeReceipt } from '~/lib/trade'
-import { useVenueRegistry } from '~/lib/venues'
+import { useAggBook, useVenueRegistry } from '~/lib/venues'
+import { planRoute } from '~/lib/router'
 
 /**
  * Inference burns input AND output tokens on every call — so you buy usage,
@@ -46,8 +47,12 @@ export default function BuyPage() {
   const [inputM, setInputM] = useState(50)
   const [outputM, setOutputM] = useState(10)
 
-  const outBook = useBook(entry?.kinds.output ? `${modelId}:output` : null)
-  const inBook = useBook(entry?.kinds.input ? `${modelId}:input` : null)
+  // Price + execute against the MERGED (cross-venue) NBBO ladder, not a single
+  // home venue — so the quote the user sees is exactly the liquidity execution
+  // sweeps (see ~/lib/router planRoute). registry must be resolved first.
+  const registry = useVenueRegistry()
+  const outBook = useAggBook(registry.data, entry?.kinds.output ? `${modelId}:output` : null)
+  const inBook = useAggBook(registry.data, entry?.kinds.input ? `${modelId}:input` : null)
 
   const quote = useMemo(() => {
     if (!entry) return null
@@ -55,21 +60,21 @@ export default function BuyPage() {
       kind: 'input' | 'output'
       qty: number
       listMicroPerM: number
-      asks: BookLevel[]
+      asks: { price: number; qty: number }[]
     }[] = []
     if (entry.kinds.input)
       legs.push({
         kind: 'input',
         qty: inputM * 1_000_000,
         listMicroPerM: entry.model.inputMicroPerM,
-        asks: inBook.data?.book.asks ?? [],
+        asks: inBook.data?.asks ?? [],
       })
     if (entry.kinds.output)
       legs.push({
         kind: 'output',
         qty: outputM * 1_000_000,
         listMicroPerM: entry.model.outputMicroPerM,
-        asks: outBook.data?.book.asks ?? [],
+        asks: outBook.data?.asks ?? [],
       })
     const priced = legs.map((leg) => {
       let remaining = leg.qty
@@ -97,7 +102,6 @@ export default function BuyPage() {
 
   const { address, isConnected } = useAccount()
   const { buyLeg } = useFirmTrade()
-  const registry = useVenueRegistry()
   const [progress, setProgress] = useState<(TradeProgress & { leg?: string }) | null>(null)
   const [receipts, setReceipts] = useState<TradeReceipt[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -108,16 +112,30 @@ export default function BuyPage() {
     setError(null)
     setReceipts([])
     try {
+      const venues = registry.data ?? []
       const done: TradeReceipt[] = []
       for (const leg of quote.legs) {
         if (leg.covered <= 0) continue
-        const r = await buyLeg(
-          `${modelId}:${leg.kind}`,
-          leg.covered,
-          (p) => setProgress({ ...p, leg: leg.kind }),
-          registry.data ?? [],
-        )
-        done.push(r)
+        const onProg = (p: TradeProgress) => setProgress({ ...p, leg: leg.kind })
+        // Walk the merged ladder into a split plan, then fill each venue's slice
+        // through the firm path (passing a single-venue set pins that operator).
+        // This is the SOR: sweep the genuinely-cheapest liquidity wherever it
+        // sits, matching the quote shown above.
+        const book = leg.kind === 'output' ? outBook.data : inBook.data
+        const route = book ? planRoute(book, 'buy', leg.covered) : null
+        const subLegs = route?.legs ?? []
+        if (subLegs.length === 0) {
+          // No agg book (single-venue dev, or stale) — best across all venues.
+          done.push(await buyLeg(`${modelId}:${leg.kind}`, leg.covered, onProg, venues))
+          continue
+        }
+        for (const rleg of subLegs) {
+          const venue = venues.find(
+            (v) => v.operator.toLowerCase() === rleg.operator.toLowerCase(),
+          )
+          if (!venue) continue
+          done.push(await buyLeg(`${modelId}:${leg.kind}`, rleg.qtyTokens, onProg, [venue]))
+        }
       }
       setReceipts(done)
       void outBook.refetch()

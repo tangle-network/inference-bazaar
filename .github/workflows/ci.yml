@@ -107,12 +107,58 @@ jobs:
       - name: install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       # Host crates compile against the (changing) settlement-core + matcher
-      # without the heavy succinct toolchain. The full guest ELF build
-      # (`cargo prove build`) is exercised by a separate, optional job.
+      # without the heavy succinct toolchain. The full guest ELF build +
+      # in-circuit parity is exercised by the `zk-guest` job below.
       - name: build host (skip guest ELF)
         env:
           SP1_SKIP_PROGRAM_BUILD: "1"
         run: cargo build --release
+
+  zk-guest:
+    name: zk (guest ELF + in-circuit parity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.91"
+      - uses: Swatinem/rust-cache@v2
+      - name: install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      # Install the Succinct toolchain so `cargo prove` can compile the RISC-V
+      # guest ELF (sp1-helper build.rs). Without this the guest is a stub and a
+      # broken circuit (or a guest/host public-values drift) would ship unnoticed.
+      - name: install SP1 toolchain
+        run: |
+          curl -L https://sp1up.succinct.xyz | bash
+          ~/.sp1/bin/sp1up
+      # Builds the guest ELF, generates a real mutually-signed crossing order set,
+      # runs the guest in execute mode, and asserts its committed public values
+      # equal the host's recomputation (domainSeparator, bookId, nonce,
+      # ordersCommitment, fillsHash). A circuit change that diverges fails here.
+      - name: guest ELF build + in-circuit parity (execute)
+        run: bash scripts/prove-batch.sh execute
+
+  e2e:
+    name: e2e (settlement spine on anvil)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.91"
+      - uses: Swatinem/rust-cache@v2
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: install solidity dependencies (soldeer)
+        working-directory: contracts
+        run: forge soldeer install
+      # The full guarantee loop end to end on anvil: deploy (book + verifier
+      # wired), atomic fill -> receipt redemption -> collateral default ->
+      # attested batch -> proven batch (against the strict mock verifier, real
+      # match-in-circuit public values). Exercises the chain client's settle
+      # paths the live operator uses.
+      - name: settlement spine e2e
+        run: bash scripts/settlement-e2e.sh
 
   ts:
     name: ts (packages + app)

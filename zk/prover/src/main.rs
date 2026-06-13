@@ -36,6 +36,9 @@ struct Args {
     batch_nonce: u64,
     mode: String,
     out: String,
+    submit: bool,
+    rpc: String,
+    key: String,
 }
 
 fn parse_args() -> Result<Args> {
@@ -50,6 +53,9 @@ fn parse_args() -> Result<Args> {
         batch_nonce: 0,
         mode: "execute".into(),
         out: "proof.json".into(),
+        submit: false,
+        rpc: String::new(),
+        key: String::new(),
     };
     let mut book_id_set = false;
     let mut it = std::env::args().skip(1);
@@ -69,8 +75,16 @@ fn parse_args() -> Result<Args> {
             "--batch-nonce" => args.batch_nonce = value()?.parse()?,
             "--mode" => args.mode = value()?,
             "--out" => args.out = value()?,
+            // After generating the groth16 proof, submit it on-chain via
+            // settleBatchProven (so the prover both produces AND settles).
+            "--submit" => args.submit = true,
+            "--rpc" => args.rpc = value()?,
+            "--key" => args.key = value()?,
             other => bail!("unknown flag {other}"),
         }
+    }
+    if args.submit && (args.rpc.is_empty() || args.key.is_empty()) {
+        bail!("--submit requires --rpc <url> and --key <0x-private-key>");
     }
     if args.orders.is_empty()
         || args.instrument.is_empty()
@@ -152,7 +166,10 @@ fn main() -> Result<()> {
             );
             println!("ordersCommitment: {oc:#x}");
             println!("fillsHash: {:#x}", batch.fills_hash);
-            println!("publicValues: {}", hex::encode_prefixed(public_values.as_slice()));
+            println!(
+                "publicValues: {}",
+                hex::encode_prefixed(public_values.as_slice())
+            );
         }
         "groth16" => {
             let pk = client.setup(ELF)?;
@@ -174,7 +191,32 @@ fn main() -> Result<()> {
                 "orders": signed.len(),
             });
             std::fs::write(&args.out, serde_json::to_string_pretty(&out)?)?;
-            println!("proof written to {} ({} fills)", args.out, batch.fills.len());
+            println!(
+                "proof written to {} ({} fills)",
+                args.out,
+                batch.fills.len()
+            );
+
+            if args.submit {
+                // Produce-and-settle: connect and submit settleBatchProven with the
+                // exact BatchFill[] the matcher produced (the contract recomputes
+                // fillsHash and re-verifies the proof's public values bind to it).
+                println!("→ submitting settleBatchProven to {}…", args.rpc);
+                let rt = tokio::runtime::Runtime::new()?;
+                let tx = rt.block_on(async {
+                    let client = surplus_settlement::chain::SettlementClient::connect(
+                        &args.rpc,
+                        &args.key,
+                        args.contract,
+                    )
+                    .await?;
+                    client.assert_domain().await?;
+                    client
+                        .settle_batch_fills_proven(args.book_id, oc, &batch.fills, proof.bytes())
+                        .await
+                })?;
+                println!("settled: {tx:#x}");
+            }
         }
         other => bail!("unknown mode {other} (execute|groth16)"),
     }

@@ -489,7 +489,21 @@ impl SettlementClient {
         batch: &Batch,
         proof: Vec<u8>,
     ) -> anyhow::Result<B256> {
-        let fills: Vec<_> = batch.batch_fills().iter().map(to_batch_fill).collect();
+        self.settle_batch_fills_proven(book_id, orders_commitment, &batch.batch_fills(), proof)
+            .await
+    }
+
+    /// Proven submit of pre-matched `BatchFill`s exactly as the epoch matcher
+    /// produced them (same shape the prover commits to via `fillsHash`), so the
+    /// calldata the contract recomputes matches the proof's public values.
+    pub async fn settle_batch_fills_proven(
+        &self,
+        book_id: B256,
+        orders_commitment: B256,
+        fills: &[crate::BatchFill],
+        proof: Vec<u8>,
+    ) -> anyhow::Result<B256> {
+        let fills: Vec<_> = fills.iter().map(to_batch_fill).collect();
         let receipt = self
             .contract
             .settleBatchProven(book_id, orders_commitment, fills, proof.into())

@@ -166,6 +166,11 @@ pub struct Clob {
     /// will reject is pure liveness grief, so a drifted node stops proposing.
     /// Stays true if the on-chain read is merely unavailable (no false stall).
     pub(crate) membership_ok: AtomicBool,
+    /// Set once the deployed contract's EIP-712 domain separator has been verified
+    /// against this node's (chain id + contract address). A mismatch means every
+    /// quorum signature would be unverifiable on-chain, so the first settle attempt
+    /// checks it and refuses to submit on drift (fail-closed); checked once.
+    pub(crate) domain_checked: AtomicBool,
     pub(crate) net: Arc<dyn ClobNet>,
 }
 
@@ -220,6 +225,7 @@ impl Clob {
             cancelled: Mutex::new(HashMap::new()),
             last_epoch: AtomicU64::new(0),
             membership_ok: AtomicBool::new(true),
+            domain_checked: AtomicBool::new(false),
             net,
         };
         clob.load_finality();

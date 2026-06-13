@@ -147,6 +147,10 @@ struct SpendJournal {
 pub struct SpendSvc {
     venue: Arc<Venue>,
     state: Mutex<SpendJournal>,
+    /// Set once the deployed contract's EIP-712 domain separator has been verified
+    /// against this node's. For a spend-only operator (no CLOB/direct fills) the
+    /// spend flush is the sole chain path, so it must fail closed on domain drift.
+    domain_checked: std::sync::atomic::AtomicBool,
 }
 
 pub type SharedSpend = Arc<SpendSvc>;
@@ -167,6 +171,7 @@ impl SpendSvc {
         SpendSvc {
             venue,
             state: Mutex::new(state),
+            domain_checked: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -571,6 +576,19 @@ impl SpendSvc {
             surplus_settlement::chain::SettlementClient::connect(rpc, op_key, ctx.contract)
                 .await
                 .map_err(|e| VenueError::Chain(e.to_string()))?;
+        // Verify the on-chain domain separator once before settling — a wrong chain
+        // id / contract address would make every settleSpend digest unverifiable.
+        if !self
+            .domain_checked
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            client
+                .assert_domain()
+                .await
+                .map_err(|e| VenueError::Chain(e.to_string()))?;
+            self.domain_checked
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         let mut settled_count = 0usize;
         let mut failures = 0usize;
         for (permit, vcum, vsig) in pending {

@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useReadContract, useReadContracts } from 'wagmi'
 import { Identicon } from '@tangle-network/blueprint-ui/components'
@@ -7,8 +8,9 @@ import { PageHeader } from '~/components/PageHeader'
 import { Badge, Panel, Stat } from '~/components/ui'
 import { cn } from '~/lib/cn'
 import { compactUsd, truncAddr } from '~/lib/format'
-import { CHAIN, useInstruments, useVenueHealth, VENUE_URL } from '~/lib/api'
+import { CHAIN, useInstruments, useVenueHealth } from '~/lib/api'
 import { SETTLEMENT, SETTLEMENT_ABI } from '~/lib/settlement'
+import { useVenueRegistry } from '~/lib/venues'
 
 const TANGLE_ABI = [
   {
@@ -58,6 +60,16 @@ export default function OperatorsPage() {
   })
   const health = useVenueHealth()
   const instruments = useInstruments()
+  // Which on-chain operators actually serve a venue, from the live registry —
+  // membership in the service is NOT a quoting signal (operator order is arbitrary).
+  const registry = useVenueRegistry()
+  const venueByOp = useMemo(() => {
+    const m = new Map<string, { url: string; healthy: boolean }>()
+    for (const v of registry.data ?? []) {
+      m.set(v.operator.toLowerCase(), { url: v.url, healthy: v.healthy })
+    }
+    return m
+  }, [registry.data])
   const issuerFunds = useReadContracts({
     contracts: addrs.flatMap((a) => [
       { address: SETTLEMENT.address, abi: SETTLEMENT_ABI, functionName: 'collateral' as const, args: [a] as const, chainId: CHAIN.id },
@@ -109,6 +121,8 @@ export default function OperatorsPage() {
           )}
           {addrs.map((addr, i) => {
             const bond = bonds.data?.[i]?.result as bigint | undefined
+            const venue = venueByOp.get(addr.toLowerCase())
+            const serving = venue?.healthy ?? false
             return (
               <div
                 key={addr}
@@ -128,10 +142,12 @@ export default function OperatorsPage() {
                       {truncAddr(addr)}
                     </a>
                     <Badge tone="emerald" icon="i-ph:shield-check-fill">bonded</Badge>
-                    {i === 0 && <Badge tone="accent">quoting</Badge>}
+                    {serving && <Badge tone="accent">quoting</Badge>}
                   </div>
                   <div className="mt-0.5 font-data text-[12px] text-[var(--s-text-muted)]">
-                    {i === 0 ? `serves the venue API · ${VENUE_URL.replace('https://', '')}` : 'joined the operator set on-chain'}
+                    {serving
+                      ? `serves the venue API · ${venue!.url.replace('https://', '')}`
+                      : 'joined the operator set on-chain'}
                   </div>
                 </div>
                 <div className="text-right">

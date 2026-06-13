@@ -5,6 +5,7 @@ import 'virtual:uno.css'
 import './styles.css'
 import { Web3Provider } from '~/providers/web3'
 import { Shell } from '~/components/Shell'
+import { RouteError } from '~/components/RouteError'
 import HomePage from '~/pages/Home'
 import MarketsPage from '~/pages/Markets'
 import ModelMarketPage from '~/pages/ModelMarket'
@@ -19,18 +20,24 @@ function withShell(node: React.ReactNode) {
   return <Shell>{node}</Shell>
 }
 
+// Every route degrades to RouteError on a render/loader throw rather than
+// white-screening the app.
+function route(path: string, node: React.ReactNode) {
+  return { path, element: withShell(node), errorElement: withShell(<RouteError />) }
+}
+
 const router = createBrowserRouter([
-  { path: '/', element: withShell(<HomePage />) },
-  { path: '/markets', element: withShell(<MarketsPage />) },
+  route('/', <HomePage />),
+  route('/markets', <MarketsPage />),
   // Model ids contain a slash (e.g. anthropic/claude-opus-4-8) — match the rest.
-  { path: '/m/*', element: withShell(<ModelMarketPage />) },
-  { path: '/buy', element: withShell(<BuyPage />) },
-  { path: '/buy/*', element: withShell(<BuyPage />) },
-  { path: '/sell', element: withShell(<SellPage />) },
-  { path: '/operators', element: withShell(<OperatorsPage />) },
-  { path: '/operators/register', element: withShell(<OperatorRegisterPage />) },
-  { path: '/activity', element: withShell(<ActivityPage />) },
-  { path: '/portfolio', element: withShell(<PortfolioPage />) },
+  route('/m/*', <ModelMarketPage />),
+  route('/buy', <BuyPage />),
+  route('/buy/*', <BuyPage />),
+  route('/sell', <SellPage />),
+  route('/operators', <OperatorsPage />),
+  route('/operators/register', <OperatorRegisterPage />),
+  route('/activity', <ActivityPage />),
+  route('/portfolio', <PortfolioPage />),
 ])
 
 createRoot(document.getElementById('root')!).render(
