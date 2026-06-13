@@ -11,9 +11,12 @@
  */
 import { useQuery } from '@tanstack/react-query'
 
+// `import.meta.env?` (not `.env.`) so these modules also load under plain
+// node/tsx (the SOR/NBBO checks run outside Vite, where import.meta.env is
+// undefined); in the Vite build it resolves exactly as before.
 export const VENUE_URL =
-  import.meta.env.VITE_SURPLUS_VENUE_URL || 'https://surplus.178.104.232.124.sslip.io'
-export const ROUTER_URL = import.meta.env.VITE_TANGLE_ROUTER_URL || 'https://router.tangle.tools'
+  import.meta.env?.VITE_SURPLUS_VENUE_URL || 'https://surplus.178.104.232.124.sslip.io'
+export const ROUTER_URL = import.meta.env?.VITE_TANGLE_ROUTER_URL || 'https://router.tangle.tools'
 
 /** Base Sepolia coordinates of the live deployment. */
 export const CHAIN = {
