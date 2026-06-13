@@ -59,6 +59,18 @@ contract Deploy is Script {
         SurplusBSM bsm = new SurplusBSM();
         console.log("SurplusBSM:", address(bsm));
 
+        // Wire the manager so it is functional from block 0. In a Tangle
+        // production deploy the runtime deploys + bootstraps the manager
+        // (onBlueprintCreated) and the owner then calls setSettlement; this
+        // mirrors that bootstrap for standalone/local/testnet deploys, where no
+        // Tangle pallet is present to do it. onBlueprintCreated is a one-shot
+        // binder with no caller gate, so the deployer can perform it here.
+        uint64 blueprintId = uint64(vm.envOr("BLUEPRINT_ID", uint256(0)));
+        address tangleCore = vm.envOr("TANGLE_CORE", deployer);
+        bsm.onBlueprintCreated(blueprintId, deployer, tangleCore);
+        bsm.setSettlement(settlement);
+        console.log("SurplusBSM wired -> settlement; tangleCore:", tangleCore);
+
         if (vm.envOr("DEPLOY_DEV_VERIFIER", uint256(0)) == 1) {
             require(block.chainid == 31_337, "dev verifier only on anvil");
             SP1MockVerifierStrict verifier = new SP1MockVerifierStrict();

@@ -39,6 +39,7 @@ contract BsmTest is SettlementTestBase {
     SurplusBSM internal bsm;
     MockTangleCore internal tangle;
     address internal blueprintOwner = address(0x0117);
+    uint64 internal constant SVC = 7;
 
     function setUp() public override {
         super.setUp();
@@ -47,6 +48,19 @@ contract BsmTest is SettlementTestBase {
         bsm.onBlueprintCreated(7, blueprintOwner, address(tangle));
         vm.prank(blueprintOwner);
         bsm.setSettlement(settlement);
+        // The issuer (`seller`) is an operator of the service its lots belong to,
+        // delivered via the fixed-membership path (approve -> initialize).
+        initServiceWith(SVC, seller);
+    }
+
+    /// Bring up a service instance through the fixed-membership flow: one operator
+    /// approves the request, then the instance initializes (requestId == SVC here).
+    function initServiceWith(uint64 serviceId, address operator) internal {
+        address[] memory callers = new address[](0);
+        vm.startPrank(address(tangle));
+        bsm.onApprove(operator, serviceId, 50);
+        bsm.onServiceInitialized(7, serviceId, serviceId, blueprintOwner, callers, uint64(block.timestamp + 1 days));
+        vm.stopPrank();
     }
 
     function recordDefault() internal returns (uint256 defaultId) {
@@ -95,5 +109,87 @@ contract BsmTest is SettlementTestBase {
         vm.prank(blueprintOwner);
         vm.expectRevert(SurplusBSM.SettlementAlreadySet.selector);
         fresh.setSettlement(settlement);
+    }
+
+    // ── Membership: fixed (approve -> initialize) ────────────────────────────────
+
+    function test_fixedMembership_frozenAtInit() public {
+        // SVC was initialized with `seller` in setUp.
+        assertTrue(bsm.isServiceActive(SVC));
+        assertTrue(bsm.isServiceOperator(SVC, seller));
+        assertEq(bsm.serviceOperatorCount(SVC), 1);
+        assertEq(bsm.serviceOwnerOf(SVC), blueprintOwner);
+    }
+
+    function test_rejectedApprovalIsNotAMember() public {
+        uint64 svc = 8;
+        address[] memory callers = new address[](0);
+        vm.startPrank(address(tangle));
+        bsm.onApprove(seller, svc, 50);
+        bsm.onApprove(buyer, svc, 50);
+        bsm.onReject(buyer, svc); // buyer pulled out before init
+        bsm.onServiceInitialized(7, svc, svc, blueprintOwner, callers, uint64(block.timestamp + 1 days));
+        vm.stopPrank();
+        assertTrue(bsm.isServiceOperator(svc, seller));
+        assertFalse(bsm.isServiceOperator(svc, buyer));
+        assertEq(bsm.serviceOperatorCount(svc), 1);
+    }
+
+    // ── Membership: dynamic (join / leave a running instance) ────────────────────
+
+    function test_dynamicJoinAndLeave() public {
+        address newOp = address(0xBEEF);
+        assertFalse(bsm.isServiceOperator(SVC, newOp));
+
+        vm.prank(address(tangle));
+        bsm.onOperatorJoined(SVC, newOp, 750);
+        assertTrue(bsm.isServiceOperator(SVC, newOp));
+        assertEq(bsm.operatorExposureBps(SVC, newOp), 750);
+        assertEq(bsm.serviceOperatorCount(SVC), 2);
+
+        vm.prank(address(tangle));
+        bsm.onOperatorLeft(SVC, newOp);
+        assertFalse(bsm.isServiceOperator(SVC, newOp));
+        assertEq(bsm.operatorExposureBps(SVC, newOp), 0);
+        assertEq(bsm.serviceOperatorCount(SVC), 1);
+    }
+
+    function test_canJoinAndLeaveAreOpen() public view {
+        assertTrue(bsm.canJoin(SVC, address(0xCAFE)));
+        assertTrue(bsm.canLeave(SVC, seller));
+    }
+
+    function test_membershipHooksAreTangleOnly() public {
+        vm.expectRevert();
+        bsm.onOperatorJoined(SVC, address(0xBEEF), 1);
+        vm.expectRevert();
+        bsm.onServiceInitialized(7, 9, 9, blueprintOwner, new address[](0), 1);
+    }
+
+    // ── Slashing is gated on real membership ─────────────────────────────────────
+
+    function test_challengeDefault_revertsForNonMemberService() public {
+        uint256 defaultId = recordDefault();
+        // Service 9 exists but `seller` (the defaulter) is not in it.
+        initServiceWith(9, address(0xD00D));
+        vm.expectRevert(abi.encodeWithSelector(SurplusBSM.NotServiceOperator.selector, uint64(9), seller));
+        bsm.challengeDefault(9, defaultId);
+    }
+
+    function test_challengeDefault_revertsAfterTermination() public {
+        uint256 defaultId = recordDefault();
+        vm.prank(address(tangle));
+        bsm.onServiceTermination(SVC, blueprintOwner);
+        assertFalse(bsm.isServiceActive(SVC));
+        assertFalse(bsm.isServiceOperator(SVC, seller));
+        vm.expectRevert(abi.encodeWithSelector(SurplusBSM.ServiceNotActive.selector, SVC));
+        bsm.challengeDefault(SVC, defaultId);
+    }
+
+    function test_onJobResult_emitsAttribution() public {
+        vm.expectEmit(true, true, false, true, address(bsm));
+        emit SurplusBSM.JobResulted(SVC, 30, 1, seller);
+        vm.prank(address(tangle));
+        bsm.onJobResult(SVC, 30, 1, seller, "", "");
     }
 }
