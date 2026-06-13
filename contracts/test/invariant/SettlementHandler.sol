@@ -173,8 +173,7 @@ contract SettlementHandler is CommonBase, StdCheats, StdUtils {
             bytes memory sig = _signDigest(hk, settlement.receiptDigest(rid, serveQty, bytes32(uint256(1))));
             try settlement.settleRedemption(rid, serveQty, bytes32(uint256(1)), sig) {
                 redemptionsSettled++;
-            }
-                catch { }
+            } catch { }
         } catch { }
     }
 
@@ -195,8 +194,7 @@ contract SettlementHandler is CommonBase, StdCheats, StdUtils {
         bytes memory sig = _signDigest(hk, settlement.spendAuthDigest(auth));
         try settlement.settleSpend(auth, served, sig) {
             spendsSettled++;
-        }
-            catch { }
+        } catch { }
     }
 
     function defaultOrReclaim(uint256 seed) external {
@@ -208,8 +206,7 @@ contract SettlementHandler is CommonBase, StdCheats, StdUtils {
         if (notional == 0) return;
         try settlement.reclaimExpired(lotId) {
             reclaimsDone++;
-        }
-            catch { }
+        } catch { }
     }
 
     function warp(uint16 secs) external {
