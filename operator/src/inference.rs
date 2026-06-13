@@ -155,6 +155,33 @@ impl InferenceBackend {
             .map_err(|e| format!("backend body: {e}"))?;
         Ok((status, body))
     }
+
+    /// Streaming OpenAI-compatible chat completion. Returns the upstream's raw
+    /// streaming response (SSE); the caller forwards the chunks token-by-token and
+    /// tees the final `usage` chunk to meter. `stream_options.include_usage` makes
+    /// the backend emit that final chunk so streamed requests bill like buffered.
+    pub async fn chat_completion_stream(
+        &self,
+        model: &str,
+        messages: &serde_json::value::RawValue,
+        max_tokens: u32,
+    ) -> Result<reqwest::Response, String> {
+        let mut req = self
+            .client
+            .post(format!("{}/v1/chat/completions", self.base_url))
+            .json(&json!({
+                "model": model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "stream": true,
+                "stream_options": { "include_usage": true },
+            }))
+            .timeout(Duration::from_secs(300));
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+        req.send().await.map_err(|e| format!("backend: {e}"))
+    }
 }
 
 /// vLLM cold-starts in minutes (model load); poll /health and log the moment
