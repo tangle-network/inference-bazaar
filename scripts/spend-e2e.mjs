@@ -208,9 +208,50 @@ const settledCum = await pub.readContract({ address: SETTLEMENT, abi: settlement
 const lot2 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'lots', args: [lotId] })
 if (Number(settledCum) !== served1 + served2) throw new Error(`cumulative settled ${settledCum} != ${served1 + served2}`)
 
+// ── 6. Streaming: token-by-token SSE, billed identically on-chain ────────────
+const streamRes = await fetch(`${VENUE}/v1/chat/completions`, {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    'x-surplus-session': session.address,
+    'x-surplus-voucher-cum': String(acked),
+    'x-surplus-voucher-sig': await voucherSig(session, acked),
+  },
+  body: JSON.stringify({
+    model: reg.model,
+    messages: [{ role: 'user', content: 'stream please' }],
+    max_tokens: 256,
+    stream: true,
+  }),
+})
+if (!streamRes.ok) throw new Error(`stream -> ${streamRes.status}: ${await streamRes.text()}`)
+if (!(streamRes.headers.get('content-type') || '').includes('text/event-stream'))
+  throw new Error('stream response is not SSE')
+const events = (await streamRes.text())
+  .split('\n\n')
+  .map((e) => e.replace(/^data:\s?/, '').trim())
+  .filter(Boolean)
+if (events[events.length - 1] !== '[DONE]') throw new Error('stream did not terminate with [DONE]')
+const parsed = events.filter((e) => e !== '[DONE]').map((e) => JSON.parse(e))
+const streamedText = parsed.map((c) => c.choices?.[0]?.delta?.content ?? '').join('')
+if (!streamedText.includes('stub reply')) throw new Error(`streamed content wrong: "${streamedText}"`)
+const surplusEv = parsed.find((c) => c.surplus)
+if (!surplusEv) throw new Error('operator did not emit a surplus event in the stream')
+const served3 = surplusEv.surplus.servedTokens
+acked = surplusEv.surplus.nextCumulative
+if (acked !== served1 + served2 + served3)
+  throw new Error(`stream nextCumulative ${acked} != ${served1 + served2 + served3}`)
+await ack(acked)
+await post(`${VENUE}/v1/spend/flush`, {})
+const settledStream = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [digest] })
+const lot3 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'lots', args: [lotId] })
+if (Number(settledStream) !== served1 + served2 + served3)
+  throw new Error(`stream settled ${settledStream} != ${served1 + served2 + served3}`)
+
 console.log('')
 console.log('=== SPEND RAIL PROVEN ===')
 console.log(`one wallet signature -> session key ${session.address.slice(0, 10)}…`)
 console.log(`vanilla OpenAI calls served: ${served1} + ${served2} tokens, zero per-request user crypto`)
 console.log(`forged voucher (not the session key) refused; over-billing impossible by construction`)
-console.log(`on-chain: lot ${Number(lot0[3])} -> ${Number(lot2[3])} tokens, spendSettled = ${settledCum}`)
+console.log(`streamed ${served3} tokens token-by-token (SSE: "${streamedText.trim()}"), billed identically`)
+console.log(`on-chain: lot ${Number(lot0[3])} -> ${Number(lot3[3])} tokens, spendSettled = ${settledStream}`)

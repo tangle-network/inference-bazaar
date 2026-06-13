@@ -44,7 +44,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # `socks` enables PRIVACY_MODE=tor: outbound inference calls tunnel through Arti's
 # SOCKS5 proxy (socks5h, so .onion hostnames resolve inside Tor).
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks", "stream"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"

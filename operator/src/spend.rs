@@ -302,15 +302,17 @@ impl SpendSvc {
 
     // ───────────────────────── Serving ───────────────────────────────────────
 
-    /// One OpenAI-compatible chat completion billed to a spend channel. The
-    /// request carries the latest consumer-signed voucher; we serve only once the
-    /// voucher acknowledges everything previously served (so our exposure is one
-    /// request) and meter the new usage against the lot's token kind.
-    pub async fn complete(
+    /// Shared money-path gate for BOTH the buffered and streamed serve paths, so
+    /// they cannot diverge. Verifies the voucher (per-request possession proof AND
+    /// payment ack — session-signed, monotone, within cap), enforces expiry/quota/
+    /// model, records the voucher as the latest settleable proof, and returns
+    /// `(permit, already_served, per-request cap)`. Both paths meter identically
+    /// afterwards via `record_served`.
+    fn authorize(
         &self,
-        voucher: VoucherHeader,
-        body: ChatBody,
-    ) -> Result<Value, (StatusCode, Value)> {
+        voucher: &VoucherHeader,
+        body: &ChatBody,
+    ) -> Result<(StoredPermit, u64, u32), (StatusCode, Value)> {
         let ctx = self.venue.settle_ctx_pub().map_err(|_| {
             (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -347,8 +349,7 @@ impl SpendSvc {
             permit.session_key,
             voucher.cumulative,
         );
-        let recovered = surplus_settlement::core::recover_signer(vdigest, &vsig);
-        if recovered != Some(permit.session_key) {
+        if surplus_settlement::core::recover_signer(vdigest, &vsig) != Some(permit.session_key) {
             return Err((
                 StatusCode::UNAUTHORIZED,
                 oai_err("bad_voucher", "voucher not signed by the session key"),
@@ -384,12 +385,6 @@ impl SpendSvc {
                 oai_err("insufficient_quota", "Authorized quota consumed."),
             ));
         }
-        if body.stream.unwrap_or(false) {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                oai_err("unsupported", "stream=true is not supported yet."),
-            ));
-        }
         if !body.model.is_empty() && body.model != permit.model_id {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -419,6 +414,25 @@ impl SpendSvc {
             .unwrap_or(1024)
             .min(MAX_TOKENS_PER_REQUEST)
             .min(u32::try_from(remaining).unwrap_or(u32::MAX));
+        Ok((permit, already_served, cap))
+    }
+
+    /// Meter served tokens into the journal — money-shaped state, persisted.
+    fn record_served(&self, session: Address, total: u64, used: u64) {
+        let mut j = self.state.lock().unwrap();
+        j.served.insert(session, total);
+        crate::metrics::inc_by(crate::metrics::names::SPEND_SERVED_TOKENS, used);
+        self.persist(&j);
+    }
+
+    /// One buffered OpenAI-compatible chat completion billed to a spend channel.
+    pub async fn complete(
+        &self,
+        voucher: VoucherHeader,
+        body: ChatBody,
+    ) -> Result<Value, (StatusCode, Value)> {
+        let (permit, already_served, cap) = self.authorize(&voucher, &body)?;
+        let remaining = permit.max_tokens.saturating_sub(already_served);
         let (status, completion) = self
             .venue
             .inference
@@ -432,24 +446,14 @@ impl SpendSvc {
             ));
         }
 
-        let usage_key = if permit.token_kind == "input" {
-            "prompt_tokens"
-        } else {
-            "completion_tokens"
-        };
         let used = completion
             .get("usage")
-            .and_then(|u| u.get(usage_key))
+            .and_then(|u| u.get(usage_key(&permit)))
             .and_then(Value::as_u64)
             .unwrap_or(0)
             .min(remaining);
         let total = already_served + used;
-        {
-            let mut j = self.state.lock().unwrap();
-            j.served.insert(permit.session_key, total);
-            crate::metrics::inc_by(crate::metrics::names::SPEND_SERVED_TOKENS, used);
-            self.persist(&j);
-        }
+        self.record_served(permit.session_key, total, used);
 
         // The gateway should now sign a voucher for `nextCumulative` so this
         // request becomes settleable; until it does, this request is our exposure.
@@ -461,6 +465,101 @@ impl SpendSvc {
             );
         }
         Ok(out)
+    }
+
+    /// One STREAMED chat completion (`stream: true`): forward the upstream's SSE
+    /// chunks token-by-token while tee-ing the final `usage` chunk to meter, then
+    /// emit a private `surplus` event (the gateway consumes+strips it to advance
+    /// its voucher) followed by `[DONE]`. Billing is identical to the buffered
+    /// path — authorization, cap, and metering go through the same gates.
+    pub async fn complete_stream(
+        self: &SharedSpend,
+        voucher: VoucherHeader,
+        body: ChatBody,
+    ) -> Result<axum::response::Response, (StatusCode, Value)> {
+        use futures::StreamExt;
+        let (permit, already_served, cap) = self.authorize(&voucher, &body)?;
+        let resp = self
+            .venue
+            .inference
+            .chat_completion_stream(&permit.model_id, &body.messages, cap)
+            .await
+            .map_err(|e| (StatusCode::BAD_GATEWAY, oai_err("upstream", &e)))?;
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err((StatusCode::BAD_GATEWAY, oai_err("upstream", &text)));
+        }
+
+        let remaining = permit.max_tokens.saturating_sub(already_served);
+        let session = permit.session_key;
+        let key = usage_key(&permit);
+        let svc = std::sync::Arc::clone(self);
+        let (tx, rx) =
+            futures::channel::mpsc::unbounded::<Result<axum::body::Bytes, std::io::Error>>();
+
+        tokio::spawn(async move {
+            let mut stream = resp.bytes_stream();
+            let mut pending = String::new();
+            let mut used: u64 = 0;
+            let mut finalized = false;
+            'read: while let Some(chunk) = stream.next().await {
+                let Ok(bytes) = chunk else { break };
+                pending.push_str(&String::from_utf8_lossy(&bytes));
+                while let Some(idx) = pending.find("\n\n") {
+                    let event: String = pending.drain(..idx + 2).collect();
+                    let data = event
+                        .lines()
+                        .find_map(|l| l.strip_prefix("data:").map(str::trim));
+                    match data {
+                        Some("[DONE]") => {
+                            let u = used.min(remaining);
+                            svc.record_served(session, already_served + u, u);
+                            let _ = tx.unbounded_send(Ok(surplus_event(u, already_served + u)));
+                            let _ =
+                                tx.unbounded_send(Ok(axum::body::Bytes::from_static(DONE_EVENT)));
+                            finalized = true;
+                            break 'read;
+                        }
+                        Some(json_str) => {
+                            // Tee: capture usage from the final chunk; forward the
+                            // chunk to the client verbatim (token-by-token).
+                            if let Ok(v) = serde_json::from_str::<Value>(json_str) {
+                                if let Some(n) = v
+                                    .get("usage")
+                                    .and_then(|x| x.get(key))
+                                    .and_then(Value::as_u64)
+                                {
+                                    used = n;
+                                }
+                            }
+                            let _ = tx.unbounded_send(Ok(event.into_bytes().into()));
+                        }
+                        None => {
+                            let _ = tx.unbounded_send(Ok(event.into_bytes().into()));
+                        }
+                    }
+                }
+            }
+            // Upstream ended without an explicit [DONE] (or errored mid-stream):
+            // meter what we saw and close the SSE so the client/gateway terminate.
+            if !finalized {
+                let u = used.min(remaining);
+                svc.record_served(session, already_served + u, u);
+                let _ = tx.unbounded_send(Ok(surplus_event(u, already_served + u)));
+                let _ = tx.unbounded_send(Ok(axum::body::Bytes::from_static(DONE_EVENT)));
+            }
+        });
+
+        axum::response::Response::builder()
+            .header("content-type", "text/event-stream")
+            .header("cache-control", "no-cache")
+            .body(axum::body::Body::from_stream(rx))
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    oai_err("stream", &e.to_string()),
+                )
+            })
     }
 
     /// Record a trailing voucher WITHOUT serving. The voucher rides on the next
@@ -657,6 +756,27 @@ fn oai_err(code: &str, message: &str) -> Value {
     json!({ "error": { "type": code, "code": code, "message": message } })
 }
 
+/// Which `usage` field bills this channel — the lot's token kind.
+fn usage_key(permit: &StoredPermit) -> &'static str {
+    if permit.token_kind == "input" {
+        "prompt_tokens"
+    } else {
+        "completion_tokens"
+    }
+}
+
+/// The streamed SSE terminator the client's OpenAI SDK stops on.
+const DONE_EVENT: &[u8] = b"data: [DONE]\n\n";
+
+/// The operator's private settlement event, injected into the stream right before
+/// `[DONE]`. The gateway parses it to advance its voucher and STRIPS it, so the
+/// developer's vanilla OpenAI client never sees it.
+fn surplus_event(served: u64, next: u64) -> axum::body::Bytes {
+    format!("data: {{\"surplus\":{{\"servedTokens\":{served},\"nextCumulative\":{next}}}}}\n\n")
+        .into_bytes()
+        .into()
+}
+
 // ─────────────────────────────── Wire types ──────────────────────────────────
 
 #[derive(Deserialize)]
@@ -754,9 +874,16 @@ async fn chat(
         Ok(v) => v,
         Err((status, body)) => return (status, Json(body)).into_response(),
     };
-    match s.complete(voucher, b).await {
-        Ok(v) => Json(v).into_response(),
-        Err((status, body)) => (status, Json(body)).into_response(),
+    if b.stream.unwrap_or(false) {
+        match s.complete_stream(voucher, b).await {
+            Ok(resp) => resp,
+            Err((status, body)) => (status, Json(body)).into_response(),
+        }
+    } else {
+        match s.complete(voucher, b).await {
+            Ok(v) => Json(v).into_response(),
+            Err((status, body)) => (status, Json(body)).into_response(),
+        }
     }
 }
 

@@ -61,6 +61,60 @@ impl Gateway {
         format!("0x{}", hex::encode(self.signer.sign_digest(digest)))
     }
 
+    /// Pass an SSE stream from the operator through to the client token-by-token,
+    /// stripping the operator's private `surplus` event (the client's vanilla
+    /// OpenAI SDK never sees it) and, at stream end, advancing the voucher to the
+    /// served cumulative + sending a trailing ack so the request settles.
+    fn stream_through(self: &Shared, resp: reqwest::Response) -> axum::response::Response {
+        use futures::StreamExt;
+        let g = std::sync::Arc::clone(self);
+        let (tx, rx) =
+            futures::channel::mpsc::unbounded::<Result<axum::body::Bytes, std::io::Error>>();
+        tokio::spawn(async move {
+            let mut stream = resp.bytes_stream();
+            let mut pending = String::new();
+            let mut next_cum: Option<u64> = None;
+            while let Some(chunk) = stream.next().await {
+                let Ok(bytes) = chunk else { break };
+                pending.push_str(&String::from_utf8_lossy(&bytes));
+                while let Some(idx) = pending.find("\n\n") {
+                    let event: String = pending.drain(..idx + 2).collect();
+                    let data = event
+                        .lines()
+                        .find_map(|l| l.strip_prefix("data:").map(str::trim));
+                    if let Some(json_str) = data {
+                        if json_str != "[DONE]" {
+                            if let Ok(v) = serde_json::from_str::<Value>(json_str) {
+                                if let Some(s) = v.get("surplus") {
+                                    if let Some(n) = s.get("nextCumulative").and_then(Value::as_u64)
+                                    {
+                                        next_cum = Some(n);
+                                    }
+                                    continue; // strip — the client never sees the surplus event
+                                }
+                            }
+                        }
+                    }
+                    let _ = tx.unbounded_send(Ok(event.into_bytes().into()));
+                }
+            }
+            if let Some(n) = next_cum {
+                {
+                    let mut a = g.acked.lock().unwrap();
+                    if n > *a {
+                        *a = n;
+                    }
+                }
+                g.send_ack(n).await;
+            }
+        });
+        axum::response::Response::builder()
+            .header("content-type", "text/event-stream")
+            .header("cache-control", "no-cache")
+            .body(axum::body::Body::from_stream(rx))
+            .expect("valid sse response")
+    }
+
     /// Post a trailing voucher for `cumulative` to the operator's ack endpoint so
     /// the just-served request becomes settleable. Best-effort by design.
     async fn send_ack(&self, cumulative: u64) {
@@ -85,6 +139,7 @@ async fn chat(State(g): State<Shared>, Json(body): Json<Value>) -> impl IntoResp
     // The voucher we present covers everything acknowledged so far (= what the
     // operator has already metered as served). The operator serves this request
     // trusting we will advance the voucher to cover it on the next call.
+    let streaming = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
     let acked = *g.acked.lock().unwrap();
     let sig = g.voucher_sig(acked);
 
@@ -108,6 +163,21 @@ async fn chat(State(g): State<Shared>, Json(body): Json<Value>) -> impl IntoResp
         }
     };
     let status = resp.status();
+    if !status.is_success() {
+        let code = StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        let body = resp
+            .json::<Value>()
+            .await
+            .unwrap_or_else(|e| err("upstream_body", &e.to_string()));
+        return (code, Json(body)).into_response();
+    }
+
+    // Streaming: pass the SSE through token-by-token, strip the operator's private
+    // surplus event, and advance + ack the voucher at stream end (below).
+    if streaming {
+        return g.stream_through(resp);
+    }
+
     let mut completion: Value = match resp.json().await {
         Ok(v) => v,
         Err(e) => {
@@ -118,10 +188,6 @@ async fn chat(State(g): State<Shared>, Json(body): Json<Value>) -> impl IntoResp
                 .into_response()
         }
     };
-    if !status.is_success() {
-        let code = StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-        return (code, Json(completion)).into_response();
-    }
 
     // Advance our acknowledgement to cover what was just served, then send a
     // trailing voucher so THIS request is settleable immediately — without it the
