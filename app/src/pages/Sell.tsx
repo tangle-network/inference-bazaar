@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAccount } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import { PageHeader } from '~/components/PageHeader'
-import { Panel } from '~/components/ui'
+import { Panel, Slider } from '~/components/ui'
 import { ProviderLogo } from '~/lib/logos'
 import { cn } from '~/lib/cn'
 import { compactUsd, pricePerM, tokens } from '~/lib/format'
@@ -38,10 +38,16 @@ export default function SellPage() {
   }, [lots.data, instruments.data])
 
   const [selected, setSelected] = useState<CreditLot | null>(null)
+  // Quantity to resell (tokens). null = the whole lot; the slider sets a partial.
+  const [sellQty, setSellQty] = useState<number | null>(null)
   const active = selected ?? sellable[0]?.lot ?? null
   const activeInstrument = sellable.find((s) => s.lot.lotId === active?.lotId)?.instrument ?? null
   const book = useAggBook(registry.data, activeInstrument?.id ?? null)
   const bestBid = book.data?.bids[0]?.price ?? null
+
+  const lotQty = Number(active?.qtyTokens ?? 0)
+  const qty = Math.min(sellQty ?? lotQty, lotQty) // default: whole lot; clamp to available
+  const isPartial = qty > 0 && qty < lotQty
 
   const [progress, setProgress] = useState<TradeProgress | null>(null)
   const [receipt, setReceipt] = useState<TradeReceipt | null>(null)
@@ -55,7 +61,7 @@ export default function SellPage() {
       const r = await sellLot(
         activeInstrument.id,
         active.lotId,
-        Number(active.qtyTokens),
+        qty,
         setProgress,
         registry.data ?? [],
       )
@@ -125,7 +131,10 @@ export default function SellPage() {
             return (
               <button
                 key={lot.lotId}
-                onClick={() => setSelected(lot)}
+                onClick={() => {
+                  setSelected(lot)
+                  setSellQty(Number(lot.qtyTokens)) // reset the slider to the full new lot
+                }}
                 className={cn(
                   'flex w-full items-center gap-3 border-b border-[var(--s-divider)] px-4 py-3.5 text-left transition-colors last:border-0',
                   isActive ? 'bg-[var(--s-accent-soft)]' : 'hover:bg-[var(--s-panel)]',
@@ -150,20 +159,43 @@ export default function SellPage() {
           {active && activeInstrument && (
             <Panel title="Firm sale">
               <div className="grid grid-cols-2 gap-x-6 gap-y-3 px-4 py-4 font-data text-[14px] sm:grid-cols-3">
-                <PV k="Lot size" v={`${tokens(Number(active.qtyTokens))} tok`} />
+                <PV k="Selling" v={`${tokens(qty)} tok`} />
                 <PV k="Operator bid" v={bestBid != null ? pricePerM(bestBid) : '—'} tone="emerald" />
                 <PV
                   k="Est. proceeds"
-                  v={bestBid != null ? compactUsd(Math.round((bestBid * Number(active.qtyTokens)) / 1e6)) : '—'}
+                  v={bestBid != null ? compactUsd(Math.round((bestBid * qty) / 1e6)) : '—'}
+                />
+              </div>
+              {/* Partial resale: carve off any amount up to the lot size — the rest
+                  stays a redeemable lot you keep. */}
+              <div className="px-4 pb-2">
+                <div className="flex items-baseline justify-between">
+                  <span className="mono-label">Amount</span>
+                  <span className="font-data text-[12px] text-[var(--s-text-muted)]">
+                    {tokens(qty)} of {tokens(lotQty)}
+                    {isPartial && <span className="text-[var(--s-accent)]"> · keep {tokens(lotQty - qty)}</span>}
+                  </span>
+                </div>
+                <Slider
+                  value={qty}
+                  min={1}
+                  max={Math.max(1, lotQty)}
+                  step={Math.max(1, Math.floor(lotQty / 200))}
+                  onChange={setSellQty}
+                  className="mt-3"
                 />
               </div>
               <div className="px-4 pb-4">
                 <button
                   onClick={execute}
-                  disabled={progress !== null || bestBid == null}
+                  disabled={progress !== null || bestBid == null || qty < 1}
                   className="btn-primary h-12 w-full !text-[15px]"
                 >
-                  {progress ? `${STEP_LABEL[progress.step]}…` : 'Request firm bid · sell lot'}
+                  {progress
+                    ? `${STEP_LABEL[progress.step]}…`
+                    : isPartial
+                      ? `Request firm bid · sell ${tokens(qty)}`
+                      : 'Request firm bid · sell lot'}
                 </button>
                 {receipt && (
                   <div className="mt-3 rounded-[8px] border border-[var(--s-emerald)]/30 bg-[var(--s-emerald-soft)] px-3 py-2.5 font-data text-[13px] text-[var(--s-emerald)]">
