@@ -16,7 +16,9 @@ author = "Tangle"
 category = "inference-market"
 license = "MIT OR Apache-2.0"
 
-supported_memberships = ["dynamic"]
+# The BSM supports both models (see SurplusBSM); declare both so a service can be
+# requested fixed or dynamic — the instance picks at request time.
+supported_memberships = ["fixed", "dynamic"]
 
 [[jobs]]
 name = "list_instrument"

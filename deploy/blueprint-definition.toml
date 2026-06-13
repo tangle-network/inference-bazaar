@@ -15,7 +15,10 @@ author = "Tangle"
 category = "inference-market"
 license = "MIT OR Apache-2.0"
 
-supported_memberships = ["dynamic"]
+# The BSM tracks membership for both models (SurplusBSM: fixed = frozen at
+# onServiceInitialized, dynamic = onOperatorJoined/Left). Declare both so a
+# service can be requested either way; the instance picks at request time.
+supported_memberships = ["fixed", "dynamic"]
 
 [[jobs]]
 name = "list_instrument"
