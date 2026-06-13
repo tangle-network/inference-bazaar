@@ -65,7 +65,12 @@ impl Gateway {
     /// stripping the operator's private `surplus` event (the client's vanilla
     /// OpenAI SDK never sees it) and, at stream end, advancing the voucher to the
     /// served cumulative + sending a trailing ack so the request settles.
-    fn stream_through(self: &Shared, resp: reqwest::Response) -> axum::response::Response {
+    fn stream_through(
+        self: &Shared,
+        resp: reqwest::Response,
+        acked_at_start: u64,
+        max_delta: u64,
+    ) -> axum::response::Response {
         use futures::StreamExt;
         let g = std::sync::Arc::clone(self);
         let (tx, rx) =
@@ -99,6 +104,7 @@ impl Gateway {
                 }
             }
             if let Some(n) = next_cum {
+                let n = capped_next(acked_at_start, n, max_delta);
                 {
                     let mut a = g.acked.lock().unwrap();
                     if n > *a {
@@ -141,6 +147,14 @@ async fn chat(State(g): State<Shared>, Json(body): Json<Value>) -> impl IntoResp
     // trusting we will advance the voucher to cover it on the next call.
     let streaming = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
     let acked = *g.acked.lock().unwrap();
+    // Independent per-request bound: the operator can never get us to sign a
+    // voucher advance larger than THIS request's max_tokens (the developer's own
+    // cap). Model-agnostic — no tokenizer needed — so an operator can't inflate a
+    // small request's bill. Absent max_tokens, fall back to the protocol cap.
+    let max_delta = body
+        .get("max_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(GATEWAY_DEFAULT_MAX_TOKENS);
     let sig = g.voucher_sig(acked);
 
     let resp = g
@@ -175,7 +189,7 @@ async fn chat(State(g): State<Shared>, Json(body): Json<Value>) -> impl IntoResp
     // Streaming: pass the SSE through token-by-token, strip the operator's private
     // surplus event, and advance + ack the voucher at stream end (below).
     if streaming {
-        return g.stream_through(resp);
+        return g.stream_through(resp, acked, max_delta);
     }
 
     let mut completion: Value = match resp.json().await {
@@ -200,6 +214,7 @@ async fn chat(State(g): State<Shared>, Json(body): Json<Value>) -> impl IntoResp
         .and_then(Value::as_u64)
     {
         Some(next) => {
+            let next = capped_next(acked, next, max_delta);
             let mut a = g.acked.lock().unwrap();
             if next > *a {
                 *a = next;
@@ -244,6 +259,35 @@ async fn models(State(g): State<Shared>) -> impl IntoResponse {
 
 fn err(code: &str, message: &str) -> Value {
     json!({ "error": { "type": code, "code": code, "message": message } })
+}
+
+/// Fallback per-request bound when a request omits max_tokens — the operator's
+/// own hard per-request cap (spend.rs MAX_TOKENS_PER_REQUEST), so an honest serve
+/// is never under-acked while an inflated claim is still bounded.
+const GATEWAY_DEFAULT_MAX_TOKENS: u64 = 8192;
+
+/// The cumulative this gateway will sign for, given the operator's claimed `next`:
+/// never more than `acked + max_delta`, so a single request can never bill beyond
+/// the developer's own max_tokens regardless of what the operator reports.
+fn capped_next(acked: u64, claimed: u64, max_delta: u64) -> u64 {
+    claimed.min(acked.saturating_add(max_delta))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::capped_next;
+
+    #[test]
+    fn caps_per_request_advance_at_max_tokens() {
+        // Honest serve within the request's max_tokens — passes through.
+        assert_eq!(capped_next(100, 150, 100), 150);
+        // Operator over-claims (says 5000 for a 100-token request) — capped at +100.
+        assert_eq!(capped_next(100, 5000, 100), 200);
+        // Exactly at the bound.
+        assert_eq!(capped_next(100, 200, 100), 200);
+        // Operator reports a regression (< acked) — left as-is (caller ignores it).
+        assert_eq!(capped_next(100, 90, 100), 90);
+    }
 }
 
 fn env(key: &str) -> anyhow::Result<String> {
