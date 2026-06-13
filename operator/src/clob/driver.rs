@@ -281,12 +281,20 @@ impl Clob {
     async fn chain_client(
         &self,
     ) -> anyhow::Result<Option<surplus_settlement::chain::SettlementClient>> {
+        use std::sync::atomic::Ordering;
         let ctx = self.venue.settle.as_ref().expect("checked in new()");
         let (Some(rpc), Some(key)) = (ctx.rpc_url.as_deref(), ctx.submitter_key()) else {
             return Ok(None);
         };
         let client =
             surplus_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract).await?;
+        // Verify the on-chain domain separator once before we ever submit: a wrong
+        // chain id / contract address would otherwise produce batch digests the
+        // quorum can't verify, failing every settle confusingly. Fail closed.
+        if !self.domain_checked.load(Ordering::Relaxed) {
+            client.assert_domain().await?;
+            self.domain_checked.store(true, Ordering::Relaxed);
+        }
         Ok(Some(client))
     }
 }
