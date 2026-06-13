@@ -77,6 +77,12 @@ pub struct Venue {
     /// Where redemptions get their tokens: managed vLLM, any OpenAI-compat
     /// URL, or the Tangle Router (legacy default). See `inference.rs`.
     pub(crate) inference: crate::inference::InferenceBackend,
+    /// `SURPLUS_ATTESTER_ONLY=1`: this node participates in CLOB quorum (gossip +
+    /// co-sign) but NEVER issues — it signs no maker quotes, so it mints no lots.
+    /// An attester that cannot issue cannot resell, so the "issuer must serve its
+    /// own model" rule does not apply to it (it serves nothing). This is the
+    /// honest model for an independent-DC quorum member like op5.
+    pub(crate) attester_only: bool,
 }
 
 /// Serve-side state of one open redemption: how much has been served (pending
@@ -119,18 +125,32 @@ impl Venue {
         // mode resells a third party's inference, which the lot does not bond, so
         // a node that can issue must never boot in "router" mode. Dev/chainless
         // venues (no signer, no book) keep the router fallback.
-        let is_bonded_issuer = settle
-            .as_ref()
-            .and_then(|s| s.operator_address_hex())
-            .is_some()
+        // An attester-only node co-signs the book's batches but issues nothing
+        // (see the `attester_only` field + the guards in `signed_mm_quote` /
+        // `rfq_quote`), so the own-model requirement does not bind it.
+        let attester_only = std::env::var("SURPLUS_ATTESTER_ONLY")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let is_bonded_issuer = !attester_only
+            && settle
+                .as_ref()
+                .and_then(|s| s.operator_address_hex())
+                .is_some()
             && std::env::var("SURPLUS_CLOB_OPERATORS")
                 .map(|v| !v.trim().is_empty())
                 .unwrap_or(false);
         if is_bonded_issuer && inference.mode() == "router" {
             panic!(
                 "bonded issuer must serve its own model: set SURPLUS_VLLM_MODEL or \
-                 SURPLUS_INFERENCE_URL. router-proxy mode is forbidden on an issuing \
+                 SURPLUS_INFERENCE_URL (or SURPLUS_ATTESTER_ONLY=1 for a quorum member \
+                 that does not issue). router-proxy mode is forbidden on an issuing \
                  rail (a lot must be backed by inference this operator runs, not resold)."
+            );
+        }
+        if attester_only {
+            tracing::info!(
+                "SURPLUS_ATTESTER_ONLY: this node co-signs CLOB batches but will not \
+                 quote or issue (no maker orders signed)"
             );
         }
         let venue = Venue {
@@ -144,6 +164,7 @@ impl Venue {
             redeem: Mutex::new(HashMap::new()),
             chain_cache: Mutex::new(ChainCache::default()),
             inference,
+            attester_only,
         };
         venue.load_outbox();
         venue.load_refs();
