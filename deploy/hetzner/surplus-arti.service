@@ -1,0 +1,20 @@
+[Unit]
+Description=Surplus venue Tor onion service (Arti)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Runs Arti as the venue's onion service (see arti.toml). Install Arti with
+# `cargo install arti` or the distro package; adjust ExecStart to its path.
+ExecStartPre=/usr/bin/install -d -o surplus -g surplus /opt/surplus/arti/state /opt/surplus/arti/cache
+ExecStart=/usr/local/bin/arti -c /opt/surplus/arti.toml proxy
+# Publish the generated .onion to the stable path the operator reads each time
+# Arti (re)writes it, so a fresh keypair is surfaced without a venue restart.
+ExecStartPost=/opt/surplus/publish-onion.sh
+Restart=always
+RestartSec=5
+User=surplus
+Group=surplus
+
+[Install]
+WantedBy=multi-user.target

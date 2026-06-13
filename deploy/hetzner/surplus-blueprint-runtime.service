@@ -1,7 +1,7 @@
 [Unit]
 Description=Surplus blueprint runtime (Base Sepolia blueprint 17 service 3)
-After=network.target surplus-mm-sidecar.service
-Wants=surplus-mm-sidecar.service
+After=network.target surplus-mm-sidecar.service surplus-arti.service
+Wants=surplus-mm-sidecar.service surplus-arti.service
 
 [Service]
 Environment=RUST_LOG=info,surplus_operator=debug
@@ -24,6 +24,10 @@ Environment=SURPLUS_ROUTER_URL=https://router.tangle.tools
 # SURPLUS_INFERENCE_URL=<openai-compat-url> (+ SURPLUS_INFERENCE_API_KEY).
 Environment=SURPLUS_INFERENCE_URL=<issuer-openai-compatible-backend>
 Environment=SURPLUS_OPERATOR_ADDR=127.0.0.1:9400
+# Tor onion endpoint: Arti (surplus-arti.service) generates it; publish-onion.sh
+# writes the hostname here and the operator surfaces it over /health. PRIVACY_MODE
+# also routes outbound inference through Arti's SOCKS proxy.
+Environment=SURPLUS_ONION_FILE=/opt/surplus/onion-hostname
 Environment=SURPLUS_MM_SIZE=2000000
 Environment=SURPLUS_MM_LEVELS=4
 Environment=SURPLUS_CHAIN_ID=84532
