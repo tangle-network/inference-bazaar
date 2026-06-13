@@ -13,6 +13,8 @@
 # Usage:
 #   scripts/prove-batch.sh execute              # validate the guest (no proof)
 #   scripts/prove-batch.sh groth16              # produce a real proof (heavy; docker)
+#   scripts/prove-batch.sh submit               # produce a proof AND settle it on-chain
+#                                               #   (needs SURPLUS_RPC_URL + SURPLUS_SUBMITTER_KEY)
 #   scripts/prove-batch.sh vkey                 # print the program verification key
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -33,9 +35,17 @@ case "$MODE" in
     ( cd zk && cargo run -q --release -p surplus-batch-prover --bin vkey )
     exit 0
     ;;
-  execute|groth16)
+  execute|groth16|submit)
     BOOK_ID="${SURPLUS_CLOB_BOOK:-0x0000000000000000000000000000000000000000000000000000000000000000}"
     INSTRUMENT="${SURPLUS_INSTRUMENT:-anthropic/claude-opus-4-8:output}"
+    PROVE_MODE="$MODE"
+    SUBMIT_ARGS=()
+    if [[ "$MODE" == "submit" ]]; then
+      PROVE_MODE="groth16"
+      : "${SURPLUS_RPC_URL:?submit needs SURPLUS_RPC_URL}"
+      : "${SURPLUS_SUBMITTER_KEY:?submit needs SURPLUS_SUBMITTER_KEY}"
+      SUBMIT_ARGS=(--submit --rpc "$SURPLUS_RPC_URL" --key "$SURPLUS_SUBMITTER_KEY")
+    fi
     echo "→ generating a real mutually-signed crossing order set…"
     cargo run -q -p surplus-settlement --example sign_fixture -- \
       --chain-id "$CHAIN_ID" --contract "$CONTRACT" > /tmp/surplus-orders.json
@@ -43,9 +53,10 @@ case "$MODE" in
     SP1_PROVER=cpu "$PROVE" --orders /tmp/surplus-orders.json \
       --instrument "$INSTRUMENT" --tick 1 --min-qty 1 \
       --chain-id "$CHAIN_ID" --contract "$CONTRACT" --book-id "$BOOK_ID" \
-      --mode "$MODE" --out /tmp/surplus-proof.json
+      --mode "$PROVE_MODE" --out /tmp/surplus-proof.json "${SUBMIT_ARGS[@]}"
+    [[ "$MODE" == "submit" ]] && { echo "submitted ✓"; exit 0; }
     ;;
-  *) echo "unknown mode: $MODE (execute|groth16|vkey)"; exit 1 ;;
+  *) echo "unknown mode: $MODE (execute|groth16|submit|vkey)"; exit 1 ;;
 esac
 
 VKEY="$( cd zk && cargo run -q --release -p surplus-batch-prover --bin vkey )"
