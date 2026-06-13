@@ -9,6 +9,7 @@ import {
 } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import { formatUnits, keccak256, toBytes } from 'viem'
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { Identicon } from '@tangle-network/blueprint-ui/components'
 import type { Address, Hex } from 'viem'
 import { PageHeader } from '~/components/PageHeader'
@@ -23,7 +24,7 @@ import {
   SERVE_TYPES,
   SETTLEMENT,
   SETTLEMENT_ABI,
-  SPEND_TYPES,
+  SPEND_PERMIT_TYPES,
   useMyLots,
   type CreditLot,
 } from '~/lib/settlement'
@@ -41,14 +42,16 @@ const REDEEM_ABI = [
  * operator (through the Tangle Router), sign the receipt, settle on-chain.
  */
 /**
- * The headline consumption path: ONE wallet signature mints a bearer API key
- * for this lot. After that it's a vanilla OpenAI client — base_url + api_key —
- * no wallet, no per-request signatures. The key is shown exactly once; only
- * its hash is registered with the issuer.
+ * The headline consumption path (spend channel — see docs/specs/spend-rail.md).
+ * ONE wallet signature delegates a fresh **session key** to draw down this lot.
+ * The session key drives the surplus gateway, which signs per-request vouchers
+ * invisibly — so it's a vanilla OpenAI client (base_url + api_key), no wallet in
+ * the request path, and the operator can NEVER bill more than the gateway signs.
+ * The session key is shown once; run the gateway with it (locally for zero trust).
  */
 function ApiKeyMint({ lot, venueUrl }: { lot: CreditLot; venueUrl: string }) {
   const { signTypedDataAsync } = useSignTypedData()
-  const [minted, setMinted] = useState<{ key: string; model: string } | null>(null)
+  const [minted, setMinted] = useState<{ sessionPriv: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -57,26 +60,32 @@ function ApiKeyMint({ lot, venueUrl }: { lot: CreditLot; venueUrl: string }) {
     setBusy(true)
     setError(null)
     try {
-      const secret = crypto.getRandomValues(new Uint8Array(16))
-      const payload = new Uint8Array([...toBytes(lot.lotId), ...toBytes(lot.issuer), ...secret])
-      const key = 'sk-surplus-' + btoa(String.fromCharCode(...payload)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
-      const keyHash = keccak256(toBytes(key))
+      // Fresh ephemeral session keypair — capped, expiring, revocable; its whole
+      // blast radius is this one lot. The gateway holds it; the wallet signs once.
+      const sessionPriv = generatePrivateKey()
+      const sessionKey = privateKeyToAccount(sessionPriv).address
       const maxTokens = BigInt(lot.qtyTokens - lot.lockedTokens)
       const expiry = BigInt(Math.min(Number(lot.expiry) - 300, Math.floor(Date.now() / 1000) + 30 * 86400))
-      const signature = await signTypedDataAsync({
+      const holderSig = await signTypedDataAsync({
         domain: EIP712_DOMAIN,
-        types: SPEND_TYPES,
-        primaryType: 'SpendKeyAuth',
-        message: { lotId: lot.lotId, keyHash, maxTokens, expiry },
+        types: SPEND_PERMIT_TYPES,
+        primaryType: 'SpendPermit',
+        message: { lotId: lot.lotId, sessionKey, maxTokens, expiry },
       })
       const res = await fetch(`${venueUrl}/v1/spend-keys`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ lotId: lot.lotId, keyHash, maxTokens: Number(maxTokens), expiry: Number(expiry), signature }),
+        body: JSON.stringify({
+          lotId: lot.lotId,
+          sessionKey,
+          maxTokens: Number(maxTokens),
+          expiry: Number(expiry),
+          holderSig,
+        }),
       })
       if (!res.ok) throw new Error(await res.text())
-      const out = await res.json()
-      setMinted({ key, model: out.model })
+      await res.json()
+      setMinted({ sessionPriv })
     } catch (e) {
       setError(e instanceof Error ? e.message.split('\n')[0]! : String(e))
     } finally {
@@ -85,26 +94,40 @@ function ApiKeyMint({ lot, venueUrl }: { lot: CreditLot; venueUrl: string }) {
   }
 
   if (minted) {
-    const snippet = `client = OpenAI(base_url="${venueUrl}/v1", api_key="${minted.key}")`
+    const run = [
+      `SURPLUS_SESSION_KEY=${minted.sessionPriv} \\`,
+      `SURPLUS_OPERATOR_URL=${venueUrl} \\`,
+      `SURPLUS_LOT_ID=${lot.lotId} \\`,
+      `SURPLUS_CHAIN_ID=${CHAIN.id} SURPLUS_SETTLEMENT_ADDR=${SETTLEMENT.address} \\`,
+      `surplus-gateway`,
+    ].join('\n')
+    const snippet = `client = OpenAI(base_url="http://127.0.0.1:8088/v1", api_key="sk-surplus")`
+    const copyAll = `${run}\n\n# then:\n${snippet}`
     return (
       <div className="w-full rounded-[10px] border border-[var(--s-accent)]/30 bg-[var(--s-accent-soft)] px-4 py-3">
         <div className="flex items-center justify-between gap-3">
-          <span className="mono-label !text-[var(--s-accent)]">API key — shown once, store it now</span>
+          <span className="mono-label !text-[var(--s-accent)]">Session key — shown once, store it now</span>
           <button
-            onClick={() => { void navigator.clipboard.writeText(minted.key); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
+            onClick={() => { void navigator.clipboard.writeText(copyAll); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
             className="font-data text-[12px] font-semibold text-[var(--s-accent)] hover:underline"
           >
-            {copied ? 'copied ✓' : 'copy key'}
+            {copied ? 'copied ✓' : 'copy setup'}
           </button>
         </div>
-        <div className="mt-2 break-all rounded-[6px] bg-[var(--s-bg)]/60 px-3 py-2 font-data text-[12px] text-[var(--s-text)]">
-          {minted.key}
+        <div className="mt-2 font-data text-[12px] text-[var(--s-text-secondary)]">
+          Run the gateway with your session key (locally = zero trust in us):
+        </div>
+        <div className="mt-1 overflow-x-auto whitespace-pre rounded-[6px] bg-[var(--s-bg)]/60 px-3 py-2 font-data text-[12px] text-[var(--s-text)]">
+          {run}
         </div>
         <div className="mt-2 font-data text-[12px] text-[var(--s-text-secondary)]">
-          Point any OpenAI client at it — no wallet in the request path:
+          Then point any OpenAI client at it — no wallet, no per-request signing:
         </div>
         <div className="mt-1 overflow-x-auto rounded-[6px] bg-[var(--s-bg)]/60 px-3 py-2 font-data text-[12px] text-[var(--s-text-muted)]">
           {snippet}
+        </div>
+        <div className="mt-2 font-data text-[11px] text-[var(--s-text-muted)]">
+          The operator can never bill more than your gateway signs. Revoke anytime on-chain.
         </div>
       </div>
     )

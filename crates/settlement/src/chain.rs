@@ -52,14 +52,15 @@ sol! {
         function settleRedemptionAttested(bytes32 bookId, bytes32 redemptionId, uint64 servedTokens, bytes32 workCommitment, bytes[] calldata sigs) external;
         function finalizeAttested(bytes32 redemptionId) external;
         function challengeAttested(bytes32 redemptionId) external;
-        struct SpendKeyAuth {
+        struct SpendPermit {
             bytes32 lotId;
-            bytes32 keyHash;
+            address sessionKey;
             uint64 maxTokens;
             uint64 expiry;
         }
-        function settleSpend(SpendKeyAuth calldata a, uint64 servedCumulative, bytes calldata holderSig) external;
-        function spendSettled(bytes32 authDigest) external view returns (uint64);
+        function settleSpend(SpendPermit calldata permit, bytes calldata holderSig, uint64 servedCumulative, bytes calldata voucherSig) external;
+        function spendSettled(bytes32 permitDigest) external view returns (uint64);
+        function spendRevoked(bytes32 permitDigest) external view returns (bool);
         function claimDefault(bytes32 redemptionId) external returns (uint256);
         function registerBook(bytes32 bookId, address[] calldata signers, uint16 threshold, uint16 bookFeeBps, address bookFeeRecipient) external;
         function rotateAttesters(bytes32 bookId, address[] calldata signers, uint16 threshold) external;
@@ -243,25 +244,35 @@ impl SettlementClient {
         Ok(())
     }
 
-    /// Settle the cumulative tokens served against a spend-key authorization.
+    /// Settle the cumulative tokens the consumer's session key acknowledged on a
+    /// spend channel. `served_cumulative` MUST be covered by `voucher_sig` (signed
+    /// by `session_key`), so the operator cannot settle more than the consumer
+    /// signed — over-billing is impossible.
+    #[allow(clippy::too_many_arguments)]
     pub async fn settle_spend(
         &self,
         lot_id: B256,
-        key_hash: B256,
+        session_key: Address,
         max_tokens: u64,
         expiry: u64,
-        served_cumulative: u64,
         holder_sig: Vec<u8>,
+        served_cumulative: u64,
+        voucher_sig: Vec<u8>,
     ) -> anyhow::Result<B256> {
-        let auth = ISurplusSettlement::SpendKeyAuth {
+        let permit = ISurplusSettlement::SpendPermit {
             lotId: lot_id,
-            keyHash: key_hash,
+            sessionKey: session_key,
             maxTokens: max_tokens,
             expiry,
         };
         let receipt = self
             .contract
-            .settleSpend(auth, served_cumulative, holder_sig.into())
+            .settleSpend(
+                permit,
+                holder_sig.into(),
+                served_cumulative,
+                voucher_sig.into(),
+            )
             .send()
             .await?
             .get_receipt()
@@ -270,8 +281,12 @@ impl SettlementClient {
         Ok(receipt.transaction_hash)
     }
 
-    pub async fn spend_settled(&self, auth_digest: B256) -> anyhow::Result<u64> {
-        Ok(self.contract.spendSettled(auth_digest).call().await?)
+    pub async fn spend_settled(&self, permit_digest: B256) -> anyhow::Result<u64> {
+        Ok(self.contract.spendSettled(permit_digest).call().await?)
+    }
+
+    pub async fn spend_revoked(&self, permit_digest: B256) -> anyhow::Result<bool> {
+        Ok(self.contract.spendRevoked(permit_digest).call().await?)
     }
 
     /// Open a redemption; returns the redemption id from the event.

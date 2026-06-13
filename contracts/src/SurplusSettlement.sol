@@ -123,19 +123,27 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         bytes32 attestedWork;
     }
 
-    /// One wallet signature that turns a lot into an API key: the holder
-    /// authorizes the key whose keccak256 is `keyHash` to draw down `lotId`,
-    /// up to `maxTokens` cumulative, until `expiry`. The issuer serves plain
-    /// bearer-authenticated requests off-chain and presents this authorization
-    /// to settle what it served — no per-request signatures, no receipts. The
-    /// holder's protections are the cap, on-chain revocation, the issuer's
-    /// collateral + slashable bond, and that the signature binds to the
-    /// CURRENT holder (reselling the lot invalidates every outstanding key).
-    struct SpendKeyAuth {
+    /// The spend rail is a one-way payment channel (see docs/specs/spend-rail.md).
+    /// `SpendPermit`: ONE holder wallet signature delegates an ephemeral
+    /// `sessionKey` to draw down `lotId` up to `maxTokens` until `expiry`. The
+    /// session key is a capped, expiring, revocable hot key whose entire blast
+    /// radius is this one lot — the holder's wallet is never used again for it.
+    struct SpendPermit {
         bytes32 lotId;
-        bytes32 keyHash;
+        address sessionKey;
         uint64 maxTokens;
         uint64 expiry;
+    }
+
+    /// `SpendVoucher`: the consumer's session key signs the cumulative tokens it
+    /// acknowledges were served. `settleSpend` can settle ONLY up to a
+    /// `servedCumulative` the session key signed — so the operator, which does
+    /// not hold that key, CANNOT over-bill. This is the cryptographic core that
+    /// replaces "trust the meter within the cap" with "the consumer signed it."
+    struct SpendVoucher {
+        bytes32 lotId;
+        address sessionKey;
+        uint64 servedCumulative;
     }
 
     struct DefaultRecord {
@@ -154,10 +162,15 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
     /// served is the authenticity gap this closes.
     bytes32 public constant RECEIPT_TYPEHASH =
         keccak256("RedemptionReceipt(bytes32 redemptionId,uint64 servedTokens,bytes32 workCommitment)");
-    /// One signature turns a lot into a bearer API key (the spend rail): the
-    /// holder authorizes cumulative metered spend up to `maxTokens` until `expiry`.
-    bytes32 public constant SPEND_TYPEHASH =
-        keccak256("SpendKeyAuth(bytes32 lotId,bytes32 keyHash,uint64 maxTokens,uint64 expiry)");
+    /// Spend rail (one-way payment channel). The holder signs a `SpendPermit`
+    /// ONCE to delegate a session key; the session key signs a `SpendVoucher`
+    /// per request acknowledging the cumulative tokens served. `settleSpend`
+    /// settles only up to a voucher the session key signed, so over-billing is
+    /// impossible by construction (the operator can't forge the voucher).
+    bytes32 public constant SPEND_PERMIT_TYPEHASH =
+        keccak256("SpendPermit(bytes32 lotId,address sessionKey,uint64 maxTokens,uint64 expiry)");
+    bytes32 public constant SPEND_VOUCHER_TYPEHASH =
+        keccak256("SpendVoucher(bytes32 lotId,address sessionKey,uint64 servedCumulative)");
     bytes32 public constant BATCH_TYPEHASH =
         keccak256("SettlementBatch(bytes32 bookId,uint64 batchNonce,bytes32 fillsHash)");
 
@@ -213,8 +226,8 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
     mapping(bytes32 => Redemption) public redemptions;
     mapping(bytes32 => bytes32) public openRedemptionOf; // lotId => open redemption id
 
-    mapping(bytes32 => uint64) public spendSettled; // spend-auth digest => cumulative tokens settled
-    mapping(bytes32 => bool) public spendRevoked; // spend-auth digest => holder killed the key
+    mapping(bytes32 => uint64) public spendSettled; // permit digest => cumulative tokens settled
+    mapping(bytes32 => bool) public spendRevoked; // permit digest => holder killed the channel
 
     /// Sentinel issuing-book for lots minted outside any book (the `settleFills`
     /// path). `registerBook` rejects it, so no quorum can ever match it.
@@ -779,50 +792,82 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         emit RedemptionSettled(redemptionId, servedTokens, debit, workCommitment);
     }
 
-    function spendAuthDigest(SpendKeyAuth calldata a) public view returns (bytes32) {
-        return _hashTypedDataV4(keccak256(abi.encode(SPEND_TYPEHASH, a.lotId, a.keyHash, a.maxTokens, a.expiry)));
+    /// The digest the HOLDER signs once to open the channel (delegate a session key).
+    function spendPermitDigest(SpendPermit calldata p) public view returns (bytes32) {
+        return
+            _hashTypedDataV4(keccak256(abi.encode(SPEND_PERMIT_TYPEHASH, p.lotId, p.sessionKey, p.maxTokens, p.expiry)));
     }
 
-    /// Settle the cumulative tokens served against a spend-key authorization.
-    /// Cumulative semantics make this idempotent and monotone: replaying an old
-    /// total is a no-op revert, and the issuer can flush at any cadence. The
-    /// signature must recover to the lot's CURRENT holder, so a resold lot's
-    /// outstanding keys die at the transfer. Settlement must land before the
-    /// lot (and the auth) expire — after expiry the remaining value is the
-    /// holder's to reclaim, so an issuer that serves without flushing eats it.
-    function settleSpend(SpendKeyAuth calldata a, uint64 servedCumulative, bytes calldata holderSig) external {
-        Lot storage lot = lots[a.lotId];
-        if (lot.holder == address(0)) revert LotNotFound(a.lotId);
-        if (block.timestamp > lot.expiry) revert LotIsExpired(a.lotId);
-        bytes32 digest = spendAuthDigest(a);
-        if (spendRevoked[digest]) revert SpendKeyIsRevoked(digest);
-        if (block.timestamp > a.expiry) revert SpendAuthExpired(digest);
-        if (ECDSA.recover(digest, holderSig) != lot.holder) revert BadSpendAuth(digest);
-        if (servedCumulative > a.maxTokens) revert SpendCapExceeded(a.maxTokens, servedCumulative);
-        uint64 settled = spendSettled[digest];
-        if (servedCumulative <= settled) revert NothingToSettle(digest);
+    /// The digest the SESSION KEY signs per request to acknowledge cumulative
+    /// tokens served. The operator can only settle up to a value signed here.
+    function spendVoucherDigest(
+        bytes32 lotId,
+        address sessionKey,
+        uint64 servedCumulative
+    )
+        public
+        view
+        returns (bytes32)
+    {
+        return _hashTypedDataV4(keccak256(abi.encode(SPEND_VOUCHER_TYPEHASH, lotId, sessionKey, servedCumulative)));
+    }
+
+    /// Settle the cumulative tokens the CONSUMER acknowledged on a spend channel.
+    ///
+    /// Over-billing is impossible by construction: `servedCumulative` must be
+    /// signed by `permit.sessionKey` (the consumer's gateway key, which the
+    /// operator does not hold), and the holder must have authorized that session
+    /// key for this lot. The operator can present no total larger than the
+    /// consumer signed. Cumulative + monotone, so flush at any cadence and replays
+    /// no-op; permissionless (keeper-friendly) because a higher amount is
+    /// unforgeable. The holder's sig must recover to the lot's CURRENT holder, so
+    /// a resold lot's outstanding channels die at transfer; settlement must land
+    /// before the lot/permit expire (after expiry the value is the holder's to
+    /// reclaim — an operator that serves without flushing eats it, by design).
+    function settleSpend(
+        SpendPermit calldata permit,
+        bytes calldata holderSig,
+        uint64 servedCumulative,
+        bytes calldata voucherSig
+    )
+        external
+    {
+        Lot storage lot = lots[permit.lotId];
+        if (lot.holder == address(0)) revert LotNotFound(permit.lotId);
+        if (block.timestamp > lot.expiry) revert LotIsExpired(permit.lotId);
+        bytes32 pd = spendPermitDigest(permit);
+        if (spendRevoked[pd]) revert SpendKeyIsRevoked(pd);
+        if (block.timestamp > permit.expiry) revert SpendAuthExpired(pd);
+        // The holder authorized this session key (binds to the CURRENT holder).
+        if (ECDSA.recover(pd, holderSig) != lot.holder) revert BadSpendAuth(pd);
+        // The consumer's session key acknowledged exactly this cumulative total.
+        bytes32 vd = spendVoucherDigest(permit.lotId, permit.sessionKey, servedCumulative);
+        if (ECDSA.recover(vd, voucherSig) != permit.sessionKey) revert BadSpendAuth(pd);
+        if (servedCumulative > permit.maxTokens) revert SpendCapExceeded(permit.maxTokens, servedCumulative);
+        uint64 settled = spendSettled[pd];
+        if (servedCumulative <= settled) revert NothingToSettle(pd);
         uint64 delta = servedCumulative - settled;
         uint64 avail = lot.qtyTokens - lot.lockedTokens;
         if (delta > avail) revert LotQtyUnavailable(avail, delta);
-        spendSettled[digest] = servedCumulative;
+        spendSettled[pd] = servedCumulative;
         uint256 debit = (uint256(lot.notionalMicro) * delta) / lot.qtyTokens;
         lot.qtyTokens -= delta;
         lot.notionalMicro -= uint128(debit);
         liability[lot.issuer] -= debit;
-        if (lot.qtyTokens == 0) delete lots[a.lotId];
-        emit SpendSettled(digest, a.lotId, delta, servedCumulative, debit);
+        if (lot.qtyTokens == 0) delete lots[permit.lotId];
+        emit SpendSettled(pd, permit.lotId, delta, servedCumulative, debit);
     }
 
-    /// Emergency brake for a leaked key: the holder kills the authorization
-    /// on-chain. Anything the issuer already served but has not yet settled is
-    /// the issuer's loss — revocation is immediate and total.
-    function revokeSpendKey(SpendKeyAuth calldata a) external {
-        Lot storage lot = lots[a.lotId];
-        if (lot.holder == address(0)) revert LotNotFound(a.lotId);
-        if (lot.holder != msg.sender) revert NotLotHolder(a.lotId);
-        bytes32 digest = spendAuthDigest(a);
+    /// Emergency brake for a leaked session key: the holder kills the channel
+    /// on-chain. Anything the operator already served but has not yet settled is
+    /// the operator's loss — revocation is immediate and total.
+    function revokeSpendKey(SpendPermit calldata permit) external {
+        Lot storage lot = lots[permit.lotId];
+        if (lot.holder == address(0)) revert LotNotFound(permit.lotId);
+        if (lot.holder != msg.sender) revert NotLotHolder(permit.lotId);
+        bytes32 digest = spendPermitDigest(permit);
         spendRevoked[digest] = true;
-        emit SpendKeyRevoked(digest, a.lotId);
+        emit SpendKeyRevoked(digest, permit.lotId);
     }
 
     /// The "definitely": deadline missed → the holder is made whole in cash from
