@@ -4,9 +4,9 @@
 # ai-trading-blueprint lifecycle but for a token-credit market: list an
 # instrument, start/stop making a market, push a reference price, and tick.
 #
-# This is the manifest shape; wiring the on-chain job handlers (the full
-# `surplus-operator` bin behind the `blueprint` feature) is the next step after
-# the lite operator e2e passes.
+# Job handlers are wired in operator/src/bin/blueprint.rs (the full
+# `surplus-operator` bin, built with `--features blueprint`); the on-chain
+# manager is contracts/src/SurplusBSM.sol (see [blueprint.manager] below).
 
 [blueprint]
 name = "surplus"
@@ -15,6 +15,23 @@ author = "Tangle"
 license = "MIT OR Apache-2.0"
 category = "inference-market"
 
+# The Blueprint Service Manager: the on-chain hook surface (operator/service
+# lifecycle, membership tracking, job attribution) and the slashing origin for
+# redemption defaults. Deployed + bootstrapped by contracts/script/Deploy.s.sol
+# (or the Tangle runtime); set the address per network.
+[blueprint.manager]
+evm = "SurplusBSM"
+address = ""
+
+# Membership is an INSTANCE-level setting chosen at service-request time. The
+# manager supports BOTH models with the same code path — it records the set, it
+# never gates the protocol's own join/leave:
+#   - fixed:   operator set frozen at onServiceInitialized (= the approvers).
+#   - dynamic: operators may join/leave a live instance (onOperatorJoined/Left).
+[blueprint.membership]
+models = ["fixed", "dynamic"]
+default = "fixed"
+
 [blueprint.operator]
 # The full operator binary registered on-chain (built with --features blueprint).
 binary = "surplus-operator"
@@ -22,36 +39,44 @@ binary = "surplus-operator"
 http_port = 9100
 
 # Jobs the blueprint exposes. IDs follow the trading-blueprint convention
-# (provision/configure/start/stop/status + a periodic tick).
+# (provision/configure/start/stop/status + a periodic tick). Handlers live in
+# operator/src/bin/blueprint.rs::router(); only the routed IDs below are served.
+#
+# IMPORTANT — positional indexing: in compact-definition deployments the runtime
+# assigns positional job indices in declaration order, so workflow_tick (the 6th
+# entry) lands at index 5 (operator/src/bin/blueprint.rs WORKFLOW_TICK_JOB_COMPACT).
+# Jobs 1/2/3 are therefore reserved placeholders that hold those positions; they
+# are NOT yet implemented (no handler — a call to them is unserved). Do not remove
+# them without also fixing the compact index.
 [[blueprint.jobs]]
 id = 0
 name = "list_instrument"
-description = "List a (model, tokenKind) credit market with tick size + min qty."
+description = "List a (model, tokenKind) credit market with tick size + min qty. [implemented]"
 
 [[blueprint.jobs]]
 id = 1
 name = "configure"
-description = "Set quoting params + risk limits for an instrument."
+description = "RESERVED placeholder (not implemented): set quoting params + risk limits."
 
 [[blueprint.jobs]]
 id = 2
 name = "start_making"
-description = "Begin making a market in an instrument (enable the tick)."
+description = "RESERVED placeholder (not implemented): begin making a market (enable the tick)."
 
 [[blueprint.jobs]]
 id = 3
 name = "stop_making"
-description = "Stop making a market (pull quotes, disable the tick)."
+description = "RESERVED placeholder (not implemented): stop making a market (pull quotes)."
 
 [[blueprint.jobs]]
 id = 4
 name = "status"
-description = "Operator health, instruments, inventory, PnL."
+description = "Operator health, instruments, inventory, PnL. [implemented]"
 
 [[blueprint.jobs]]
 id = 30
 name = "workflow_tick"
-description = "Periodic tick: pull reference price, fetch sidecar quotes, place/update quotes."
+description = "Periodic tick: pull reference price, fetch sidecar quotes, place/update quotes. [implemented]"
 
 # Settlement: the legacy rails (chosen per order, never hard-wired) plus the
 # firm rail — EIP-712 signed orders cleared atomically on SurplusSettlement.
