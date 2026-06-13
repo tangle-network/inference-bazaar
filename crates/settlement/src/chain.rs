@@ -51,6 +51,7 @@ sol! {
         function settleRedemption(bytes32 redemptionId, uint64 servedTokens, bytes32 workCommitment, bytes calldata holderSig) external;
         function settleRedemptionAttested(bytes32 bookId, bytes32 redemptionId, uint64 servedTokens, bytes32 workCommitment, bytes[] calldata sigs) external;
         function finalizeAttested(bytes32 redemptionId) external;
+        function lotBook(bytes32 lotId) external view returns (bytes32);
         function challengeAttested(bytes32 redemptionId) external;
         struct SpendPermit {
             bytes32 lotId;
@@ -353,6 +354,49 @@ impl SettlementClient {
         Ok(())
     }
 
+    /// The book a lot was minted into (NO_BOOK for trustless `settleFills` lots,
+    /// which cannot be attested). Needed to drive `settleRedemptionAttested`.
+    pub async fn lot_book(&self, lot_id: B256) -> anyhow::Result<B256> {
+        Ok(self.contract.lotBook(lot_id).call().await?)
+    }
+
+    /// Attest service for a redemption the holder won't receipt: the issuing
+    /// book's quorum signs `receiptDigest(rid, served, work)`, posting a
+    /// challengeable claim. Saves the operator from an unjust default+slash.
+    pub async fn settle_redemption_attested(
+        &self,
+        book_id: B256,
+        redemption_id: B256,
+        served: u64,
+        work_commitment: B256,
+        sigs: Vec<Vec<u8>>,
+    ) -> anyhow::Result<B256> {
+        let sigs: Vec<alloy_primitives::Bytes> = sigs.into_iter().map(Into::into).collect();
+        let r = self
+            .contract
+            .settleRedemptionAttested(book_id, redemption_id, served, work_commitment, sigs)
+            .send()
+            .await?
+            .get_receipt()
+            .await?;
+        anyhow::ensure!(r.status(), "settleRedemptionAttested reverted");
+        Ok(r.transaction_hash)
+    }
+
+    /// Finalize an unchallenged attestation once its window has passed (anyone
+    /// may call; the settlement is exactly what the quorum vouched).
+    pub async fn finalize_attested(&self, redemption_id: B256) -> anyhow::Result<B256> {
+        let r = self
+            .contract
+            .finalizeAttested(redemption_id)
+            .send()
+            .await?
+            .get_receipt()
+            .await?;
+        anyhow::ensure!(r.status(), "finalizeAttested reverted");
+        Ok(r.transaction_hash)
+    }
+
     pub async fn claim_default(&self, redemption_id: B256) -> anyhow::Result<U256> {
         let receipt = self
             .contract
@@ -480,6 +524,37 @@ impl SettlementClient {
             .await?;
         anyhow::ensure!(receipt.status(), "settleBatchAttested reverted");
         Ok(receipt.transaction_hash)
+    }
+
+    /// Attested submit returning the minted lot ids (FillSettled events), so a
+    /// caller can drive an attested redemption of a batch-minted lot.
+    pub async fn settle_batch_attested_with_lots(
+        &self,
+        book_id: B256,
+        batch: &Batch,
+        sigs: Vec<Vec<u8>>,
+    ) -> anyhow::Result<(B256, Vec<B256>)> {
+        let fills: Vec<_> = batch.batch_fills().iter().map(to_batch_fill).collect();
+        let sigs: Vec<alloy_primitives::Bytes> = sigs.into_iter().map(Into::into).collect();
+        let receipt = self
+            .contract
+            .settleBatchAttested(book_id, fills, sigs)
+            .send()
+            .await?
+            .get_receipt()
+            .await?;
+        anyhow::ensure!(receipt.status(), "settleBatchAttested reverted");
+        let lots = receipt
+            .logs()
+            .iter()
+            .filter_map(|log| {
+                log.log_decode::<ISurplusSettlement::FillSettled>()
+                    .ok()
+                    .map(|l| l.inner.lotId)
+            })
+            .filter(|l| *l != B256::ZERO)
+            .collect();
+        Ok((receipt.transaction_hash, lots))
     }
 
     pub async fn settle_batch_proven(

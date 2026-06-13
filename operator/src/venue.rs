@@ -89,6 +89,15 @@ pub struct Venue {
 pub(crate) struct RedeemProgress {
     pub served: u64,
     pub used_auths: HashSet<surplus_settlement::core::alloy_primitives::B256>,
+    /// The latest work commitment served (the one the holder's receipt covers).
+    /// `Some` once anything has been served; the attestation pump needs it to
+    /// vouch service when the holder won't sign.
+    #[serde(default)]
+    pub work: Option<surplus_settlement::core::alloy_primitives::B256>,
+    /// Unix time of the last serve. The attestation pump waits a grace past this
+    /// for the holder's receipt before vouching service via the quorum.
+    #[serde(default)]
+    pub served_at: u64,
 }
 
 #[derive(Default, Clone, Copy)]

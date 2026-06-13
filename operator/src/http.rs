@@ -58,6 +58,9 @@ pub fn rate_limited(app: Router) -> Router {
 /// Fills clear without any external poke; failures requeue and retry on the
 /// next tick. Spawned by both the lite and the blueprint bins.
 pub fn spawn_auto_flush(venue: Shared) {
+    // Anti-grief: vouch service for served-but-unreceipted redemptions through the
+    // quorum and finalize them, so a non-signing holder can't force a default.
+    crate::redeem::spawn_redeem_attest(venue.clone());
     let interval = std::env::var("SURPLUS_FLUSH_INTERVAL_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
