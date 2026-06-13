@@ -276,6 +276,7 @@ impl SpendSvc {
         };
         let mut j = self.state.lock().unwrap();
         j.permits.insert(body.session_key, stored);
+        crate::metrics::inc(crate::metrics::names::SPEND_KEYS);
         self.persist(&j);
         Ok(json!({
             "sessionKey": format!("{:#x}", body.session_key),
@@ -441,6 +442,7 @@ impl SpendSvc {
         {
             let mut j = self.state.lock().unwrap();
             j.served.insert(permit.session_key, total);
+            crate::metrics::inc_by(crate::metrics::names::SPEND_SERVED_TOKENS, used);
             self.persist(&j);
         }
 
@@ -592,7 +594,9 @@ impl SpendSvc {
             {
                 Ok(tx) => {
                     let mut j = self.state.lock().unwrap();
+                    let delta = vcum - j.settled.get(&permit.session_key).copied().unwrap_or(0);
                     j.settled.insert(permit.session_key, vcum);
+                    crate::metrics::inc_by(crate::metrics::names::SPEND_SETTLED_TOKENS, delta);
                     self.persist(&j);
                     settled_count += 1;
                     tracing::info!(lot = %format!("{:#x}", permit.lot_id), served = vcum, tx = %format!("{tx:#x}"), "spend settled");

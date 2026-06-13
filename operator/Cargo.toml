@@ -52,14 +52,14 @@ futures = "0.3"
 async-trait = "0.1"
 
 # On-chain blueprint deps — pulled only with `--features blueprint`.
-blueprint-sdk = { version = "0.2.0-alpha.6", features = ["std", "tangle", "macros"], optional = true }
+blueprint-sdk = { version = "=0.2.0-alpha.8", features = ["std", "tangle", "macros"], optional = true }
 alloy-sol-types = { version = "1", optional = true }
 
 # PKI gossip mesh for the shared CLOB — pulled only with `--features mesh`.
 # Same versions the lock already resolves via blueprint-sdk, so one copy of
 # everything (alloy-primitives is unified at one version — Address IS Address).
-blueprint-networking = { version = "0.2.0-alpha.7", optional = true }
-blueprint-crypto = { version = "0.2.0-alpha.7", features = ["k256"], optional = true }
+blueprint-networking = { version = "=0.2.0-alpha.7", optional = true }
+blueprint-crypto = { version = "=0.2.0-alpha.7", features = ["k256"], optional = true }
 libp2p = { version = "0.54.1", default-features = false, optional = true }
 crossbeam-channel = { version = "0.5", optional = true }
 # Same bincode the mesh receivers decode with (varint envelope — see mesh.rs).

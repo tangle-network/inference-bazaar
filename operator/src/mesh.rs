@@ -41,10 +41,6 @@ use crate::venue::Venue;
 
 pub type MeshHandle = NetworkServiceHandle<K256Ecdsa>;
 
-/// How long a proposer waits for peer co-signatures before settling for what it
-/// has (quorum-or-carry is decided by `aggregate_attestation` either way).
-const ATTEST_TIMEOUT: Duration = Duration::from_secs(8);
-
 /// Everything that travels the mesh, on one topic.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -75,14 +71,17 @@ pub struct MeshNet {
     handle: MeshHandle,
     msg_id: AtomicU64,
     pending: Mutex<HashMap<B256, mpsc::UnboundedSender<Attestation>>>,
+    /// Epoch-derived co-signature wait — never overruns a short epoch (M7).
+    attest_deadline: Duration,
 }
 
 impl MeshNet {
-    pub fn new(handle: MeshHandle) -> Arc<Self> {
+    pub fn new(handle: MeshHandle, epoch_secs: u64) -> Arc<Self> {
         Arc::new(MeshNet {
             handle,
             msg_id: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
+            attest_deadline: crate::clob::attest_deadline(epoch_secs),
         })
     }
 
@@ -147,7 +146,7 @@ impl ClobNet for MeshNet {
         self.broadcast(&MeshWire::Proposal(wire.clone()));
 
         let mut out = Vec::new();
-        let deadline = tokio::time::Instant::now() + ATTEST_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + self.attest_deadline;
         while out.len() < want {
             match tokio::time::timeout_at(deadline, rx.recv()).await {
                 Ok(Some(att)) => out.push(att),
@@ -283,7 +282,7 @@ pub fn start(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<(SharedClob, 
     .map_err(|e| anyhow::anyhow!("mesh service: {e}"))?;
     let handle = service.start();
 
-    let net = MeshNet::new(handle.clone());
+    let net = MeshNet::new(handle.clone(), cfg.epoch_secs);
     let clob = Arc::new(Clob::with_net(venue, cfg, net.clone())?);
     spawn_mesh_loop(clob.clone(), net, handle);
     crate::clob::spawn_membership_reconciler(clob.clone());

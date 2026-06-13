@@ -11040,4 +11040,4 @@ checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 [[patch.unused]]
 name = "core2"
 version = "0.4.0"
-source = "git+https://github.com/tangle-network/core2?branch=master#f09d72153a7ec5977277bea83fc7d7b1a8fec8d6"
+source = "git+https://github.com/tangle-network/core2?rev=f09d72153a7ec5977277bea83fc7d7b1a8fec8d6#f09d72153a7ec5977277bea83fc7d7b1a8fec8d6"

@@ -7,7 +7,7 @@ members = ["crates/orderbook", "crates/settlement-core", "crates/matcher", "crat
 
 # blueprint-sdk (alpha) pulls core2 transitively via libp2p-core -> multihash,
 # and core2 was yanked from crates.io. Point at the same git copy the reference
-# blueprints use so the graph resolves. Unused (a harmless warning) until the
-# operator's `blueprint` feature is on.
+# blueprints use so the graph resolves. Pinned by rev (not branch) so a
+# force-push upstream can't silently change our build (audit M5).
 [patch.crates-io]
-core2 = { git = "https://github.com/tangle-network/core2", branch = "master" }
+core2 = { git = "https://github.com/tangle-network/core2", rev = "f09d72153a7ec5977277bea83fc7d7b1a8fec8d6" }

@@ -3,7 +3,8 @@
 // epoch, the peer co-signs, and the 2-of-2 attested batch settles on the real
 // tsUSD rail. Run: FUNDER_KEY=0x... node scripts/clob-e2e-live.mjs
 import { createPublicClient, createWalletClient, http, parseAbi, parseAbiItem, keccak256, toHex, zeroHash } from 'viem'
-import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts'
+import { privateKeyToAccount } from 'viem/accounts'
+import { ephemeralKey } from './_keys.mjs'
 import { baseSepolia } from 'viem/chains'
 import fs from 'node:fs'
 
@@ -17,14 +18,8 @@ const BOOK = process.env.BOOK ?? '0x00000000000000000000000000000000000000000000
 const FUNDER_KEY = process.env.FUNDER_KEY
 if (!FUNDER_KEY) throw new Error('FUNDER_KEY required (gas for the fresh traders)')
 
-const keyOf = (path) => {
-  if (fs.existsSync(path)) return fs.readFileSync(path, 'utf8').trim()
-  const k = generatePrivateKey()
-  fs.writeFileSync(path, k, { mode: 0o600 })
-  return k
-}
-const seller = privateKeyToAccount(keyOf('/tmp/surplus-clob-seller.key'))
-const buyer = privateKeyToAccount(keyOf('/tmp/surplus-clob-buyer.key'))
+const seller = privateKeyToAccount(ephemeralKey('clob-seller'))
+const buyer = privateKeyToAccount(ephemeralKey('clob-buyer'))
 const funder = createWalletClient({ account: privateKeyToAccount(FUNDER_KEY), chain: baseSepolia, transport: http(RPC) })
 
 const settlementAbi = parseAbi([

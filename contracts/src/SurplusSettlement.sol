@@ -576,10 +576,10 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         if (buyerBal < cost) revert InsufficientBalance(buyerBal, cost);
         balances[buy.trader] = buyerBal - cost;
         uint256 fee = (cost * feeBps) / 10_000;
-        uint256 bookFee = (cost * bookFeeBps) / 10_000;
-        balances[sell.trader] += cost - fee - bookFee;
+        uint256 bookFeeAmt = (cost * bookFeeBps) / 10_000;
+        balances[sell.trader] += cost - fee - bookFeeAmt;
         balances[feeRecipient] += fee;
-        if (bookFee > 0) balances[bookFeeRecipient] += bookFee;
+        if (bookFeeAmt > 0) balances[bookFeeRecipient] += bookFeeAmt;
 
         bytes32 newLotId = keccak256(abi.encode(buyHash, sellHash, sellFilled));
         if (sell.lotId == bytes32(0)) {

@@ -88,7 +88,7 @@ fn route_cost(path: &str) -> f64 {
         "/clob/propose" => 5.0,
         "/rfq" | "/rfq/fill" | "/redeem/receipt" | "/settlement/flush" => 3.0,
         "/clob/order" | "/clob/gossip" | "/clob/cancel" | "/clob/cancel-gossip" => 2.0,
-        "/health" => 0.0,
+        "/health" | "/metrics" => 0.0,
         _ => 1.0,
     }
 }

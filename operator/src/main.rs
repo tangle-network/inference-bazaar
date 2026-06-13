@@ -13,6 +13,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
+    surplus_operator::metrics::init();
     let venue = Arc::new(Venue::from_env());
     http::spawn_auto_flush(venue.clone());
     let mut app = http::router(venue.clone());
