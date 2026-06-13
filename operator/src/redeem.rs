@@ -127,6 +127,91 @@ pub fn output_hash(completion: &Value) -> B256 {
     keccak256(&buf)
 }
 
+/// Settlement-tx margin: never attest within this of the redemption deadline, so
+/// the settle lands before the holder could `claimDefault`.
+const REDEEM_ATTEST_MARGIN_SECS: u64 = 120;
+
+fn env_secs(key: &str, default: u64) -> u64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+/// What the attestation pump should do with one served redemption.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum RedeemAction {
+    /// Vouch service through the quorum (holder hasn't receipted in time).
+    Attest,
+    /// Challenge window passed on a posted attestation — settle it.
+    Finalize,
+    /// Settled / defaulted / gone — forget it.
+    Drop,
+    /// Holder still within grace, or window still open — do nothing yet.
+    Wait,
+}
+
+/// Pure policy for the attestation pump (unit-tested). `state` is the on-chain
+/// `RedemptionState` (1=Open, 2=Contested; 0/3/4 = None/Settled/Defaulted → done).
+pub(crate) fn redeem_attest_action(
+    state: u8,
+    served: u64,
+    now: u64,
+    served_at: u64,
+    deadline: u64,
+    challenge_deadline: u64,
+    grace: u64,
+    margin: u64,
+) -> RedeemAction {
+    match state {
+        1 => {
+            // Open: vouch service once the holder's grace to self-sign has passed,
+            // but only while the settle can still land before the deadline.
+            if served > 0
+                && now >= served_at.saturating_add(grace)
+                && now.saturating_add(margin) < deadline
+            {
+                RedeemAction::Attest
+            } else {
+                RedeemAction::Wait
+            }
+        }
+        2 => {
+            if now > challenge_deadline {
+                RedeemAction::Finalize
+            } else {
+                RedeemAction::Wait
+            }
+        }
+        _ => RedeemAction::Drop,
+    }
+}
+
+/// Background attestation pump — vouches service for served-but-unreceipted
+/// redemptions and finalizes them, so a non-signing holder can't grief the
+/// operator into a default+slash. No-op without the `chain` feature.
+#[cfg(feature = "chain")]
+pub fn spawn_redeem_attest(venue: std::sync::Arc<Venue>) {
+    let interval = env_secs("SURPLUS_REDEEM_ATTEST_INTERVAL_SECS", 60).max(5);
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(interval));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            match venue.attest_redemptions().await {
+                Ok(report) if report.get("attested").is_some() => {
+                    tracing::debug!(%report, "redeem-attest tick")
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!("redeem-attest tick failed: {e}"),
+            }
+        }
+    });
+}
+
+#[cfg(not(feature = "chain"))]
+pub fn spawn_redeem_attest(_venue: std::sync::Arc<Venue>) {}
+
 impl Venue {
     /// Serve one inference call against an open redemption of a lot we issued.
     #[cfg(feature = "chain")]
@@ -282,7 +367,12 @@ impl Venue {
 
         {
             let mut redeem = self.redeem.lock().unwrap();
-            redeem.entry(body.redemption_id.clone()).or_default().served = total;
+            let prog = redeem.entry(body.redemption_id.clone()).or_default();
+            prog.served = total;
+            // Record what (and when) we served so the attestation pump can vouch
+            // service if the holder never returns to sign the receipt.
+            prog.work = Some(work);
+            prog.served_at = crate::market::now_unix();
         }
         self.persist_redeem();
 
@@ -344,6 +434,96 @@ impl Venue {
         )
     }
 
+    /// Attestation pump tick: for each served-but-unreceipted redemption, vouch
+    /// service through the issuing book's quorum (so a holder can't consume
+    /// inference then force a default+slash by refusing to sign), and finalize
+    /// once the challenge window passes. Self-signs the receipt digest — complete
+    /// for a single-attester book; an N-of-M book additionally needs peer
+    /// co-signatures (the call reverts and is retried until reached).
+    #[cfg(feature = "chain")]
+    pub async fn attest_redemptions(&self) -> Result<Value, VenueError> {
+        let ctx = self.settle_ctx_pub()?;
+        let (rpc, key) = match (ctx.rpc_url.as_deref(), ctx.submitter_key()) {
+            (Some(r), Some(k)) => (r, k),
+            _ => return Ok(json!({ "mode": "dry" })),
+        };
+        let signer = ctx
+            .signer
+            .as_ref()
+            .ok_or(VenueError::SettlementUnconfigured("operator key"))?;
+        let grace = env_secs("SURPLUS_REDEEM_ATTEST_GRACE_SECS", 300);
+        let margin = REDEEM_ATTEST_MARGIN_SECS;
+
+        let pending: Vec<(String, u64, B256, u64)> = {
+            let j = self.redeem.lock().unwrap();
+            j.iter()
+                .filter_map(|(rid, p)| p.work.map(|w| (rid.clone(), p.served, w, p.served_at)))
+                .collect()
+        };
+        if pending.is_empty() {
+            return Ok(json!({ "mode": "noop" }));
+        }
+        let client = surplus_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
+            .await
+            .map_err(|e| VenueError::Chain(e.to_string()))?;
+        let now = crate::market::now_unix();
+        let (mut attested, mut finalized, mut dropped) = (0u32, 0u32, 0u32);
+        for (rid_str, served, work, served_at) in pending {
+            let Ok(rid) = rid_str.parse::<B256>() else {
+                continue;
+            };
+            let Ok(r) = client.get_redemption(rid).await else {
+                continue;
+            };
+            match redeem_attest_action(
+                r.state,
+                served,
+                now,
+                served_at,
+                r.deadline,
+                r.challengeDeadline,
+                grace,
+                margin,
+            ) {
+                RedeemAction::Attest => {
+                    let Ok(book) = client.lot_book(r.lotId).await else {
+                        continue;
+                    };
+                    let digest = surplus_settlement::receipt_digest(rid, served, work, &ctx.domain);
+                    let sig = signer.sign_digest(digest).to_vec();
+                    match client
+                        .settle_redemption_attested(book, rid, served, work, vec![sig])
+                        .await
+                    {
+                        Ok(_) => {
+                            attested += 1;
+                            tracing::info!(rid = %rid_str, served, "redemption attested (holder did not receipt)");
+                        }
+                        Err(e) => {
+                            tracing::warn!(rid = %rid_str, "settleRedemptionAttested failed (N-of-M book needs peer co-signs?): {e}");
+                        }
+                    }
+                }
+                RedeemAction::Finalize => match client.finalize_attested(rid).await {
+                    Ok(_) => {
+                        finalized += 1;
+                        self.redeem.lock().unwrap().remove(&rid_str);
+                        self.persist_redeem();
+                        tracing::info!(rid = %rid_str, "attested redemption finalized — no default");
+                    }
+                    Err(e) => tracing::warn!(rid = %rid_str, "finalizeAttested failed: {e}"),
+                },
+                RedeemAction::Drop => {
+                    self.redeem.lock().unwrap().remove(&rid_str);
+                    self.persist_redeem();
+                    dropped += 1;
+                }
+                RedeemAction::Wait => {}
+            }
+        }
+        Ok(json!({ "attested": attested, "finalized": finalized, "dropped": dropped }))
+    }
+
     #[cfg(not(feature = "chain"))]
     pub async fn redeem_serve(&self, _body: RedeemServeBody) -> Result<Value, VenueError> {
         Err(VenueError::SettlementUnconfigured(
@@ -362,6 +542,49 @@ impl Venue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attest_policy() {
+        // Open, served, holder grace passed, well before deadline -> Attest.
+        assert_eq!(
+            redeem_attest_action(1, 100, 1_000, 600, 5_000, 0, 300, 120),
+            RedeemAction::Attest
+        );
+        // Open but still within the holder's grace -> Wait.
+        assert_eq!(
+            redeem_attest_action(1, 100, 800, 600, 5_000, 0, 300, 120),
+            RedeemAction::Wait
+        );
+        // Open, grace passed, but too close to the deadline to settle safely -> Wait.
+        assert_eq!(
+            redeem_attest_action(1, 100, 4_950, 600, 5_000, 0, 300, 120),
+            RedeemAction::Wait
+        );
+        // Open but nothing served yet -> Wait.
+        assert_eq!(
+            redeem_attest_action(1, 0, 5_000, 0, 9_000, 0, 300, 120),
+            RedeemAction::Wait
+        );
+        // Contested, challenge window passed -> Finalize.
+        assert_eq!(
+            redeem_attest_action(2, 100, 2_000, 600, 5_000, 1_500, 300, 120),
+            RedeemAction::Finalize
+        );
+        // Contested, window still open -> Wait.
+        assert_eq!(
+            redeem_attest_action(2, 100, 1_400, 600, 5_000, 1_500, 300, 120),
+            RedeemAction::Wait
+        );
+        // Settled / defaulted / gone -> Drop.
+        assert_eq!(
+            redeem_attest_action(3, 100, 9, 0, 5_000, 0, 300, 120),
+            RedeemAction::Drop
+        );
+        assert_eq!(
+            redeem_attest_action(0, 0, 9, 0, 5_000, 0, 300, 120),
+            RedeemAction::Drop
+        );
+    }
     use serde_json::json;
     use surplus_settlement::core::recover_signer;
     use surplus_settlement::Signer;

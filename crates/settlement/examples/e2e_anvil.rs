@@ -15,7 +15,7 @@
 
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::sol;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use surplus_settlement::chain::SettlementClient;
 use surplus_settlement::{
     domain, instrument_hash, Batch, Order, SignedFill, Signer, SIDE_BUY, SIDE_SELL,
@@ -223,11 +223,12 @@ async fn main() -> anyhow::Result<()> {
             .map(|a| a.sign_digest(digest).to_vec())
             .collect(),
     );
-    operator
-        .settle_batch_attested(book_id, &batch, sigs[..2].to_vec())
+    let (_btx, batch_lots) = operator
+        .settle_batch_attested_with_lots(book_id, &batch, sigs[..2].to_vec())
         .await?;
+    let att_lot = batch_lots[0];
     println!(
-        "attested batch settled (2-of-3 quorum), book nonce -> {}",
+        "attested batch settled (2-of-3 quorum), book nonce -> {}, lot {att_lot:#x}",
         nonce + 1
     );
 
@@ -273,6 +274,48 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     println!("proven batch settled against strict verifier (match-in-circuit publicValues bound)");
 
-    println!("\nE2E PASS: atomic fill, receipt redemption, collateral default, attested + proven batches");
+    // ── 6. Attested redemption: the holder consumes a batch-minted lot but won't
+    //       sign the receipt. The issuing book's quorum vouches service; after the
+    //       challenge window the operator finalizes and is paid — NO unjust default
+    //       or slash (this is the anti-grief capability the operator pump drives). ─
+    let red3 = buyer_client.request_redemption(att_lot, 40_000).await?;
+    let liab_before = operator.liability_of(seller.address()).await?;
+    let defaults_before = operator.defaults_count().await?;
+    let work3 = surplus_settlement::work_commitment(
+        keccak256(b"anthropic/claude-opus-4-8:output"),
+        keccak256(br#"[{"role":"user","content":"hi"}]"#),
+        keccak256(b"attested output"),
+    );
+    // The book quorum signs the receipt digest — the holder never does.
+    let rdigest = surplus_settlement::receipt_digest(red3, 40_000, work3, &dom);
+    let rsigs = surplus_settlement::sort_quorum_sigs(
+        rdigest,
+        attesters
+            .iter()
+            .map(|a| a.sign_digest(rdigest).to_vec())
+            .collect(),
+    );
+    operator
+        .settle_redemption_attested(book_id, red3, 40_000, work3, rsigs[..2].to_vec())
+        .await?;
+    // Advance past the challenge window (deploy default 1h), then finalize.
+    raw.raw_request::<_, serde_json::Value>("evm_increaseTime".into(), (3600 + 60,))
+        .await?;
+    raw.raw_request::<_, serde_json::Value>("evm_mine".into(), ())
+        .await?;
+    operator.finalize_attested(red3).await?;
+    let liab_after = operator.liability_of(seller.address()).await?;
+    assert!(
+        liab_after < liab_before,
+        "attested redemption must free the served liability"
+    );
+    assert_eq!(
+        operator.defaults_count().await?,
+        defaults_before,
+        "no default: the operator was paid via attestation, not defaulted+slashed"
+    );
+    println!("attested redemption: quorum vouched, window passed, finalized — liability freed, no default");
+
+    println!("\nE2E PASS: fill, receipt redemption, default, attested + proven batches, attested redemption");
     Ok(())
 }
