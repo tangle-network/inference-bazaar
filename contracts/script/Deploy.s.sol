@@ -71,10 +71,35 @@ contract Deploy is Script {
         bsm.setSettlement(settlement);
         console.log("SurplusBSM wired -> settlement; tangleCore:", tangleCore);
 
+        // SP1 proven path: wire the verifier + the guest program's vkey so
+        // settleBatchProven is live. On anvil with DEPLOY_DEV_VERIFIER, use the
+        // strict mock. On real chains the owner supplies the SP1VerifierGateway
+        // address + vkey via env (SP1_VERIFIER + SP1_VKEY); absent that the proven
+        // path stays disabled (sp1Verifier == 0) until governance wires it.
+        address sp1Verifier = vm.envOr("SP1_VERIFIER", address(0));
+        bytes32 sp1Vkey = vm.envOr("SP1_VKEY", bytes32(0));
         if (vm.envOr("DEPLOY_DEV_VERIFIER", uint256(0)) == 1) {
             require(block.chainid == 31_337, "dev verifier only on anvil");
-            SP1MockVerifierStrict verifier = new SP1MockVerifierStrict();
-            console.log("SP1MockVerifierStrict:", address(verifier));
+            sp1Verifier = address(new SP1MockVerifierStrict());
+            console.log("SP1MockVerifierStrict:", sp1Verifier);
+        }
+        if (sp1Verifier != address(0)) {
+            settlement.setSp1Verifier(sp1Verifier, sp1Vkey);
+            console.log("SP1 verifier wired:", sp1Verifier);
+        }
+
+        // Register the initial settlement book (attester quorum) so the attested
+        // AND proven batch paths work from block 0. Production governance registers
+        // the real quorum post-deploy via the timelock; for dev/testnet (or when
+        // REGISTER_BOOK=1) register a single-attester book owned by the deployer.
+        if (vm.envOr("REGISTER_BOOK", uint256(0)) == 1 || block.chainid == 31_337) {
+            bytes32 bookId = vm.envOr("BOOK_ID", keccak256("surplus.book.0"));
+            address[] memory defaultAtt = new address[](1);
+            defaultAtt[0] = deployer;
+            address[] memory attesters = vm.envOr("BOOK_ATTESTERS", ",", defaultAtt);
+            uint16 threshold = uint16(vm.envOr("BOOK_THRESHOLD", uint256(1)));
+            settlement.registerBook(bookId, attesters, threshold, 0, address(0));
+            console.log("book registered:", vm.toString(bookId));
         }
 
         if (vm.envOr("USE_TIMELOCK", uint256(0)) == 1) {
