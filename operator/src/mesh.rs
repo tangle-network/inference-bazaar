@@ -233,14 +233,27 @@ pub fn start(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<(SharedClob, 
     let instance_key_pair = blueprint_crypto::k256::K256SigningKey::from_bytes(&key_bytes)
         .map_err(|e| anyhow::anyhow!("operator key as K256 secret: {e}"))?;
 
+    // STABLE libp2p identity: derive the ed25519 transport key deterministically
+    // from the operator key (hashed with a domain tag into a separate seed, so
+    // the libp2p key is not the raw k256 secret). A fresh `generate_ed25519()`
+    // each boot would change the PeerId on every restart, breaking the
+    // bootnode multiaddrs (`/ip4/…/tcp/…/p2p/<PeerId>`) cross-DC peers dial. This
+    // way the PeerId is stable across restarts AND computable offline.
+    let mut libp2p_seed = surplus_settlement::core::alloy_primitives::keccak256(
+        [key_bytes.as_slice(), b"surplus-mesh-libp2p-v1"].concat(),
+    )
+    .0;
+    let local_key = libp2p::identity::Keypair::ed25519_from_bytes(&mut libp2p_seed)
+        .map_err(|e| anyhow::anyhow!("derive stable mesh libp2p identity: {e}"))?;
+
     let allowed: HashSet<Address> = cfg.operators.iter().map(|(a, _)| *a).collect();
     let network_config = NetworkConfig::<K256Ecdsa> {
         network_name: "surplus-clob".into(),
         // Per-deployment topic scoping: one mesh per (chain, settlement contract).
         instance_id: format!("{chain_id}-{contract:#x}"),
         instance_key_pair,
-        local_key: libp2p::identity::Keypair::generate_ed25519(),
-        listen_addr: listen,
+        local_key,
+        listen_addr: listen.clone(),
         target_peer_count: cfg.operators.len() as u32,
         bootstrap_peers,
         enable_mdns: std::env::var("SURPLUS_MESH_MDNS").as_deref() == Ok("1"),
@@ -257,6 +270,7 @@ pub fn start(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<(SharedClob, 
     )
     .map_err(|e| anyhow::anyhow!("mesh service: {e}"))?;
     let handle = service.start();
+    let local_peer_id = handle.local_peer_id;
 
     let net = MeshNet::new(handle.clone(), cfg.epoch_secs);
     let clob = Arc::new(Clob::with_net(venue, cfg, net.clone())?);
@@ -264,6 +278,11 @@ pub fn start(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<(SharedClob, 
     crate::clob::spawn_membership_reconciler(clob.clone());
     spawn_epoch_loop(clob.clone());
     let router = crate::clob::router(clob.clone());
-    tracing::info!(instance = %format!("{chain_id}-{contract:#x}"), "shared CLOB on PKI mesh");
+    tracing::info!(
+        instance = %format!("{chain_id}-{contract:#x}"),
+        peer_id = %local_peer_id,
+        %listen,
+        "shared CLOB on PKI mesh — peers dial /ip4/<this-host>/tcp/<port>/p2p/<peer_id> via SURPLUS_MESH_BOOTNODES"
+    );
     Ok((clob, router))
 }
