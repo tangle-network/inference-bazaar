@@ -22,7 +22,7 @@ Run these before/after a deploy — they are the end-to-end proof:
 
 ## 1. Contracts (governance-owned)
 
-`cd contracts && forge script script/Deploy.s.sol --broadcast` with:
+`deploy/deploy-surplus.sh` (wraps `Deploy.s.sol`, captures addresses into `deploy/.env.deployed` + the manifest). Env:
 
 - `PAYMENT_TOKEN` = the real testnet USDC (a standard ERC20 — **not** fee-on-
   transfer/rebasing; the solvency model assumes `transferFrom` moves exactly
