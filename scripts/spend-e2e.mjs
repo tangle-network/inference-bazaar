@@ -24,6 +24,7 @@ const settlementAbi = parseAbi([
   'function lots(bytes32) view returns (address holder, address issuer, bytes32 instrument, uint64 qtyTokens, uint64 lockedTokens, uint64 expiry, uint128 notionalMicro)',
   'function spendSettled(bytes32 permitDigest) view returns (uint64)',
   'function spendPermitDigest((bytes32 lotId, address sessionKey, uint64 maxTokens, uint64 expiry) p) view returns (bytes32)',
+  'function revokeSpendKey((bytes32 lotId, address sessionKey, uint64 maxTokens, uint64 expiry) permit)',
 ])
 const usdAbi = parseAbi([
   'function mint(address to, uint256 amount)',
@@ -248,10 +249,34 @@ const lot3 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, f
 if (Number(settledStream) !== served1 + served2 + served3)
   throw new Error(`stream settled ${settledStream} != ${served1 + served2 + served3}`)
 
+// ── 7. Revocation: holder kills the channel on-chain; the operator stops ──────
+// serving it. revokeSpendKey makes settleSpend revert, so continued service is
+// unbillable — the flush reconciler must drop the channel and refuse it.
+await tx(await bw.writeContract({
+  address: SETTLEMENT, abi: settlementAbi, functionName: 'revokeSpendKey',
+  args: [{ lotId, sessionKey: session.address, maxTokens, expiry }],
+}))
+const reconciled = await post(`${VENUE}/v1/spend/flush`, {})
+if ((reconciled.dropped ?? 0) < 1) throw new Error(`flush did not drop the revoked channel: ${JSON.stringify(reconciled)}`)
+const afterRevoke = await fetch(`${VENUE}/v1/chat/completions`, {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    'x-surplus-session': session.address,
+    'x-surplus-voucher-cum': String(acked),
+    'x-surplus-voucher-sig': await voucherSig(session, acked),
+  },
+  body: JSON.stringify({ model: reg.model, messages: [{ role: 'user', content: 'after revoke' }], max_tokens: 256 }),
+})
+if (afterRevoke.status !== 401) throw new Error(`post-revocation serve returned ${afterRevoke.status}, want 401 (channel dropped)`)
+const settledAfterRevoke = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [digest] })
+if (Number(settledAfterRevoke) !== Number(settledStream)) throw new Error('revoked channel must not bill further')
+
 console.log('')
 console.log('=== SPEND RAIL PROVEN ===')
 console.log(`one wallet signature -> session key ${session.address.slice(0, 10)}…`)
 console.log(`vanilla OpenAI calls served: ${served1} + ${served2} tokens, zero per-request user crypto`)
 console.log(`forged voucher (not the session key) refused; over-billing impossible by construction`)
 console.log(`streamed ${served3} tokens token-by-token (SSE: "${streamedText.trim()}"), billed identically`)
+console.log(`holder revoked on-chain -> operator dropped the channel and refused further service (401)`)
 console.log(`on-chain: lot ${Number(lot0[3])} -> ${Number(lot3[3])} tokens, spendSettled = ${settledStream}`)

@@ -307,10 +307,16 @@ impl Venue {
             prog.served
         };
         let release_auth = || {
-            let mut redeem = self.redeem.lock().unwrap();
-            if let Some(prog) = redeem.get_mut(&body.redemption_id) {
-                prog.used_auths.remove(&digest);
+            {
+                let mut redeem = self.redeem.lock().unwrap();
+                if let Some(prog) = redeem.get_mut(&body.redemption_id) {
+                    prog.used_auths.remove(&digest);
+                }
             }
+            // Durably forget the freed reservation too: otherwise a crash after a
+            // failed inference leaves the journaled auth consumed, blocking a
+            // legitimate retry of the same request.
+            self.persist_redeem();
         };
         let remaining = r.qtyTokens.saturating_sub(already);
         if remaining == 0 {
@@ -319,6 +325,11 @@ impl Venue {
                 "redemption quota fully served — submit the receipt".into(),
             ));
         }
+        // Journal the reservation BEFORE serving. If we crash mid-inference, the
+        // consumed authorization survives the restart, so a captured ServeRequest
+        // cannot be replayed to serve the same digest twice (re-opening quota the
+        // operator already spent compute on but can never settle past qtyTokens).
+        self.persist_redeem();
 
         // Serve REAL inference from the issuer's configured backend — its own
         // managed vLLM, any OpenAI-compatible endpoint, or the Tangle Router

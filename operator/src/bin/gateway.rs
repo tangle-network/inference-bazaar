@@ -144,6 +144,7 @@ impl Gateway {
                 }
             };
             if advanced {
+                self.persist_acked();
                 self.send_ack(ch, next).await;
             }
         }
@@ -197,11 +198,17 @@ impl Gateway {
             }
             if let Some(n) = next_cum {
                 let n = capped_next(acked_at_start, n, max_delta);
-                {
+                let advanced = {
                     let mut a = ch.acked.lock().unwrap();
                     if n > *a {
                         *a = n;
+                        true
+                    } else {
+                        false
                     }
+                };
+                if advanced {
+                    g.persist_acked();
                 }
                 g.send_ack(&ch, n).await;
             }
@@ -227,6 +234,27 @@ impl Gateway {
             .await;
         if let Err(e) = r {
             tracing::warn!("trailing ack failed (next request will catch up): {e}");
+        }
+    }
+
+    /// Journal every channel's acked cumulative so a gateway restart resumes from
+    /// the last voucher it signed instead of 0. Without this, a restart re-signs
+    /// `cum=0`, the operator rejects it as stale (it already served more) with a
+    /// `409`, and the channel is permanently bricked. Atomic tmp+rename;
+    /// best-effort (a write failure only costs a resync on the next restart).
+    fn persist_acked(&self) {
+        let Some(path) = state_path() else { return };
+        let map: serde_json::Map<String, Value> = self
+            .channels
+            .iter()
+            .map(|c| (format!("{:#x}", c.lot_id), json!(*c.acked.lock().unwrap())))
+            .collect();
+        let tmp = path.with_extension("json.tmp");
+        let Ok(bytes) = serde_json::to_vec(&map) else {
+            return;
+        };
+        if let Err(e) = std::fs::write(&tmp, &bytes).and_then(|()| std::fs::rename(&tmp, &path)) {
+            tracing::warn!("gateway state write failed: {e}");
         }
     }
 }
@@ -281,6 +309,7 @@ async fn chat(State(g): State<Shared>, Json(body): Json<Value>) -> impl IntoResp
                     // it, then fail over to the next.
                     if ch.max_tokens > 0 {
                         *ch.acked.lock().unwrap() = ch.max_tokens;
+                        g.persist_acked();
                     }
                 }
                 let code = StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
@@ -427,6 +456,24 @@ fn env(key: &str) -> anyhow::Result<String> {
     std::env::var(key).map_err(|_| anyhow::anyhow!("missing required env {key}"))
 }
 
+/// Where per-channel acked cumulatives are journaled (see `persist_acked`). Unset
+/// = no persistence (a restart resets acked → risks a stale-voucher brick), so a
+/// production gateway should always set it.
+fn state_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("SURPLUS_GATEWAY_STATE").map(std::path::PathBuf::from)
+}
+
+/// Restore per-channel acked cumulatives saved by `persist_acked`, keyed by lotId.
+fn load_acked_map() -> std::collections::HashMap<String, u64> {
+    let Some(path) = state_path() else {
+        return Default::default();
+    };
+    let Ok(raw) = std::fs::read(&path) else {
+        return Default::default();
+    };
+    serde_json::from_slice(&raw).unwrap_or_default()
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -435,7 +482,17 @@ async fn main() -> anyhow::Result<()> {
 
     let listen =
         std::env::var("SURPLUS_GATEWAY_LISTEN").unwrap_or_else(|_| "127.0.0.1:8088".into());
-    let channels: Vec<Arc<Channel>> = load_channels()?.into_iter().map(Arc::new).collect();
+    // Seed each channel's acked from the journal so a restart resumes where it
+    // left off (an un-seeded restart would re-sign cum=0 and brick the channel on
+    // the operator's stale-voucher check).
+    let mut loaded = load_channels()?;
+    let saved = load_acked_map();
+    for c in &mut loaded {
+        if let Some(&a) = saved.get(&format!("{:#x}", c.lot_id)) {
+            *c.acked.get_mut().unwrap() = a;
+        }
+    }
+    let channels: Vec<Arc<Channel>> = loaded.into_iter().map(Arc::new).collect();
     let gateway = Arc::new(Gateway {
         chain_id: U256::from(env("SURPLUS_CHAIN_ID")?.parse::<u64>()?),
         settlement: env("SURPLUS_SETTLEMENT_ADDR")?

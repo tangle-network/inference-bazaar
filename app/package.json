@@ -7,7 +7,8 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "preview": "vite preview --port 4173",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx src/lib/router.check.ts"
   },
   "dependencies": {
     "@lobehub/icons-static-svg": "^1.91.0",
@@ -35,6 +36,7 @@
     "@unocss/preset-wind4": "^66.5.10",
     "@vitejs/plugin-react": "^4.3.4",
     "events": "^3.3.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.8.0",
     "unocss": "^66.5.10",
     "vite": "^6.0.0",
