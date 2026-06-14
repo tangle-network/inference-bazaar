@@ -87,9 +87,12 @@ Settlement can be permissionless because a higher amount is unforgeable.
 - **Consumer take-and-don't-pay:** bounded to ~one request (operator stops
   serving when the voucher stops advancing).
 - **Resale / revocation / expiry:** `settleSpend` reverts on a stale holder,
-  `revokeSpend`, or expiry — so the holder is always protected; the operator
-  must mirror these checks before serving so it does not serve into a settlement
-  it cannot land (its risk, by design).
+  `revokeSpend`, or expiry — so the holder is always protected. The operator
+  mirrors these so it does not serve into a settlement it cannot land: expiry is
+  checked per request in `authorize`; revocation/resale are reconciled each flush
+  cycle (`reconcile_revocations` drops any channel the holder revoked or whose lot
+  changed hands). Any unbillable service is bounded to one flush interval — the
+  operator's risk, by design.
 - **Operator down:** the lot is still the consumer's; unspent value returns as
   cash via `reclaimExpired` / `claimDefault` — **permissionless on-chain calls,
   no dependency on Surplus.**

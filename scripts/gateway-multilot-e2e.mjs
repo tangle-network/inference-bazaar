@@ -125,28 +125,72 @@ const cfg = [
   { lotId: c2.lotId, sessionKey: c2.priv, operatorUrl: VENUE, model: c2.model, maxTokens: Number(CAP2), expiry: Number(expiry) },
 ]
 const cfgPath = `/tmp/surplus-gw-${process.pid}.json`
+const statePath = `/tmp/surplus-gw-state-${process.pid}.json`
 const fs = await import('node:fs')
 fs.writeFileSync(cfgPath, JSON.stringify(cfg))
 
-const gw = spawn(GATEWAY_BIN, [], {
-  env: {
-    ...process.env,
-    SURPLUS_GATEWAY_CONFIG: cfgPath,
-    SURPLUS_CHAIN_ID: '31337',
-    SURPLUS_SETTLEMENT_ADDR: SETTLEMENT,
-    SURPLUS_GATEWAY_LISTEN: `127.0.0.1:${GW_PORT}`,
-    RUST_LOG: 'warn',
-  },
-  stdio: 'inherit',
-})
-const shutdown = () => { try { gw.kill() } catch {} ; try { fs.unlinkSync(cfgPath) } catch {} }
+// The gateway is restartable: it journals each channel's acked cumulative to
+// SURPLUS_GATEWAY_STATE so a restart resumes instead of re-signing cum=0.
+function startGateway() {
+  return spawn(GATEWAY_BIN, [], {
+    env: {
+      ...process.env,
+      SURPLUS_GATEWAY_CONFIG: cfgPath,
+      SURPLUS_GATEWAY_STATE: statePath,
+      SURPLUS_CHAIN_ID: '31337',
+      SURPLUS_SETTLEMENT_ADDR: SETTLEMENT,
+      SURPLUS_GATEWAY_LISTEN: `127.0.0.1:${GW_PORT}`,
+      RUST_LOG: 'warn',
+    },
+    stdio: 'inherit',
+  })
+}
+let gw = startGateway()
+const shutdown = () => {
+  try { gw.kill() } catch {}
+  try { fs.unlinkSync(cfgPath) } catch {}
+  try { fs.unlinkSync(statePath) } catch {}
+}
 process.on('exit', shutdown)
 
-try {
-  // Wait for the gateway to accept connections.
+async function waitReady() {
   for (let i = 0; i < 50; i++) {
-    try { await fetch(`${GW}/v1/models`); break } catch { await sleep(100) }
+    try { await fetch(`${GW}/v1/models`); return } catch { await sleep(100) }
   }
+  throw new Error('gateway never came up')
+}
+
+// Stream a completion THROUGH the gateway and assert: the client gets real SSE
+// content AND the private `surplus` event was stripped (never leaks downstream).
+async function streamCall(model, content, maxTokens) {
+  const r = await fetch(`${GW}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content }], max_tokens: maxTokens, stream: true }),
+  })
+  if (!r.ok) throw new Error(`stream call -> ${r.status}: ${await r.text()}`)
+  const ct = r.headers.get('content-type') || ''
+  if (!ct.includes('text/event-stream')) throw new Error(`expected SSE, got "${ct}"`)
+  let buf = '', text = '', sawSurplus = false
+  const dec = new TextDecoder()
+  for await (const chunk of r.body) {
+    buf += dec.decode(chunk, { stream: true })
+    let idx
+    while ((idx = buf.indexOf('\n\n')) !== -1) {
+      const ev = buf.slice(0, idx); buf = buf.slice(idx + 2)
+      const line = ev.split('\n').find((l) => l.startsWith('data:'))
+      if (!line) continue
+      const data = line.slice(5).trim()
+      if (data === '[DONE]') continue
+      if (data.includes('"surplus"')) { sawSurplus = true; continue }
+      try { const j = JSON.parse(data); const d = j.choices?.[0]?.delta?.content; if (d) text += d } catch {}
+    }
+  }
+  return { text, sawSurplus }
+}
+
+try {
+  await waitReady()
 
   // ── Drive a VANILLA OpenAI client at the gateway — no per-request crypto ─────
   // Five calls; lot1 (cap 200) drains after two 137-token replies, then the
@@ -159,7 +203,7 @@ try {
     if (!r.choices?.[0]?.message?.content) throw new Error(`call ${i} returned no content`)
     ok++
   }
-  console.log(`${ok}/5 calls served seamlessly through one gateway over two lots`)
+  console.log(`${ok}/5 buffered calls served seamlessly through one gateway over two lots`)
 
   // ── Flush + prove BOTH lots debited on-chain ────────────────────────────────
   await post(`${VENUE}/v1/spend/flush`, {})
@@ -167,16 +211,42 @@ try {
     address: SETTLEMENT, abi: settlementAbi, functionName: 'spendPermitDigest',
     args: [{ lotId, sessionKey: lotId === c1.lotId ? c1.session.address : c2.session.address, maxTokens: cap, expiry }],
   })
-  const settled1 = Number(await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [await digest(c1.lotId, CAP1)] }))
-  const settled2 = Number(await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [await digest(c2.lotId, CAP2)] }))
-
+  const settledOf = async (lotId, cap) => Number(await pub.readContract({
+    address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [await digest(lotId, cap)],
+  }))
+  const settled1 = await settledOf(c1.lotId, CAP1)
+  const settled2a = await settledOf(c2.lotId, CAP2)
   if (settled1 !== Number(CAP1)) throw new Error(`lot1 should be fully drained to ${CAP1}, got ${settled1}`)
-  if (settled2 <= 0) throw new Error(`lot2 should have served the failover calls, got ${settled2}`)
+  if (settled2a <= 0) throw new Error(`lot2 should have served the failover calls, got ${settled2a}`)
+
+  // ── STREAMING through the gateway: SSE content flows, surplus event stripped ─
+  const s = await streamCall(c2.model, 'stream please', 256)
+  if (!s.text) throw new Error('streamed call produced no content')
+  if (s.sawSurplus) throw new Error('gateway leaked the private surplus event to the client')
+  console.log(`streamed ${s.text.length} chars through the gateway (surplus event stripped)`)
+
+  // ── RESTART: prove acked persistence (a reset-to-0 gateway would 409-brick) ──
+  gw.kill(); await sleep(300)
+  const stateRaw = JSON.parse(fs.readFileSync(statePath, 'utf8'))
+  const lot2Acked = Number(stateRaw[c2.lotId.toLowerCase()] ?? stateRaw[c2.lotId] ?? 0)
+  if (lot2Acked <= 0) throw new Error(`expected persisted acked for lot2, got ${JSON.stringify(stateRaw)}`)
+  gw = startGateway()
+  await waitReady()
+  const after = await post(`${GW}/v1/chat/completions`, {
+    model: c2.model, messages: [{ role: 'user', content: 'post-restart' }], max_tokens: 256,
+  })
+  if (!after.choices?.[0]?.message?.content) throw new Error('post-restart call returned no content (channel bricked?)')
+
+  // The streaming + post-restart calls must have billed lot2 further on-chain.
+  await post(`${VENUE}/v1/spend/flush`, {})
+  const settled2b = await settledOf(c2.lotId, CAP2)
+  if (settled2b <= settled2a) throw new Error(`lot2 should bill further after stream+restart: ${settled2a} -> ${settled2b}`)
 
   console.log('')
   console.log('=== MULTI-LOT GATEWAY PROVEN ===')
-  console.log(`one OpenAI base_url, two lots: lot1 drained to ${settled1}, then failed over to lot2 (${settled2})`)
-  console.log(`a wallet of lots behind one API key — seamless across operators`)
+  console.log(`one OpenAI base_url, two lots: lot1 drained to ${settled1}, then failed over to lot2 (${settled2a})`)
+  console.log(`streaming served through the gateway; acked persisted (${lot2Acked}) so a restart resumed and billed on to ${settled2b}`)
+  console.log(`a wallet of lots behind one API key — seamless across operators, restart-safe`)
 } finally {
   shutdown()
 }

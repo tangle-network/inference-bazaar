@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "typescript": "^5.8.0",
+    "viem": "^2.52.2",
     "vitest": "^3.0.0"
   },
   "packageManager": "pnpm@10.33.4"

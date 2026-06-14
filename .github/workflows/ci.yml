@@ -160,6 +160,42 @@ jobs:
       - name: settlement spine e2e
         run: bash scripts/settlement-e2e.sh
 
+  money-e2e:
+    # The consumption money-paths the live operator + gateway actually run,
+    # against anvil + a stub OpenAI upstream. settlement-e2e covers the trader
+    # spine; this covers the developer spine — without it, a regression in the
+    # spend rail, voucher metering, multi-lot routing, streaming, or the
+    # gateway's restart-safe acked persistence would ship unnoticed.
+    name: e2e (spend + multi-lot gateway on anvil)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.91"
+      - uses: Swatinem/rust-cache@v2
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: install solidity dependencies (soldeer)
+        working-directory: contracts
+        run: forge soldeer install
+      # viem is a root devDependency so `node scripts/*.mjs` resolves it.
+      - name: install node deps (viem for the e2e drivers)
+        run: pnpm install --frozen-lockfile
+      # Developer path: one-signature key mint → vanilla OpenAI calls (buffered +
+      # streamed) → on-chain billing → forged voucher refused.
+      - name: spend-rail e2e
+        run: bash scripts/spend-e2e.sh
+      # A wallet of lots behind one API key: drain + failover, streaming through
+      # the gateway, and a gateway restart that resumes from persisted acked
+      # (a reset-to-0 restart would brick the channel on the stale-voucher check).
+      - name: multi-lot gateway e2e
+        run: bash scripts/gateway-multilot-e2e.sh
+
   ts:
     name: ts (packages + app)
     runs-on: ubuntu-latest
@@ -183,3 +219,9 @@ jobs:
       - name: app — typecheck
         working-directory: app
         run: pnpm typecheck
+      # The SOR math (planRoute / nbboTouch) is load-bearing for cross-venue
+      # routing; router.check.ts asserts it on hand-built ladders. (The live
+      # aggregation is proven separately by the layer2 / nbbo-sor e2e.)
+      - name: app — test (SOR unit checks)
+        working-directory: app
+        run: pnpm test

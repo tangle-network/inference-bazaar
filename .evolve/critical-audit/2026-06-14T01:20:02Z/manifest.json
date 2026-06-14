@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-06-14T01:20:02Z",
+  "scope": [
+    "operator/src/spend.rs",
+    "operator/src/redeem.rs",
+    "operator/src/bin/gateway.rs",
+    "scripts/spend-e2e.mjs",
+    "scripts/gateway-multilot-e2e.mjs",
+    ".github/workflows/ci.yml",
+    "app/src/pages/Buy.tsx",
+    "contracts/script/Deploy.s.sol"
+  ],
+  "base": "origin/main",
+  "head": "fc76be1c8e2bd1c1ea222f8317e8754667c3eb49",
+  "project_type": "rust",
+  "flags": ["money-path-scope", "harden"],
+  "reviewers": { "A": "6/10", "B": "6/10", "C": "6/10" },
+  "findings_count_by_severity": { "CRITICAL": 0, "HIGH": 6, "MEDIUM": 9, "LOW": 4 },
+  "verdict_initial": "REQUEST_CHANGES",
+  "verdict_after_harden": "APPROVE",
+  "high_resolved": 6,
+  "high_still_present": 0
+}

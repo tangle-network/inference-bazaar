@@ -657,18 +657,12 @@ impl SpendSvc {
                 )
             }
         };
-        let pending: Vec<(StoredPermit, u64, String)> = {
-            let j = self.state.lock().unwrap();
-            j.permits
-                .iter()
-                .filter_map(|(sk, p)| {
-                    let (vcum, vsig) = j.voucher.get(sk).cloned().unwrap_or((0, String::new()));
-                    let settled = j.settled.get(sk).copied().unwrap_or(0);
-                    (vcum > settled && !vsig.is_empty()).then(|| (p.clone(), vcum, vsig))
-                })
-                .collect()
-        };
-        if pending.is_empty() {
+        // Cheap exit (no RPC) when there are no channels at all: nothing to settle
+        // and nothing to reconcile. We connect whenever channels exist — even with
+        // no pending vouchers — so on-chain revocation/resale is honored on idle
+        // channels too.
+        let has_channels = { !self.state.lock().unwrap().permits.is_empty() };
+        if !has_channels {
             return Ok(json!({ "mode": "noop", "settled": 0 }));
         }
         let client =
@@ -688,6 +682,25 @@ impl SpendSvc {
             self.domain_checked
                 .store(true, std::sync::atomic::Ordering::Relaxed);
         }
+        // Mirror on-chain revocation/resale BEFORE settling: drop any channel the
+        // holder revoked or whose lot changed hands, so the serve path stops
+        // accepting it (settleSpend would revert → unbillable inference). The
+        // free-serve window is bounded to one flush interval — this is the doc's
+        // "operator must mirror these checks before serving" (spend-rail.md).
+        let dropped = self.reconcile_revocations(&client).await;
+        // Build pending AFTER reconciliation so we never attempt to settle a
+        // just-dropped (revoked/resold) channel.
+        let pending: Vec<(StoredPermit, u64, String)> = {
+            let j = self.state.lock().unwrap();
+            j.permits
+                .iter()
+                .filter_map(|(sk, p)| {
+                    let (vcum, vsig) = j.voucher.get(sk).cloned().unwrap_or((0, String::new()));
+                    let settled = j.settled.get(sk).copied().unwrap_or(0);
+                    (vcum > settled && !vsig.is_empty()).then(|| (p.clone(), vcum, vsig))
+                })
+                .collect()
+        };
         let mut settled_count = 0usize;
         let mut failures = 0usize;
         for (permit, vcum, vsig) in pending {
@@ -724,7 +737,74 @@ impl SpendSvc {
                 }
             }
         }
-        Ok(json!({ "mode": "direct", "settled": settled_count, "failed": failures }))
+        Ok(
+            json!({ "mode": "direct", "settled": settled_count, "failed": failures, "dropped": dropped.len() }),
+        )
+    }
+
+    /// Drop any spend channel the holder revoked on-chain (`revokeSpendKey`) or
+    /// whose lot was resold (current `lot.holder` no longer matches the permit's
+    /// holder). For both, `settleSpend` reverts — `SpendKeyIsRevoked` / `BadSpendAuth`
+    /// — so continuing to serve is unbillable (free) inference. On a transient RPC
+    /// error we keep the channel (fail-open on uncertainty so a flaky node never
+    /// nukes live channels); the next flush re-checks. Returns the dropped session
+    /// keys so the caller can exclude them from the settle pass.
+    #[cfg(feature = "chain")]
+    async fn reconcile_revocations(
+        &self,
+        client: &surplus_settlement::chain::SettlementClient,
+    ) -> Vec<Address> {
+        let Ok(ctx) = self.venue.settle_ctx_pub() else {
+            return Vec::new();
+        };
+        let chain_id = ctx.domain.chain_id.unwrap_or_default();
+        let permits: Vec<StoredPermit> = {
+            let j = self.state.lock().unwrap();
+            j.permits.values().cloned().collect()
+        };
+        let mut dead: Vec<(Address, B256, bool, bool)> = Vec::new();
+        for p in permits {
+            let pd = spend_permit_digest(
+                chain_id,
+                ctx.contract,
+                p.lot_id,
+                p.session_key,
+                p.max_tokens,
+                p.expiry,
+            );
+            let revoked = match client.spend_revoked(pd).await {
+                Ok(v) => v,
+                Err(_) => continue, // transient: re-check next flush
+            };
+            let resold = match client.get_lot(p.lot_id).await {
+                Ok(lot) => lot.holder != p.holder,
+                Err(_) => continue,
+            };
+            if revoked || resold {
+                dead.push((p.session_key, p.lot_id, revoked, resold));
+            }
+        }
+        if dead.is_empty() {
+            return Vec::new();
+        }
+        let mut sessions = Vec::with_capacity(dead.len());
+        {
+            let mut j = self.state.lock().unwrap();
+            for (sk, lot_id, revoked, resold) in &dead {
+                j.permits.remove(sk);
+                j.voucher.remove(sk);
+                j.served.remove(sk);
+                j.settled.remove(sk);
+                sessions.push(*sk);
+                tracing::warn!(
+                    lot = %format!("{:#x}", lot_id),
+                    revoked, resold,
+                    "spend channel dropped — refusing further service (settleSpend would revert)"
+                );
+            }
+            self.persist(&j);
+        }
+        sessions
     }
 
     #[cfg(not(feature = "chain"))]
