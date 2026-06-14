@@ -14,7 +14,7 @@ export function RouteError() {
       <div className="font-body text-[18px] font-semibold text-[var(--s-text)]">
         Something broke on this page
       </div>
-      <div className="mx-auto mt-2 max-w-[520px] truncate font-data text-[13px] text-[var(--s-text-muted)]">
+      <div className="mx-auto mt-2 max-w-[520px] truncate font-data text-[15px] text-[var(--s-text-muted)]">
         {msg}
       </div>
       <button onClick={() => window.location.reload()} className="btn-primary mt-4 h-9">

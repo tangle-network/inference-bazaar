@@ -110,12 +110,12 @@ export default function OperatorsPage() {
 
         <Panel className="mt-4" title="On-chain operator set">
           {operators.isError && (
-            <div className="px-4 py-8 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+            <div className="px-4 py-8 text-center font-data text-[15px] text-[var(--s-text-muted)]">
               Chain read failed — check RPC connectivity.
             </div>
           )}
           {operators.isLoading && (
-            <div className="px-4 py-8 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+            <div className="px-4 py-8 text-center font-data text-[15px] text-[var(--s-text-muted)]">
               Reading service operator set…
             </div>
           )}
@@ -144,7 +144,7 @@ export default function OperatorsPage() {
                     <Badge tone="emerald" icon="i-ph:shield-check-fill">bonded</Badge>
                     {serving && <Badge tone="accent">quoting</Badge>}
                   </div>
-                  <div className="mt-0.5 font-data text-[12px] text-[var(--s-text-muted)]">
+                  <div className="mt-0.5 font-data text-[15px] text-[var(--s-text-muted)]">
                     {serving
                       ? `serves the venue API · ${venue!.url.replace('https://', '')}`
                       : 'joined the operator set on-chain'}
@@ -163,7 +163,7 @@ export default function OperatorsPage() {
                       ? compactUsd(Number(issuerFunds.data[i * 2]!.result))
                       : '…'}
                   </div>
-                  <div className="font-data text-[11px] tabular-nums text-[var(--s-text-muted)]">
+                  <div className="font-data text-[12px] tabular-nums text-[var(--s-text-muted)]">
                     {issuerFunds.data?.[i * 2 + 1]?.result !== undefined
                       ? `liability ${compactUsd(Number(issuerFunds.data[i * 2 + 1]!.result))}`
                       : ''}
@@ -174,7 +174,7 @@ export default function OperatorsPage() {
           })}
         </Panel>
 
-        <div className={cn('panel mt-4 px-4 py-3 font-data text-[13px] text-[var(--s-text-muted)]')}>
+        <div className={cn('panel mt-4 px-4 py-3 font-data text-[15px] text-[var(--s-text-muted)]')}>
           Every lot is cash-collateralized at mint: the contract rejects issuance unless collateral
           covers outstanding liability plus the default penalty. Refusal to serve is slashable;
           principal never depends on the slash.{' '}

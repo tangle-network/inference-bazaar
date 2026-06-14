@@ -65,12 +65,12 @@ export function Badge({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-[5px] px-1.5 py-0.5 font-data text-[12px] font-semibold uppercase tracking-wider leading-none',
+        'inline-flex items-center gap-1 rounded-[5px] px-1.5 py-0.5 font-data text-[15px] font-semibold uppercase tracking-wider leading-none',
         className,
       )}
       style={{ color: v.fg, background: v.bg }}
     >
-      {icon && <span className={cn(icon, 'text-[12px]')} />}
+      {icon && <span className={cn(icon, 'text-[15px]')} />}
       {children}
     </span>
   )
@@ -104,10 +104,10 @@ export function Stat({
   return (
     <div className={cn('min-w-0 px-3.5 py-2.5', className)}>
       <div className="mono-label truncate">{label}</div>
-      <div className="mt-1.5 truncate font-data text-[24px] font-bold leading-none tabular-nums" style={{ color }}>
+      <div className="mt-1.5 truncate font-data text-[22px] font-bold leading-none tabular-nums" style={{ color }}>
         {value}
       </div>
-      {sub != null && <div className="mt-1.5 truncate font-data text-[12px] text-[var(--s-text-muted)]">{sub}</div>}
+      {sub != null && <div className="mt-1.5 truncate font-data text-[15px] text-[var(--s-text-muted)]">{sub}</div>}
     </div>
   )
 }
@@ -139,7 +139,7 @@ export function Segmented<T extends string>({
             onClick={() => onChange(o.value)}
             className={cn(
               'rounded-[5px] font-data font-semibold uppercase tracking-wide transition-colors',
-              size === 'sm' ? 'px-2.5 py-1 text-[11px]' : 'px-3 py-1.5 text-[12px]',
+              size === 'sm' ? 'px-2.5 py-1 text-[12px]' : 'px-3 py-1.5 text-[15px]',
               active
                 ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
                 : 'text-[var(--s-text-muted)] hover:text-[var(--s-text-secondary)]',
@@ -228,7 +228,7 @@ export function Field({
     <label className="block">
       <div className="mb-1.5 flex items-center justify-between">
         <span className="mono-label">{label}</span>
-        {hint != null && <span className="font-data text-[11px] text-[var(--s-text-muted)]">{hint}</span>}
+        {hint != null && <span className="font-data text-[12px] text-[var(--s-text-muted)]">{hint}</span>}
       </div>
       {children}
     </label>

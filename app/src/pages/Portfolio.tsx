@@ -109,24 +109,24 @@ function ApiKeyMint({ lot, venueUrl }: { lot: CreditLot; venueUrl: string }) {
           <span className="mono-label !text-[var(--s-accent)]">Session key — shown once, store it now</span>
           <button
             onClick={() => { void navigator.clipboard.writeText(copyAll); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
-            className="font-data text-[12px] font-semibold text-[var(--s-accent)] hover:underline"
+            className="font-data text-[15px] font-semibold text-[var(--s-accent)] hover:underline"
           >
             {copied ? 'copied ✓' : 'copy setup'}
           </button>
         </div>
-        <div className="mt-2 font-data text-[12px] text-[var(--s-text-secondary)]">
+        <div className="mt-2 font-data text-[15px] text-[var(--s-text-secondary)]">
           Run the gateway with your session key (locally = zero trust in us):
         </div>
-        <div className="mt-1 overflow-x-auto whitespace-pre rounded-[6px] bg-[var(--s-bg)]/60 px-3 py-2 font-data text-[12px] text-[var(--s-text)]">
+        <div className="mt-1 overflow-x-auto whitespace-pre rounded-[6px] bg-[var(--s-bg)]/60 px-3 py-2 font-data text-[15px] text-[var(--s-text)]">
           {run}
         </div>
-        <div className="mt-2 font-data text-[12px] text-[var(--s-text-secondary)]">
+        <div className="mt-2 font-data text-[15px] text-[var(--s-text-secondary)]">
           Then point any OpenAI client at it — no wallet, no per-request signing:
         </div>
-        <div className="mt-1 overflow-x-auto rounded-[6px] bg-[var(--s-bg)]/60 px-3 py-2 font-data text-[12px] text-[var(--s-text-muted)]">
+        <div className="mt-1 overflow-x-auto rounded-[6px] bg-[var(--s-bg)]/60 px-3 py-2 font-data text-[15px] text-[var(--s-text-muted)]">
           {snippet}
         </div>
-        <div className="mt-2 font-data text-[11px] text-[var(--s-text-muted)]">
+        <div className="mt-2 font-data text-[12px] text-[var(--s-text-muted)]">
           The operator can never bill more than your gateway signs. Revoke anytime on-chain.
         </div>
       </div>
@@ -137,7 +137,7 @@ function ApiKeyMint({ lot, venueUrl }: { lot: CreditLot; venueUrl: string }) {
       <button onClick={mint} disabled={busy} className="btn-primary h-9 whitespace-nowrap">
         {busy ? 'Sign in wallet…' : 'Create API key'}
       </button>
-      {error && <span className="max-w-[260px] truncate font-data text-[11px] text-[var(--s-crimson)]" title={error}>{error}</span>}
+      {error && <span className="max-w-[260px] truncate font-data text-[12px] text-[var(--s-crimson)]" title={error}>{error}</span>}
     </div>
   )
 }
@@ -277,8 +277,8 @@ function SpendLot({ lot }: { lot: CreditLot }) {
   if (served) {
     return (
       <div className="w-full rounded-[8px] border border-[var(--s-emerald)]/25 bg-[var(--s-emerald-soft)] px-3 py-2.5">
-        <p className="whitespace-pre-wrap font-body text-[13px] leading-relaxed text-[var(--s-text)]">{served.text}</p>
-        <div className="mt-1.5 font-data text-[12px] text-[var(--s-emerald)]">
+        <p className="whitespace-pre-wrap font-body text-[15px] leading-relaxed text-[var(--s-text)]">{served.text}</p>
+        <div className="mt-1.5 font-data text-[15px] text-[var(--s-emerald)]">
           {served.servedTokens} tokens debited at your locked strike — settled on-chain.
         </div>
       </div>
@@ -292,12 +292,12 @@ function SpendLot({ lot }: { lot: CreditLot }) {
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !busy && serve()}
           placeholder="Ask anything — billed to this credit"
-          className="h-10 flex-1 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-glass)] px-3 font-body text-[14px] text-[var(--s-text)] placeholder:text-[var(--s-text-subtle)] focus-ring"
+          className="h-10 flex-1 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-glass)] px-3 font-body text-[15px] text-[var(--s-text)] placeholder:text-[var(--s-text-subtle)] focus-ring"
         />
         <button onClick={serve} disabled={!!busy || !prompt.trim()} className="btn-primary h-10 shrink-0">
           {busy ?? 'Run'}
         </button>
-        {error && <span className="w-full font-data text-[11px] text-[var(--s-crimson)]">{error}</span>}
+        {error && <span className="w-full font-data text-[12px] text-[var(--s-crimson)]">{error}</span>}
       </div>
     )
   }
@@ -306,7 +306,7 @@ function SpendLot({ lot }: { lot: CreditLot }) {
       <button onClick={open} disabled={!!busy} className="btn-primary h-9">
         {busy ?? 'Spend'}
       </button>
-      {error && <span className="font-data text-[11px] text-[var(--s-crimson)]">{error}</span>}
+      {error && <span className="font-data text-[12px] text-[var(--s-crimson)]">{error}</span>}
     </div>
   )
 }
@@ -349,14 +349,14 @@ export default function PortfolioPage() {
       <div>
         <PageHeader title="Portfolio" subtitle="Your balances and credits, read from the chain." />
         <div className="flex flex-col items-center gap-4 px-6 py-20 text-center">
-          <span className="i-ph:wallet text-[40px] text-[var(--s-text-subtle)]" />
-          <p className="max-w-sm font-body text-[14px] text-[var(--s-text-muted)]">
+          <span className="i-ph:wallet text-[44px] text-[var(--s-text-subtle)]" />
+          <p className="max-w-sm font-body text-[15px] text-[var(--s-text-muted)]">
             Connect to see live Base Sepolia balances and your fills on the venue.
           </p>
           <ConnectKitButton.Custom>
             {({ show }) => (
               <button onClick={show} className="btn-primary h-11">
-                <span className="i-ph:wallet text-[16px]" /> Connect wallet
+                <span className="i-ph:wallet text-[18px]" /> Connect wallet
               </button>
             )}
           </ConnectKitButton.Custom>
@@ -375,7 +375,7 @@ export default function PortfolioPage() {
             <span className="overflow-hidden rounded-full">
               <Identicon address={address as Address} size={20} />
             </span>
-            <span className="font-data text-[13px] text-[var(--s-text-secondary)]">{truncAddr(address)}</span>
+            <span className="font-data text-[15px] text-[var(--s-text-secondary)]">{truncAddr(address)}</span>
           </span>
         }
       />
@@ -410,12 +410,12 @@ export default function PortfolioPage() {
 
         <Panel className="mt-4" title="Credit lots — on-chain">
           {lots.isLoading && (
-            <div className="px-4 py-8 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+            <div className="px-4 py-8 text-center font-data text-[15px] text-[var(--s-text-muted)]">
               Scanning SurplusSettlement fills…
             </div>
           )}
           {lots.isSuccess && (lots.data?.length ?? 0) === 0 && (
-            <div className="px-4 py-8 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+            <div className="px-4 py-8 text-center font-data text-[15px] text-[var(--s-text-muted)]">
               No credit lots in this wallet. A firm buy settles into a lot here, with its quantity,
               cost basis, expiry, and issuer.
             </div>
@@ -423,10 +423,10 @@ export default function PortfolioPage() {
           {(lots.data ?? []).map((lot) => {
             const inst = (instruments.data ?? []).find((i) => instrumentHash(i.id) === lot.instrument)
             return (
-              <div key={lot.lotId} className="flex flex-wrap items-center gap-4 border-b border-[var(--s-divider)] px-4 py-3.5 font-data text-[14px] last:border-0">
+              <div key={lot.lotId} className="flex flex-wrap items-center gap-4 border-b border-[var(--s-divider)] px-4 py-3.5 font-data text-[15px] last:border-0">
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold text-[var(--s-text)]">{inst?.id ?? `${lot.instrument.slice(0, 18)}…`}</div>
-                  <div className="mt-0.5 text-[12px] text-[var(--s-text-muted)]">
+                  <div className="mt-0.5 text-[15px] text-[var(--s-text-muted)]">
                     issuer {truncAddr(lot.issuer)} ·{' '}
                     {Number(lot.expiry) * 1000 > Date.now()
                       ? `expires in ${Math.max(1, Math.round((Number(lot.expiry) * 1000 - Date.now()) / 86_400_000))}d`
@@ -435,10 +435,10 @@ export default function PortfolioPage() {
                 </div>
                 <div className="text-right">
                   <div className="tabular-nums font-bold text-[var(--s-text)]">{tokens(Number(lot.qtyTokens))} tok</div>
-                  <div className="text-[12px] tabular-nums text-[var(--s-text-muted)]">basis {compactUsd(Number(lot.notionalMicro))}</div>
+                  <div className="text-[15px] tabular-nums text-[var(--s-text-muted)]">basis {compactUsd(Number(lot.notionalMicro))}</div>
                 </div>
                 <a
-                  className="font-data text-[12px] text-[var(--s-accent)] hover:underline"
+                  className="font-data text-[15px] text-[var(--s-accent)] hover:underline"
                   href={`${CHAIN.explorer}/tx/${lot.txHash}`}
                   target="_blank"
                   rel="noreferrer"
@@ -452,7 +452,7 @@ export default function PortfolioPage() {
         </Panel>
 
         <Panel className="mt-4" title="On-chain">
-          <div className="grid gap-1 px-4 py-4 font-data text-[14px]">
+          <div className="grid gap-1 px-4 py-4 font-data text-[15px]">
             <a
               className="text-[var(--s-accent)] hover:underline"
               href={`${CHAIN.explorer}/address/${address}`}

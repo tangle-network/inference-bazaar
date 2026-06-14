@@ -24,7 +24,7 @@ function VenueStatus() {
           health.data?.ok ? 'bg-[var(--s-emerald)]' : health.isError ? 'bg-[var(--s-crimson)]' : 'bg-[var(--s-amber)] animate-pulse',
         )}
       />
-      <span className="font-data text-[12px] tabular-nums text-[var(--s-text-muted)]">
+      <span className="font-data text-[15px] tabular-nums text-[var(--s-text-muted)]">
         {health.data?.ok ? `venue ${health.data.latencyMs}ms` : health.isError ? 'venue down' : 'venue…'}
       </span>
     </a>
@@ -50,7 +50,7 @@ function ThemeButton() {
       className="flex h-9 w-9 items-center justify-center rounded-[6px] border border-[var(--s-border)] bg-[var(--s-panel)] text-[var(--s-text-muted)] transition-colors hover:border-[var(--s-border-hover)] hover:text-[var(--s-text)]"
       title="Toggle theme"
     >
-      <span className={cn(theme === 'dark' ? 'i-ph:sun' : 'i-ph:moon', 'text-[16px]')} />
+      <span className={cn(theme === 'dark' ? 'i-ph:sun' : 'i-ph:moon', 'text-[18px]')} />
     </button>
   )
 }
@@ -78,7 +78,7 @@ function PrivacyButton() {
           : 'Privacy OFF: clearnet'
       }
     >
-      <span className={cn(on ? 'i-ph:shield-check-fill' : 'i-ph:shield', 'text-[16px]')} />
+      <span className={cn(on ? 'i-ph:shield-check-fill' : 'i-ph:shield', 'text-[18px]')} />
     </button>
   )
 }
@@ -97,7 +97,7 @@ function NavItems({ collapsed = false, onNavigate }: { collapsed?: boolean; onNa
           aria-label={collapsed ? item.label : undefined}
           className={({ isActive }) =>
             cn(
-              'group relative flex items-center rounded-[8px] font-data text-[14px] font-medium transition-colors',
+              'group relative flex items-center rounded-[8px] font-data text-[15px] font-medium transition-colors',
               collapsed ? 'h-10 w-11 justify-center px-0' : 'gap-3 px-3 py-2.5',
               isActive
                 ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
@@ -110,7 +110,7 @@ function NavItems({ collapsed = false, onNavigate }: { collapsed?: boolean; onNa
               {isActive && (
                 <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-[var(--s-accent)]" />
               )}
-              <span className={cn(item.icon, 'shrink-0 text-[19px]')} />
+              <span className={cn(item.icon, 'shrink-0 text-[18px]')} />
               {!collapsed && item.label}
             </>
           )}
@@ -157,7 +157,7 @@ export function Shell({ children }: { children: ReactNode }) {
               title="Expand sidebar"
               className="pointer-events-none absolute inset-0 flex h-10 w-10 items-center justify-center rounded-[8px] border border-[var(--s-border-hover)] bg-[var(--s-panel)] text-[var(--s-text-secondary)] opacity-0 shadow-[var(--s-shadow-pop)] transition-opacity duration-150 hover:text-[var(--s-text)] focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/brand:pointer-events-auto group-hover/brand:opacity-100"
             >
-              <span className="i-ph:caret-right-bold text-[16px]" />
+              <span className="i-ph:caret-right-bold text-[18px]" />
             </button>
           </div>
         ) : (
@@ -171,7 +171,7 @@ export function Shell({ children }: { children: ReactNode }) {
               title="Collapse sidebar"
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[var(--s-text-muted)] transition-colors hover:bg-[var(--s-panel)] hover:text-[var(--s-text)]"
             >
-              <span className="i-ph:caret-left-bold text-[16px]" />
+              <span className="i-ph:caret-left-bold text-[18px]" />
             </button>
           </div>
         )}
@@ -193,16 +193,16 @@ export function Shell({ children }: { children: ReactNode }) {
             )}
           >
             {collapsed ? (
-              <span className="i-ph:shield-check-fill text-[16px] text-[var(--s-accent)]" />
+              <span className="i-ph:shield-check-fill text-[18px] text-[var(--s-accent)]" />
             ) : (
               <>
                 <div className="flex items-center gap-2">
-                  <span className="i-ph:shield-check-fill text-[16px] text-[var(--s-accent)]" />
-                  <span className="font-data text-[12px] font-semibold uppercase tracking-wider text-[var(--s-text-secondary)]">
+                  <span className="i-ph:shield-check-fill text-[18px] text-[var(--s-accent)]" />
+                  <span className="font-data text-[15px] font-semibold uppercase tracking-wider text-[var(--s-text-secondary)]">
                     Base Sepolia
                   </span>
                 </div>
-                <p className="mt-1.5 font-data text-[12px] leading-snug text-[var(--s-text-muted)]">
+                <p className="mt-1.5 font-data text-[15px] leading-snug text-[var(--s-text-muted)]">
                   Blueprint {CHAIN.blueprintId} · service {CHAIN.serviceId}
                 </p>
               </>

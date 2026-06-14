@@ -38,7 +38,7 @@ export default function ActivityPage() {
           {entries.map((e, i) => (
             <div
               key={i}
-              className="border-b border-[var(--s-divider)] px-4 py-3 font-data text-[13px] last:border-0"
+              className="border-b border-[var(--s-divider)] px-4 py-3 font-data text-[15px] last:border-0"
             >
               <pre className="overflow-x-auto whitespace-pre-wrap text-[var(--s-text-secondary)]">
                 {JSON.stringify(e, null, 2)}
@@ -48,7 +48,7 @@ export default function ActivityPage() {
         </Panel>
 
         <Panel className="mt-4" title="On-chain trail">
-          <div className="grid gap-1 px-4 py-4 font-data text-[14px]">
+          <div className="grid gap-1 px-4 py-4 font-data text-[15px]">
             <a
               className="text-[var(--s-accent)] hover:underline"
               href={`${CHAIN.explorer}/address/${CHAIN.tangle}`}
@@ -74,6 +74,6 @@ export default function ActivityPage() {
 
 function Empty({ text }: { text: string }) {
   return (
-    <div className="px-4 py-10 text-center font-data text-[13px] text-[var(--s-text-muted)]">{text}</div>
+    <div className="px-4 py-10 text-center font-data text-[15px] text-[var(--s-text-muted)]">{text}</div>
   )
 }

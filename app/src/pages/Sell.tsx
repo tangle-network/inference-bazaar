@@ -79,14 +79,14 @@ export default function SellPage() {
       <div>
         <PageHeader title="Sell" subtitle="Sell credit lots you hold back to the market, firm." />
         <div className="flex flex-col items-center gap-4 px-6 py-20 text-center">
-          <span className="i-ph:storefront text-[40px] text-[var(--s-text-subtle)]" />
-          <p className="max-w-sm font-body text-[14px] text-[var(--s-text-muted)]">
+          <span className="i-ph:storefront text-[44px] text-[var(--s-text-subtle)]" />
+          <p className="max-w-sm font-body text-[15px] text-[var(--s-text-muted)]">
             Connect to see the credit lots you hold on SurplusSettlement.
           </p>
           <ConnectKitButton.Custom>
             {({ show }) => (
               <button onClick={show} className="btn-primary h-11">
-                <span className="i-ph:wallet text-[16px]" /> Connect wallet
+                <span className="i-ph:wallet text-[18px]" /> Connect wallet
               </button>
             )}
           </ConnectKitButton.Custom>
@@ -110,13 +110,13 @@ export default function SellPage() {
       <div className="grid grid-cols-1 gap-4 px-4 py-4 sm:px-6 lg:grid-cols-12">
         <Panel title="Your credit lots" className="lg:col-span-5" bodyClassName="max-h-[560px] overflow-y-auto">
           {lots.isLoading && (
-            <div className="px-4 py-10 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+            <div className="px-4 py-10 text-center font-data text-[15px] text-[var(--s-text-muted)]">
               Reading your lots from Base Sepolia…
             </div>
           )}
           {lots.isSuccess && sellable.length === 0 && (
             <div className="px-4 py-10 text-center">
-              <p className="font-data text-[13px] text-[var(--s-text-muted)]">
+              <p className="font-data text-[15px] text-[var(--s-text-muted)]">
                 No credit lots in this wallet. Buy a market to hold transferable, on-chain credits —
                 they appear here the moment settlement lands.
               </p>
@@ -142,14 +142,14 @@ export default function SellPage() {
               >
                 {model && <ProviderLogo provider={model.provider} size={30} />}
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-body text-[14px] font-semibold text-[var(--s-text)]">
+                  <div className="truncate font-body text-[15px] font-semibold text-[var(--s-text)]">
                     {model?.name ?? instrument!.model_id} · {instrument!.token_kind}
                   </div>
-                  <div className="font-data text-[12px] text-[var(--s-text-muted)]">
+                  <div className="font-data text-[15px] text-[var(--s-text-muted)]">
                     {tokens(Number(lot.qtyTokens))} tokens · paid {compactUsd(Number(lot.notionalMicro))}
                   </div>
                 </div>
-                {isActive && <span className="i-ph:check text-[16px] text-[var(--s-accent)]" />}
+                {isActive && <span className="i-ph:check text-[18px] text-[var(--s-accent)]" />}
               </button>
             )
           })}
@@ -158,7 +158,7 @@ export default function SellPage() {
         <div className="lg:col-span-7">
           {active && activeInstrument && (
             <Panel title="Firm sale">
-              <div className="grid grid-cols-2 gap-x-6 gap-y-3 px-4 py-4 font-data text-[14px] sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-3 px-4 py-4 font-data text-[15px] sm:grid-cols-3">
                 <PV k="Selling" v={`${tokens(qty)} tok`} />
                 <PV k="Operator bid" v={bestBid != null ? pricePerM(bestBid) : '—'} tone="emerald" />
                 <PV
@@ -171,7 +171,7 @@ export default function SellPage() {
               <div className="px-4 pb-2">
                 <div className="flex items-baseline justify-between">
                   <span className="mono-label">Amount</span>
-                  <span className="font-data text-[12px] text-[var(--s-text-muted)]">
+                  <span className="font-data text-[15px] text-[var(--s-text-muted)]">
                     {tokens(qty)} of {tokens(lotQty)}
                     {isPartial && <span className="text-[var(--s-accent)]"> · keep {tokens(lotQty - qty)}</span>}
                   </span>
@@ -198,7 +198,7 @@ export default function SellPage() {
                       : 'Request firm bid · sell lot'}
                 </button>
                 {receipt && (
-                  <div className="mt-3 rounded-[8px] border border-[var(--s-emerald)]/30 bg-[var(--s-emerald-soft)] px-3 py-2.5 font-data text-[13px] text-[var(--s-emerald)]">
+                  <div className="mt-3 rounded-[8px] border border-[var(--s-emerald)]/30 bg-[var(--s-emerald-soft)] px-3 py-2.5 font-data text-[15px] text-[var(--s-emerald)]">
                     Sold {tokens(receipt.qtyTokens)} at {pricePerM(receipt.priceMicroPerM)} ·{' '}
                     {compactUsd(receipt.costMicro)} credited to your settlement balance.
                     {receipt.settleTx && (
@@ -212,11 +212,11 @@ export default function SellPage() {
                   </div>
                 )}
                 {error && (
-                  <div className="mt-3 rounded-[8px] border border-[var(--s-crimson)]/30 bg-[var(--s-crimson-soft)] px-3 py-2.5 font-data text-[13px] text-[var(--s-crimson)]">
+                  <div className="mt-3 rounded-[8px] border border-[var(--s-crimson)]/30 bg-[var(--s-crimson-soft)] px-3 py-2.5 font-data text-[15px] text-[var(--s-crimson)]">
                     {error}
                   </div>
                 )}
-                <p className="mt-4 font-body text-[12px] leading-relaxed text-[var(--s-text-subtle)]">
+                <p className="mt-4 font-body text-[15px] leading-relaxed text-[var(--s-text-subtle)]">
                   The operator's bid is an EIP-712 signed order. Your signed sell pairs with it and
                   settleFills transfers the lot and pays you in one transaction.
                 </p>
@@ -233,7 +233,7 @@ function PV({ k, v, tone }: { k: string; v: string; tone?: 'emerald' }) {
   return (
     <div>
       <div className="mono-label">{k}</div>
-      <div className="mt-1 text-[17px] font-bold tabular-nums" style={{ color: tone ? 'var(--s-emerald)' : 'var(--s-text)' }}>
+      <div className="mt-1 text-[18px] font-bold tabular-nums" style={{ color: tone ? 'var(--s-emerald)' : 'var(--s-text)' }}>
         {v}
       </div>
     </div>

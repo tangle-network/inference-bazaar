@@ -29,15 +29,15 @@ export default defineConfig({
       'bg-[var(--s-glass-strong)] border border-[var(--s-border)] rounded-[10px] backdrop-blur-[24px]',
     // Micro-label: the uppercase tracked mono caption used on every stat.
     'mono-label':
-      'font-data text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--s-text-muted)]',
+      'font-data text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--s-text-muted)]',
     'mono-num': 'font-data tabular-nums text-[var(--s-text)]',
     // Arena buttons: translucent violet fill + violet text, glow on hover.
     'btn-primary':
-      'inline-flex items-center justify-center gap-1.5 rounded-[8px] bg-[var(--s-accent-soft)] border border-[var(--s-accent)]/30 px-4 font-data text-[13px] font-semibold uppercase tracking-wide text-[var(--s-accent)] transition-all hover:bg-[var(--s-accent)]/24 hover:border-[var(--s-accent)]/50 hover:shadow-[var(--s-glow-violet)] disabled:opacity-40 disabled:cursor-not-allowed',
+      'inline-flex items-center justify-center gap-1.5 rounded-[8px] bg-[var(--s-accent-soft)] border border-[var(--s-accent)]/30 px-4 font-data text-[15px] font-semibold uppercase tracking-wide text-[var(--s-accent)] transition-all hover:bg-[var(--s-accent)]/24 hover:border-[var(--s-accent)]/50 hover:shadow-[var(--s-glow-violet)] disabled:opacity-40 disabled:cursor-not-allowed',
     'btn-secondary':
-      'inline-flex items-center justify-center gap-1.5 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-glass)] px-4 font-data text-[13px] font-semibold uppercase tracking-wide text-[var(--s-text-secondary)] backdrop-blur-[8px] transition-colors hover:border-[var(--s-border-hover)] hover:text-[var(--s-text)] disabled:opacity-40 disabled:cursor-not-allowed',
+      'inline-flex items-center justify-center gap-1.5 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-glass)] px-4 font-data text-[15px] font-semibold uppercase tracking-wide text-[var(--s-text-secondary)] backdrop-blur-[8px] transition-colors hover:border-[var(--s-border-hover)] hover:text-[var(--s-text)] disabled:opacity-40 disabled:cursor-not-allowed',
     'btn-brand':
-      'inline-flex items-center justify-center gap-1.5 rounded-[8px] bg-[var(--s-brand-soft)] border border-[var(--s-brand)]/30 px-4 font-data text-[13px] font-semibold uppercase tracking-wide text-[var(--s-brand)] transition-colors hover:bg-[var(--s-brand)]/24 hover:border-[var(--s-brand)]/50 disabled:opacity-40 disabled:cursor-not-allowed',
+      'inline-flex items-center justify-center gap-1.5 rounded-[8px] bg-[var(--s-brand-soft)] border border-[var(--s-brand)]/30 px-4 font-data text-[15px] font-semibold uppercase tracking-wide text-[var(--s-brand)] transition-colors hover:bg-[var(--s-brand)]/24 hover:border-[var(--s-brand)]/50 disabled:opacity-40 disabled:cursor-not-allowed',
     'glow-emerald': 'shadow-[var(--s-glow-emerald)]',
     'glow-crimson': 'shadow-[var(--s-glow-crimson)]',
     'glow-violet': 'shadow-[var(--s-glow-violet)]',

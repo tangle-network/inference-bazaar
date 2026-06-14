@@ -38,7 +38,7 @@ export default function ModelMarketPage() {
 
   if (catalog.isLoading || instruments.isLoading) {
     return (
-      <div className="px-6 py-16 text-center font-data text-[14px] text-[var(--s-text-muted)]">
+      <div className="px-6 py-16 text-center font-data text-[15px] text-[var(--s-text-muted)]">
         Loading live market…
       </div>
     )
@@ -46,7 +46,7 @@ export default function ModelMarketPage() {
   if (!model) {
     return (
       <div className="px-6 py-16 text-center">
-        <p className="font-data text-[14px] text-[var(--s-text-muted)]">
+        <p className="font-data text-[15px] text-[var(--s-text-muted)]">
           {catalog.isError ? 'Router catalog unreachable.' : `No catalog entry for ${modelId}.`}
         </p>
         <Link to="/" className="btn-secondary mt-4 h-10">Back to markets</Link>
@@ -67,9 +67,9 @@ export default function ModelMarketPage() {
       <div className="border-b border-[var(--s-border)] px-4 py-5 sm:px-6">
         <Link
           to="/"
-          className="mb-3 inline-flex items-center gap-1.5 font-data text-[13px] text-[var(--s-text-muted)] hover:text-[var(--s-text-secondary)]"
+          className="mb-3 inline-flex items-center gap-1.5 font-data text-[15px] text-[var(--s-text-muted)] hover:text-[var(--s-text-secondary)]"
         >
-          <span className="i-ph:arrow-left text-[14px]" /> Markets
+          <span className="i-ph:arrow-left text-[15px]" /> Markets
         </Link>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="flex items-center gap-4">
@@ -78,7 +78,7 @@ export default function ModelMarketPage() {
               <h1 className="font-display text-[28px] font-bold leading-tight tracking-tight text-[var(--s-text)]">
                 {model.name}
               </h1>
-              <div className="mt-1 flex items-center gap-2 font-data text-[13px] text-[var(--s-text-muted)]">
+              <div className="mt-1 flex items-center gap-2 font-data text-[15px] text-[var(--s-text-muted)]">
                 <span>{model.id}</span>
                 {model.contextLength > 0 && (
                   <>
@@ -131,7 +131,7 @@ export default function ModelMarketPage() {
         <Panel
           title="Order book"
           className="lg:col-span-4"
-          right={<span className="font-data text-[12px] text-[var(--s-text-muted)]">{instrumentId}</span>}
+          right={<span className="font-data text-[15px] text-[var(--s-text-muted)]">{instrumentId}</span>}
         >
           {!hasInstrument ? (
             <EmptyNote text={`${kind} side not listed for this model yet.`} />
@@ -161,13 +161,13 @@ export default function ModelMarketPage() {
             <div className="grid grid-cols-2 divide-x divide-[var(--s-divider)] font-data">
               <div className="px-4 py-3">
                 <div className="mono-label">Router list price</div>
-                <div className="mt-1 text-[20px] font-bold tabular-nums text-[var(--s-text-muted)] line-through decoration-[var(--s-text-subtle)]/50">
+                <div className="mt-1 text-[22px] font-bold tabular-nums text-[var(--s-text-muted)] line-through decoration-[var(--s-text-subtle)]/50">
                   {list > 0 ? pricePerM(list) : '—'}
                 </div>
               </div>
               <div className="px-4 py-3">
                 <div className="mono-label">Best firm ask</div>
-                <div className="mt-1 text-[20px] font-bold tabular-nums text-[var(--s-emerald)]">
+                <div className="mt-1 text-[22px] font-bold tabular-nums text-[var(--s-emerald)]">
                   {bestAsk != null ? pricePerM(bestAsk) : '—'}
                 </div>
               </div>
@@ -276,7 +276,7 @@ function TradeTicket({
         </div>
         <Slider value={qtyM} min={1} max={50} onChange={setQtyM} className="mt-3" />
 
-        <div className="mt-5 grid gap-2 font-data text-[13px]">
+        <div className="mt-5 grid gap-2 font-data text-[15px]">
           <Line k="Indicative ask" v={bestAsk != null ? pricePerM(bestAsk) : '—'} />
           <Line k="Estimated cost" v={compactUsd(estCostMicro)} strong />
           <Line k="At router list" v={compactUsd(listCostMicro)} muted strike />
@@ -295,27 +295,27 @@ function TradeTicket({
           {!isConnected ? (
             <ConnectKitButton.Custom>
               {({ show }) => (
-                <button onClick={show} className="btn-primary h-11 w-full !text-[14px]">
-                  <span className="i-ph:wallet text-[16px]" /> Connect to trade
+                <button onClick={show} className="btn-primary h-11 w-full !text-[15px]">
+                  <span className="i-ph:wallet text-[18px]" /> Connect to trade
                 </button>
               )}
             </ConnectKitButton.Custom>
           ) : (
-            <button onClick={execute} disabled={busy || bestAsk == null} className="btn-primary h-11 w-full !text-[14px]">
+            <button onClick={execute} disabled={busy || bestAsk == null} className="btn-primary h-11 w-full !text-[15px]">
               {busy ? STEP_LABEL[progress!.step] + '…' : `Request firm quote · buy ${tokens(qtyTokens)}`}
             </button>
           )}
         </div>
 
         {progress && (
-          <div className="mt-3 flex items-center gap-2 rounded-[8px] border border-[var(--s-accent)]/25 bg-[var(--s-accent-soft)] px-3 py-2.5 font-data text-[13px] text-[var(--s-accent)]">
-            <span className="i-ph:circle-fill s-pulse text-[8px]" />
+          <div className="mt-3 flex items-center gap-2 rounded-[8px] border border-[var(--s-accent)]/25 bg-[var(--s-accent-soft)] px-3 py-2.5 font-data text-[15px] text-[var(--s-accent)]">
+            <span className="i-ph:circle-fill s-pulse text-[12px]" />
             {STEP_LABEL[progress.step]}
             {progress.detail ? ` — ${progress.detail}` : ''}
           </div>
         )}
         {receipt && (
-          <div className="mt-3 rounded-[8px] border border-[var(--s-emerald)]/30 bg-[var(--s-emerald-soft)] px-3 py-2.5 font-data text-[13px] text-[var(--s-emerald)]">
+          <div className="mt-3 rounded-[8px] border border-[var(--s-emerald)]/30 bg-[var(--s-emerald-soft)] px-3 py-2.5 font-data text-[15px] text-[var(--s-emerald)]">
             Settled: {tokens(receipt.qtyTokens)} at {pricePerM(receipt.priceMicroPerM)} ·{' '}
             {compactUsd(receipt.costMicro)} paid from your settlement balance.
             {receipt.settleTx && (
@@ -335,12 +335,12 @@ function TradeTicket({
           </div>
         )}
         {error && (
-          <div className="mt-3 rounded-[8px] border border-[var(--s-crimson)]/30 bg-[var(--s-crimson-soft)] px-3 py-2.5 font-data text-[13px] text-[var(--s-crimson)]">
+          <div className="mt-3 rounded-[8px] border border-[var(--s-crimson)]/30 bg-[var(--s-crimson-soft)] px-3 py-2.5 font-data text-[15px] text-[var(--s-crimson)]">
             {error}
           </div>
         )}
 
-        <p className="mt-4 font-body text-[12px] leading-relaxed text-[var(--s-text-subtle)]">
+        <p className="mt-4 font-body text-[15px] leading-relaxed text-[var(--s-text-subtle)]">
           Execution is atomic on SurplusSettlement (Base Sepolia): your signed order pairs with the
           operator's signed quote, payment debits your deposited balance, and the credit lot is
           minted against the issuer's on-chain collateral.
@@ -383,7 +383,7 @@ function Line({
 
 function EmptyNote({ text }: { text: string }) {
   return (
-    <div className="flex h-32 items-center justify-center font-data text-[13px] text-[var(--s-text-subtle)]">
+    <div className="flex h-32 items-center justify-center font-data text-[15px] text-[var(--s-text-subtle)]">
       {text}
     </div>
   )

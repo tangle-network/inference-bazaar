@@ -137,7 +137,7 @@ export function DepthChart({
 
   if (!bids.length && !asks.length) {
     return (
-      <div className="flex items-center justify-center font-data text-[12px] text-[var(--s-text-subtle)]" style={{ height }}>
+      <div className="flex items-center justify-center font-data text-[15px] text-[var(--s-text-subtle)]" style={{ height }}>
         no depth
       </div>
     )

@@ -17,7 +17,7 @@ export function PageHeader({
           {title}
         </h1>
         {subtitle != null && (
-          <p className="mt-1 max-w-2xl font-body text-[14px] leading-snug text-[var(--s-text-muted)]">{subtitle}</p>
+          <p className="mt-1 max-w-2xl font-body text-[15px] leading-snug text-[var(--s-text-muted)]">{subtitle}</p>
         )}
       </div>
       {right != null && <div className="flex items-center gap-2">{right}</div>}
