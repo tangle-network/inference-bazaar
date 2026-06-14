@@ -66,19 +66,23 @@ function PrivacyButton() {
         setPrivacy(next)
         setOn(next)
       }}
+      aria-pressed={on}
       className={cn(
-        'flex h-9 w-9 items-center justify-center rounded-[6px] border transition-colors',
+        'relative flex h-9 w-9 items-center justify-center rounded-[6px] border transition-colors',
         on
           ? 'border-[var(--s-accent)]/40 bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
           : 'border-[var(--s-border)] bg-[var(--s-panel)] text-[var(--s-text-muted)] hover:border-[var(--s-border-hover)] hover:text-[var(--s-text)]',
       )}
       title={
         on
-          ? 'Privacy ON: dialing operator .onions + anti-sticky acquisition (use a Tor browser for real anonymity)'
-          : 'Privacy OFF: clearnet'
+          ? 'Tor privacy ON — dialing operator .onions + anti-sticky acquisition (use a Tor browser for full anonymity). Click to turn off.'
+          : 'Tor privacy OFF — clearnet. Click to route via operator .onions.'
       }
     >
       <span className={cn(on ? 'i-ph:shield-check-fill' : 'i-ph:shield', 'text-[18px]')} />
+      {on && (
+        <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[var(--s-accent)] ring-2 ring-[var(--s-bg)]" />
+      )}
     </button>
   )
 }
@@ -193,14 +197,18 @@ export function Shell({ children }: { children: ReactNode }) {
             )}
           >
             {collapsed ? (
-              <span className="i-ph:shield-check-fill text-[18px] text-[var(--s-accent)]" />
+              <span className="i-ph:cube text-[18px] text-[var(--s-accent)]" />
             ) : (
               <>
-                <div className="flex items-center gap-2">
-                  <span className="i-ph:shield-check-fill text-[18px] text-[var(--s-accent)]" />
-                  <span className="font-data text-[15px] font-semibold uppercase tracking-wider text-[var(--s-text-secondary)]">
-                    Base Sepolia
-                  </span>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="i-ph:cube text-[18px] text-[var(--s-accent)]" />
+                    <span className="font-data text-[15px] font-semibold uppercase tracking-wider text-[var(--s-text-secondary)]">
+                      Base Sepolia
+                    </span>
+                  </div>
+                  {/* external-link affordance: this chip opens the settlement contract on the explorer */}
+                  <span className="i-ph:arrow-up-right text-[14px] text-[var(--s-text-subtle)]" />
                 </div>
                 <p className="mt-1.5 font-data text-[15px] leading-snug text-[var(--s-text-muted)]">
                   Blueprint {CHAIN.blueprintId} · service {CHAIN.serviceId}
