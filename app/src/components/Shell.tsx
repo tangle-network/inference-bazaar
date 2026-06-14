@@ -147,7 +147,9 @@ export function Shell({ children }: { children: ReactNode }) {
       {/* Sidebar — desktop. Collapsible to an icon rail (persisted). */}
       <aside
         className={cn(
-          'hidden shrink-0 flex-col border-r border-[var(--s-border)] bg-[color-mix(in_srgb,var(--s-surface)_70%,transparent)] py-4 transition-[width] duration-200 lg:flex',
+          // relative z-30 so the account dock's upward menu paints ABOVE the main
+          // content (which has its own stacking context from the fade transform).
+          'relative z-30 hidden shrink-0 flex-col border-r border-[var(--s-border)] bg-[color-mix(in_srgb,var(--s-surface)_70%,transparent)] py-4 transition-[width] duration-200 lg:flex',
           collapsed ? 'w-16 px-2' : 'w-60 px-3',
         )}
       >
@@ -191,7 +193,9 @@ export function Shell({ children }: { children: ReactNode }) {
           <NavItems collapsed={collapsed} />
         </div>
 
-        <div className={cn('mt-auto', !collapsed && 'px-1')}>
+        <div className={cn('mt-auto flex flex-col gap-2', !collapsed && 'px-1')}>
+          {/* Account dock — bottom-left, like the arena shell. Menu opens upward. */}
+          <WalletButton variant="sidebar" collapsed={collapsed} />
           {/* Network status → the multi-instance operator directory. Shows the
            * LIVE union count across all blueprint-17 instances, not a single
            * pinned service. */}
@@ -228,7 +232,7 @@ export function Shell({ children }: { children: ReactNode }) {
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Top bar */}
-        <header className="flex h-[var(--header-h)] shrink-0 items-center justify-between gap-3 border-b border-[var(--s-border)] bg-[color-mix(in_srgb,var(--s-surface)_55%,transparent)] px-4 backdrop-blur-xl">
+        <header className="relative z-30 flex h-[var(--header-h)] shrink-0 items-center justify-between gap-3 border-b border-[var(--s-border)] bg-[color-mix(in_srgb,var(--s-surface)_55%,transparent)] px-4 backdrop-blur-xl">
           <div className="flex items-center gap-3 lg:hidden">
             <button
               onClick={() => setMobileNav((v) => !v)}
@@ -242,7 +246,11 @@ export function Shell({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-2">
             <PrivacyButton />
             <ThemeButton />
-            <WalletButton />
+            {/* Desktop docks the wallet in the sidebar; the top bar carries it only
+             * on mobile, where the sidebar is hidden. */}
+            <div className="lg:hidden">
+              <WalletButton />
+            </div>
           </div>
         </header>
 

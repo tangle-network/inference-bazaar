@@ -16,7 +16,15 @@ function truncate(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
 }
 
-export function WalletButton() {
+export function WalletButton({
+  variant = 'header',
+  collapsed = false,
+}: {
+  /** 'header' = compact pill, menu opens down-right. 'sidebar' = bottom dock,
+   * menu opens up (full-width row, or avatar-only when `collapsed`). */
+  variant?: 'header' | 'sidebar'
+  collapsed?: boolean
+} = {}) {
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -35,11 +43,31 @@ export function WalletButton() {
   }, [open])
 
   const wrongChain = isConnected && chainId !== SURPLUS_CHAIN.id
+  const sidebar = variant === 'sidebar'
+  const bal = balance
+    ? `${(Number(balance.value) / 10 ** balance.decimals).toFixed(3)} ${balance.symbol}`
+    : null
 
   return (
     <ConnectKitButton.Custom>
       {({ show }) => {
         if (!isConnected || !address) {
+          if (sidebar) {
+            return collapsed ? (
+              <button
+                onClick={show}
+                title="Connect wallet"
+                className="btn-primary mx-auto flex h-10 w-11 items-center justify-center p-0"
+              >
+                <span className="i-ph:wallet text-[18px]" />
+              </button>
+            ) : (
+              <button onClick={show} className="btn-primary h-10 w-full" disabled={status === 'reconnecting'}>
+                <span className="i-ph:wallet text-[18px]" />
+                {status === 'reconnecting' ? 'Reconnecting…' : 'Connect wallet'}
+              </button>
+            )
+          }
           return (
             <button onClick={show} className="btn-primary h-10" disabled={status === 'reconnecting'}>
               <span className="i-ph:wallet text-[18px]" />
@@ -49,25 +77,73 @@ export function WalletButton() {
         }
         return (
           <div ref={menuRef} className="relative">
-            <button
-              onClick={() => setOpen((v) => !v)}
-              className="relative flex h-10 items-center gap-2.5 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-glass)] pl-1.5 pr-3 backdrop-blur-[8px] transition-colors hover:border-[var(--s-accent)]/40"
-            >
-              <span className="overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
-                <Identicon address={address as Address} size={28} />
-              </span>
-              <span className="hidden font-data text-[15px] font-semibold text-[var(--s-text)] sm:inline">
-                {truncate(address)}
-              </span>
-              {wrongChain ? (
-                <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--s-amber)]" title="Wrong network" />
-              ) : (
-                <span className="h-2 w-2 rounded-full bg-[var(--s-emerald)]" />
-              )}
-            </button>
+            {sidebar && collapsed ? (
+              <button
+                onClick={() => setOpen((v) => !v)}
+                title={truncate(address)}
+                className="relative mx-auto flex h-10 w-11 items-center justify-center rounded-[8px] border border-[var(--s-border)] bg-[var(--s-panel)] transition-colors hover:border-[var(--s-accent)]/40"
+              >
+                <span className="overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
+                  <Identicon address={address as Address} size={26} />
+                </span>
+                <span
+                  className={cn(
+                    'absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-[var(--s-surface)]',
+                    wrongChain ? 'bg-[var(--s-amber)] animate-pulse' : 'bg-[var(--s-emerald)]',
+                  )}
+                />
+              </button>
+            ) : sidebar ? (
+              <button
+                onClick={() => setOpen((v) => !v)}
+                className="flex w-full items-center gap-2.5 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-panel)] px-2.5 py-2 text-left transition-colors hover:border-[var(--s-accent)]/40"
+              >
+                <span className="overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
+                  <Identicon address={address as Address} size={30} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-data text-[15px] font-semibold text-[var(--s-text)]">
+                    {truncate(address)}
+                  </div>
+                  <div className="truncate font-data text-[12px] text-[var(--s-text-muted)]">
+                    {bal ?? SURPLUS_CHAIN.name}
+                  </div>
+                </div>
+                <span
+                  className={cn(
+                    'h-2 w-2 shrink-0 rounded-full',
+                    wrongChain ? 'bg-[var(--s-amber)] animate-pulse' : 'bg-[var(--s-emerald)]',
+                  )}
+                />
+              </button>
+            ) : (
+              <button
+                onClick={() => setOpen((v) => !v)}
+                className="relative flex h-10 items-center gap-2.5 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-glass)] pl-1.5 pr-3 backdrop-blur-[8px] transition-colors hover:border-[var(--s-accent)]/40"
+              >
+                <span className="overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
+                  <Identicon address={address as Address} size={28} />
+                </span>
+                <span className="hidden font-data text-[15px] font-semibold text-[var(--s-text)] sm:inline">
+                  {truncate(address)}
+                </span>
+                {wrongChain ? (
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--s-amber)]" title="Wrong network" />
+                ) : (
+                  <span className="h-2 w-2 rounded-full bg-[var(--s-emerald)]" />
+                )}
+              </button>
+            )}
 
             {open && (
-              <div className="panel-strong absolute right-0 top-full z-50 mt-2 w-76 p-4 shadow-[var(--s-shadow-pop)]">
+              <div
+                className={cn(
+                  // SOLID, opaque, elevated menu — never see-through, always above
+                  // page content (z-60). Opens upward in the sidebar dock.
+                  'absolute z-[60] w-72 rounded-[10px] border border-[var(--s-border)] bg-[var(--s-pop)] p-4 shadow-[var(--s-shadow-pop)]',
+                  sidebar ? 'bottom-full left-0 mb-2' : 'right-0 top-full mt-2',
+                )}
+              >
                 <div className="flex items-center gap-3">
                   <span className="overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
                     <Identicon address={address as Address} size={36} />
