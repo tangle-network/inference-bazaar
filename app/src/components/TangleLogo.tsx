@@ -32,29 +32,22 @@ export function TangleMark({ size = 32, idSuffix = 'a' }: { size?: number; idSuf
   )
 }
 
-/** Brand lockup: Tangle mark + Surplus wordmark + subtitle. */
+/** Brand lockup: Tangle mark + Surplus wordmark + subtitle. The mark stands on
+ * its own at full scale (no boxed chip) — like the Tangle arena shell. `compact`
+ * is the collapsed-sidebar form: the bare mark, sized to a 40px nav slot. */
 export function SurplusBrand({ compact = false }: { compact?: boolean }) {
+  if (compact) {
+    return <TangleMark size={30} />
+  }
   return (
     <div className="flex items-center gap-2.5">
-      <span
-        className="flex items-center justify-center rounded-[8px]"
-        style={{
-          width: 34,
-          height: 34,
-          background: 'color-mix(in srgb, var(--s-accent) 12%, transparent)',
-          border: '1px solid color-mix(in srgb, var(--s-accent) 24%, transparent)',
-        }}
-      >
-        <TangleMark size={24} />
-      </span>
-      {!compact && (
-        <div className="leading-none">
-          <div className="font-display text-[15px] font-bold tracking-tight text-[var(--s-text)]">Surplus</div>
-          <div className="mt-1 flex items-center gap-1 font-data text-[9px] uppercase tracking-[0.18em] text-[var(--s-text-muted)]">
-            on <TangleMark size={9} idSuffix="sub" /> Tangle
-          </div>
+      <TangleMark size={38} />
+      <div className="leading-none">
+        <div className="font-display text-[20px] font-bold tracking-tight text-[var(--s-text)]">Surplus</div>
+        <div className="mt-1.5 flex items-center gap-1 font-data text-[9px] uppercase tracking-[0.18em] text-[var(--s-text-muted)]">
+          on <TangleMark size={9} idSuffix="sub" /> Tangle
         </div>
-      )}
+      </div>
     </div>
   )
 }
