@@ -6,6 +6,7 @@ import { privacyOn, setPrivacy } from '~/lib/privacy'
 import { WalletButton } from '~/components/WalletButton'
 import { SurplusBrand } from '~/components/TangleLogo'
 import { CHAIN, useVenueHealth } from '~/lib/api'
+import { useVenueRegistry } from '~/lib/venues'
 
 /** Measured, not asserted: live venue health + latency. */
 function VenueStatus() {
@@ -16,7 +17,7 @@ function VenueStatus() {
       target="_blank"
       rel="noreferrer"
       className="hidden items-center gap-2 rounded-[8px] border border-[var(--s-border)] px-2.5 py-1.5 transition-colors hover:border-[var(--s-border-hover)] lg:flex"
-      title="Surplus service 4 on Base Sepolia"
+      title="Home venue health · Surplus on Base Sepolia (Blueprint 17)"
     >
       <span
         className={cn(
@@ -134,6 +135,11 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_KEY, collapsed ? 'true' : 'false')
   }, [collapsed])
+  // Multi-instance: how many operators are live across ALL blueprint-17 instances
+  // (the registry union), not a single pinned service.
+  const registry = useVenueRegistry()
+  const liveOps = (registry.data ?? []).filter((v) => v.healthy).length
+  const liveLabel = registry.data ? `${liveOps} operator${liveOps === 1 ? '' : 's'} live` : 'live on-chain'
   const loc = useLocation()
 
   return (
@@ -186,11 +192,12 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
 
         <div className={cn('mt-auto', !collapsed && 'px-1')}>
-          <a
-            href={`${CHAIN.explorer}/address/${CHAIN.tangle}`}
-            target="_blank"
-            rel="noreferrer"
-            title={collapsed ? `Base Sepolia · Blueprint ${CHAIN.blueprintId} · service ${CHAIN.serviceId}` : undefined}
+          {/* Network status → the multi-instance operator directory. Shows the
+           * LIVE union count across all blueprint-17 instances, not a single
+           * pinned service. */}
+          <NavLink
+            to="/operators"
+            title={collapsed ? `Base Sepolia · Blueprint ${CHAIN.blueprintId} · ${liveLabel} — view operators` : undefined}
             className={cn(
               'panel panel-hover',
               collapsed ? 'mx-auto flex h-10 w-11 items-center justify-center' : 'block px-3 py-3',
@@ -207,15 +214,14 @@ export function Shell({ children }: { children: ReactNode }) {
                       Base Sepolia
                     </span>
                   </div>
-                  {/* external-link affordance: this chip opens the settlement contract on the explorer */}
-                  <span className="i-ph:arrow-up-right text-[14px] text-[var(--s-text-subtle)]" />
+                  <span className="i-ph:caret-right text-[14px] text-[var(--s-text-subtle)]" />
                 </div>
                 <p className="mt-1.5 font-data text-[15px] leading-snug text-[var(--s-text-muted)]">
-                  Blueprint {CHAIN.blueprintId} · service {CHAIN.serviceId}
+                  Blueprint {CHAIN.blueprintId} · {liveLabel}
                 </p>
               </>
             )}
-          </a>
+          </NavLink>
         </div>
       </aside>
 

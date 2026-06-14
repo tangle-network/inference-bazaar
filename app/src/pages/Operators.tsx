@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { useReadContract, useReadContracts } from 'wagmi'
+import { useReadContracts } from 'wagmi'
 import { Identicon } from '@tangle-network/blueprint-ui/components'
 import type { Address } from 'viem'
 import { formatUnits } from 'viem'
@@ -11,16 +11,6 @@ import { compactUsd, truncAddr } from '~/lib/format'
 import { CHAIN, useInstruments, useVenueHealth } from '~/lib/api'
 import { SETTLEMENT, SETTLEMENT_ABI } from '~/lib/settlement'
 import { useVenueRegistry } from '~/lib/venues'
-
-const TANGLE_ABI = [
-  {
-    type: 'function',
-    name: 'getServiceOperators',
-    inputs: [{ name: 'serviceId', type: 'uint64' }],
-    outputs: [{ name: '', type: 'address[]' }],
-    stateMutability: 'view',
-  },
-] as const
 
 const STAKING_ABI = [
   {
@@ -40,14 +30,14 @@ const STAKING_ABI = [
 ] as const
 
 export default function OperatorsPage() {
-  const operators = useReadContract({
-    address: CHAIN.tangle,
-    abi: TANGLE_ABI,
-    functionName: 'getServiceOperators',
-    args: [BigInt(CHAIN.serviceId)],
-    chainId: CHAIN.id,
-  })
-  const addrs = (operators.data ?? []) as Address[]
+  // Multi-instance: the directory is the UNION of operators across every ACTIVE
+  // blueprint-17 service instance (the live registry), not a single pinned
+  // service — an operator joining any instance shows up here with no app change.
+  const registry = useVenueRegistry()
+  const addrs = useMemo(
+    () => [...new Map((registry.data ?? []).map((v) => [v.operator.toLowerCase(), v.operator])).values()] as Address[],
+    [registry.data],
+  )
   const bonds = useReadContracts({
     contracts: addrs.map((a) => ({
       address: CHAIN.staking,
@@ -60,9 +50,7 @@ export default function OperatorsPage() {
   })
   const health = useVenueHealth()
   const instruments = useInstruments()
-  // Which on-chain operators actually serve a venue, from the live registry —
-  // membership in the service is NOT a quoting signal (operator order is arbitrary).
-  const registry = useVenueRegistry()
+  // Which operators actually serve a live venue (vs merely registered on-chain).
   const venueByOp = useMemo(() => {
     const m = new Map<string, { url: string; healthy: boolean }>()
     for (const v of registry.data ?? []) {
@@ -82,7 +70,7 @@ export default function OperatorsPage() {
     <div>
       <PageHeader
         title="Operators"
-        subtitle="The on-chain operator set of Surplus service 4 — bonded restake, slashed for refusing valid redemptions."
+        subtitle="Every operator across Surplus's live instances on Base Sepolia — bonded restake, slashed for refusing valid redemptions."
         right={
           <Link to="/operators/register" className="btn-primary h-10">
             <span className="i-ph:plus text-[15px]" /> Become an operator
@@ -93,10 +81,10 @@ export default function OperatorsPage() {
       <div className="px-4 py-4 sm:px-6">
         <div className="panel grid grid-cols-2 divide-x divide-[var(--s-divider)] sm:grid-cols-4">
           <Stat
-            label="Service operators"
-            value={operators.isLoading ? '…' : addrs.length}
+            label="Operators"
+            value={registry.isLoading ? '…' : addrs.length}
             tone="accent"
-            sub={`service ${CHAIN.serviceId} · blueprint ${CHAIN.blueprintId}`}
+            sub={`blueprint ${CHAIN.blueprintId} · all instances`}
           />
           <Stat
             label="Venue"
@@ -109,14 +97,14 @@ export default function OperatorsPage() {
         </div>
 
         <Panel className="mt-4" title="On-chain operator set">
-          {operators.isError && (
+          {registry.isError && (
             <div className="px-4 py-8 text-center font-data text-[15px] text-[var(--s-text-muted)]">
               Chain read failed — check RPC connectivity.
             </div>
           )}
-          {operators.isLoading && (
+          {registry.isLoading && (
             <div className="px-4 py-8 text-center font-data text-[15px] text-[var(--s-text-muted)]">
-              Reading service operator set…
+              Discovering operators across instances…
             </div>
           )}
           {addrs.map((addr, i) => {
