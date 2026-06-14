@@ -8,15 +8,18 @@
  */
 :root,
 [data-theme='dark'] {
-  /* Depth layering — dark purple, stepping lighter (not black). */
-  --s-bg: #160f22;
-  --s-surface: #1e1733;
-  --s-panel: #261d40;
-  --s-panel-strong: #2f244e;
+  /* Depth layering — dark purple, four clearly-stepped elevations (not flat).
+   * bg = page floor (deepest), surface = sidebar/header, panel = floating cards,
+   * panel-strong = elevated/hover/inputs. The glass tokens below render cards on
+   * the *panel* tiers so they sit visibly above bg, not blended into it. */
+  --s-bg: #0f0a1a;
+  --s-surface: #1a1330;
+  --s-panel: #271d42;
+  --s-panel-strong: #362858;
 
-  --s-border: rgba(183, 157, 255, 0.13);
-  --s-border-hover: rgba(183, 157, 255, 0.3);
-  --s-divider: rgba(183, 157, 255, 0.09);
+  --s-border: rgba(183, 157, 255, 0.18);
+  --s-border-hover: rgba(183, 157, 255, 0.36);
+  --s-divider: rgba(183, 157, 255, 0.11);
 
   --s-text: #f4f1fd;
   --s-text-secondary: #c6bcdf;
@@ -43,9 +46,10 @@
   --s-amber-soft: rgba(255, 193, 94, 0.12);
   --s-blue: #8090ff;
 
-  /* Glass surfaces — purple-tinted. */
-  --s-glass: rgba(30, 23, 51, 0.62);
-  --s-glass-strong: rgba(30, 23, 51, 0.82);
+  /* Glass surfaces — purple-tinted, on the lighter panel tiers + more opaque so
+   * cards read as a distinct elevation above the page floor, not the same color. */
+  --s-glass: rgba(39, 29, 66, 0.72);
+  --s-glass-strong: rgba(54, 40, 88, 0.86);
 
   --s-glow-emerald: 0 0 20px rgba(61, 220, 151, 0.08), 0 0 60px rgba(61, 220, 151, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   --s-glow-crimson: 0 0 20px rgba(255, 93, 122, 0.08), 0 0 60px rgba(255, 93, 122, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.04);
