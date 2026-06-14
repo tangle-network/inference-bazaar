@@ -1,0 +1,59 @@
+name: release
+
+# Cut the operator-binary release the blueprint definitions point at. The Tangle
+# blueprint deploy fetches `surplus-operator` (linux/amd64) from the GitHub release
+# at the pinned tag and verifies its sha256 — so this must run (and the sha synced
+# into deploy/blueprint-definition*.toml) before `cargo tangle blueprint deploy`.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  operator-binary:
+    name: build + publish surplus-operator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.91"
+      - uses: Swatinem/rust-cache@v2
+      # blueprint-sdk's transitive build scripts compile protobuf.
+      - name: install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: build operator (blueprint, release)
+        run: cargo build --release -p surplus-operator --bin surplus-operator --features blueprint
+      - name: sha256
+        id: sha
+        run: |
+          BIN=target/release/surplus-operator
+          test -f "$BIN"
+          SHA=$(sha256sum "$BIN" | cut -d' ' -f1)
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          {
+            echo "### surplus-operator (linux/amd64)"
+            echo ""
+            echo "\`\`\`"
+            echo "sha256: $SHA"
+            echo "\`\`\`"
+            echo "Sync into the manifests before deploy:"
+            echo "\`\`\`"
+            echo "scripts/set-release-sha.sh $SHA ${GITHUB_REF_NAME}"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/release/surplus-operator
+          generate_release_notes: true
+          body: |
+            Operator binary `surplus-operator` (linux/amd64) for the Surplus blueprint.
+
+            **sha256:** `${{ steps.sha.outputs.sha256 }}`
+
+            Before `cargo tangle blueprint deploy`, pin this in the manifests:
+            `scripts/set-release-sha.sh ${{ steps.sha.outputs.sha256 }} ${{ github.ref_name }}`
