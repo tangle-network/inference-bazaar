@@ -132,7 +132,7 @@ export default function MarketsPage() {
         {(venueDown || routerDown) && (
           <div className="panel mb-4 flex items-center gap-3 border-[var(--s-crimson)]/30 px-4 py-3">
             <span className="i-ph:pulse text-[18px] text-[var(--s-crimson)]" />
-            <span className="font-data text-[13px] text-[var(--s-text-secondary)]">
+            <span className="font-data text-[15px] text-[var(--s-text-secondary)]">
               {venueDown ? 'Venue API unreachable.' : 'Router catalog unreachable.'} Live data
               resumes automatically when the source recovers.
             </span>
@@ -171,7 +171,7 @@ export default function MarketsPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search models, providers…"
-              className="h-10 w-64 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-glass)] pl-8 pr-3 font-data text-[14px] text-[var(--s-text)] outline-none backdrop-blur-[8px] placeholder:text-[var(--s-text-subtle)] focus:border-[var(--s-accent)]/40"
+              className="h-10 w-64 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-glass)] pl-8 pr-3 font-data text-[15px] text-[var(--s-text)] outline-none backdrop-blur-[8px] placeholder:text-[var(--s-text-subtle)] focus:border-[var(--s-accent)]/40"
             />
           </div>
           <div className="ml-auto flex items-center gap-2">
@@ -214,7 +214,7 @@ export default function MarketsPage() {
                   ))}
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-12 text-center font-data text-[14px] text-[var(--s-text-muted)]">
+                    <td colSpan={7} className="px-4 py-12 text-center font-data text-[15px] text-[var(--s-text-muted)]">
                       {venueDown ? 'Venue offline — no live markets to show.' : 'No markets match.'}
                     </td>
                   </tr>
@@ -264,7 +264,7 @@ function Row({
               <div className="truncate font-body text-[15px] font-semibold text-[var(--s-text)]">
                 {model.name}
               </div>
-              <div className="truncate font-data text-[12px] text-[var(--s-text-muted)]">
+              <div className="truncate font-data text-[15px] text-[var(--s-text-muted)]">
                 {model.provider}
                 {model.contextLength > 0 &&
                   ` · ${model.contextLength >= 1_000_000 ? `${Math.round(model.contextLength / 1e6)}M` : `${Math.round(model.contextLength / 1000)}K`} ctx`}
@@ -276,23 +276,23 @@ function Row({
           {row.discount != null ? (
             <Badge tone="emerald">{pct(row.discount, 1)}</Badge>
           ) : (
-            <span className="font-data text-[13px] text-[var(--s-text-subtle)]">—</span>
+            <span className="font-data text-[15px] text-[var(--s-text-subtle)]">—</span>
           )}
         </td>
         <td className="px-4 py-3 text-right font-data text-[15px] font-semibold tabular-nums text-[var(--s-text)]">
           {row.bestAsk != null ? pricePerM(row.bestAsk) : '—'}
         </td>
-        <td className="px-4 py-3 text-right font-data text-[14px] tabular-nums text-[var(--s-text-muted)] line-through decoration-[var(--s-text-subtle)]/60">
+        <td className="px-4 py-3 text-right font-data text-[15px] tabular-nums text-[var(--s-text-muted)] line-through decoration-[var(--s-text-subtle)]/60">
           {row.listMicroPerM > 0 ? pricePerM(row.listMicroPerM) : '—'}
         </td>
-        <td className="px-4 py-3 text-right font-data text-[14px] tabular-nums text-[var(--s-text-secondary)]">
+        <td className="px-4 py-3 text-right font-data text-[15px] tabular-nums text-[var(--s-text-secondary)]">
           {book ? compactUsd(row.liquidityNotionalMicro) : '—'}
         </td>
         <td className="px-4 py-3">
           {book ? (
             <DepthChart bids={book.bids} asks={book.asks} height={40} mini />
           ) : (
-            <span className="font-data text-[12px] text-[var(--s-text-subtle)]">no book</span>
+            <span className="font-data text-[15px] text-[var(--s-text-subtle)]">no book</span>
           )}
         </td>
         <td className="px-4 py-3 text-right">
@@ -317,7 +317,7 @@ function Row({
                 </div>
                 <DepthChart bids={book.bids} asks={book.asks} height={150} formatX={pricePerM} />
               </div>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-2 self-center font-data text-[13px]">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2 self-center font-data text-[15px]">
                 <KV k="Best bid" v={book.bids[0] ? pricePerM(book.bids[0].price) : '—'} tone="emerald" />
                 <KV k="Best ask (NBBO)" v={book.asks[0] ? pricePerM(book.asks[0].price) : '—'} tone="crimson" />
                 <KV k="Reference" v={pricePerM(book.refMid)} />
@@ -372,15 +372,15 @@ function FeatureTile({
         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px]"
         style={{ background: `var(--s-${tone}-soft)` }}
       >
-        <span className={cn(icon, 'text-[19px]')} style={{ color: `var(--s-${tone})` }} />
+        <span className={cn(icon, 'text-[18px]')} style={{ color: `var(--s-${tone})` }} />
       </span>
       <div className="min-w-0">
         <div className="mono-label">{label}</div>
-        <div className="truncate font-data text-[19px] font-bold tabular-nums text-[var(--s-text)]">
+        <div className="truncate font-data text-[18px] font-bold tabular-nums text-[var(--s-text)]">
           {value}
         </div>
         {row && (
-          <div className="truncate font-data text-[12px] text-[var(--s-text-muted)]">
+          <div className="truncate font-data text-[15px] text-[var(--s-text-muted)]">
             {row.model.name}
           </div>
         )}

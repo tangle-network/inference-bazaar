@@ -130,16 +130,12 @@ export default function HomePage() {
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
       {/* Hero */}
       <div className="max-w-2xl">
-        <div className="mono-label flex items-center gap-2 text-[var(--s-accent)]">
-          <span className="h-1.5 w-1.5 rounded-full bg-[var(--s-accent)] shadow-[0_0_8px_var(--s-accent)]" />
-          Prepaid inference credits · settled on Base Sepolia
-        </div>
-        <h1 className="mt-3 font-display text-[34px] font-bold leading-[1.08] tracking-tight text-[var(--s-text)] sm:text-[44px]">
+        <h1 className="font-display text-[36px] font-bold leading-[1.08] tracking-tight text-[var(--s-text)] sm:text-[44px]">
           The same models.
           <br />
           <span className="text-[var(--s-accent)]">Below list price.</span>
         </h1>
-        <p className="mt-4 max-w-xl font-body text-[16px] leading-relaxed text-[var(--s-text-secondary)]">
+        <p className="mt-4 max-w-xl font-body text-[18px] leading-relaxed text-[var(--s-text-secondary)]">
           Buy Claude, GPT and more at a discount — each credit collateral-backed by the operator who sells it,
           settled on-chain, and spent through the same API you already call.
         </p>
@@ -149,14 +145,13 @@ export default function HomePage() {
       <div className="mt-8 grid gap-4 lg:grid-cols-12">
         {/* Model quick-pick — the live best deals, not a directory */}
         <div className="lg:col-span-5">
-          <div className="mono-label mb-2">Pick a model</div>
           <div className="flex flex-col gap-1.5">
             {loading &&
               Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="h-[58px] animate-pulse rounded-[10px] bg-[var(--s-panel)]" />
               ))}
             {!loading && tradeable.length === 0 && (
-              <div className="panel px-4 py-5 font-data text-[13px] text-[var(--s-text-muted)]">
+              <div className="panel px-4 py-5 font-data text-[15px] text-[var(--s-text-muted)]">
                 {venueDown
                   ? 'Operators are offline — markets resume when a venue recovers.'
                   : 'Liquidity is seeding. Open the order books to watch it fill.'}
@@ -177,19 +172,19 @@ export default function HomePage() {
                 >
                   <ProviderLogo provider={t.model.provider} size={30} />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-body text-[14px] font-semibold text-[var(--s-text)]">
+                    <div className="truncate font-body text-[15px] font-semibold text-[var(--s-text)]">
                       {t.model.name}
                     </div>
-                    <div className="truncate font-data text-[12px] text-[var(--s-text-muted)]">
+                    <div className="truncate font-data text-[15px] text-[var(--s-text-muted)]">
                       {pricePerM(t.model.outputMicroPerM)} list
                     </div>
                   </div>
                   {t.discount != null && t.discount > 0 ? (
-                    <span className="shrink-0 rounded-[5px] bg-[var(--s-emerald-soft)] px-1.5 py-0.5 font-data text-[12px] font-bold tabular-nums text-[var(--s-emerald)]">
+                    <span className="shrink-0 rounded-[5px] bg-[var(--s-emerald-soft)] px-1.5 py-0.5 font-data text-[15px] font-bold tabular-nums text-[var(--s-emerald)]">
                       −{pct(t.discount, 0)}
                     </span>
                   ) : (
-                    <span className="shrink-0 font-data text-[12px] text-[var(--s-text-subtle)]">list</span>
+                    <span className="shrink-0 font-data text-[15px] text-[var(--s-text-subtle)]">list</span>
                   )}
                 </button>
               )
@@ -204,10 +199,10 @@ export default function HomePage() {
               <div className="flex items-center gap-3">
                 <ProviderLogo provider={entry.model.provider} size={36} />
                 <div className="min-w-0">
-                  <div className="truncate font-body text-[16px] font-semibold text-[var(--s-text)]">
+                  <div className="truncate font-body text-[18px] font-semibold text-[var(--s-text)]">
                     {entry.model.name}
                   </div>
-                  <div className="font-data text-[12px] text-[var(--s-text-muted)]">
+                  <div className="font-data text-[15px] text-[var(--s-text-muted)]">
                     {quote.operators > 0
                       ? `${quote.operators} operator${quote.operators === 1 ? '' : 's'} quoting now`
                       : 'no live quotes — priced at list'}
@@ -223,11 +218,11 @@ export default function HomePage() {
               <div className="mt-6 flex flex-wrap items-end justify-between gap-4 rounded-[12px] bg-[var(--s-emerald-soft)] px-5 py-4">
                 <div>
                   <div className="mono-label !text-[var(--s-emerald)]">You save / month</div>
-                  <div className="mt-1 font-display text-[40px] font-bold leading-none tabular-nums text-[var(--s-emerald)]">
+                  <div className="mt-1 font-display text-[44px] font-bold leading-none tabular-nums text-[var(--s-emerald)]">
                     {quote.savings > 0 ? compactUsd(quote.savings) : '—'}
                   </div>
                 </div>
-                <div className="text-right font-data text-[13px] text-[var(--s-text-secondary)]">
+                <div className="text-right font-data text-[15px] text-[var(--s-text-secondary)]">
                   <div className="tabular-nums">
                     <span className="font-semibold text-[var(--s-text)]">{compactUsd(quote.cost)}</span>{' '}
                     <span className="text-[var(--s-text-muted)] line-through">{compactUsd(quote.list)}</span>
@@ -241,7 +236,7 @@ export default function HomePage() {
               {/* Per-leg breakdown — reconciles the headline with where the
                   discount actually is (operators quote output far more than
                   input, so a leg priced at list reads honestly, not as a bug). */}
-              <div className="mt-3 grid grid-cols-2 gap-2 font-data text-[12px]">
+              <div className="mt-3 grid grid-cols-2 gap-2 font-data text-[15px]">
                 {quote.legs.map((l) => (
                   <div
                     key={l.kind}
@@ -269,7 +264,7 @@ export default function HomePage() {
               </button>
             </div>
           ) : (
-            <div className="panel flex h-full min-h-[280px] items-center justify-center p-6 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+            <div className="panel flex h-full min-h-[280px] items-center justify-center p-6 text-center font-data text-[15px] text-[var(--s-text-muted)]">
               {loading ? 'Pricing the live books…' : 'Select a model to see your discount.'}
             </div>
           )}
@@ -285,11 +280,11 @@ export default function HomePage() {
       >
         <div className="flex items-center gap-3">
           <span className="i-ph:chart-line-up text-[18px] text-[var(--s-accent)]" />
-          <span className="font-data text-[13px] text-[var(--s-text-secondary)]">
+          <span className="font-data text-[15px] text-[var(--s-text-secondary)]">
             Want the order books, depth and operator-by-operator quotes?
           </span>
         </div>
-        <span className="font-data text-[13px] font-semibold text-[var(--s-accent)]">Open the market →</span>
+        <span className="font-data text-[15px] font-semibold text-[var(--s-accent)]">Open the market →</span>
       </button>
     </div>
   )
@@ -312,12 +307,12 @@ function UsageDial({
     <div>
       <div className="flex items-baseline justify-between">
         <span className="mono-label">{label}</span>
-        <span className="font-data text-[16px] font-bold tabular-nums text-[var(--s-text)]">
+        <span className="font-data text-[18px] font-bold tabular-nums text-[var(--s-text)]">
           {tokens(value * 1e6)}
         </span>
       </div>
       <Slider value={value} min={1} max={max} onChange={onChange} className="mt-3" />
-      <p className="mt-1.5 font-data text-[11px] text-[var(--s-text-subtle)]">{hint}</p>
+      <p className="mt-1.5 font-data text-[12px] text-[var(--s-text-subtle)]">{hint}</p>
     </div>
   )
 }
@@ -415,11 +410,11 @@ function ProofStrip() {
               rel="noreferrer"
               className="flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-[var(--s-panel)]"
             >
-              <div className="min-w-0 font-data text-[13px] text-[var(--s-text-secondary)]">
+              <div className="min-w-0 font-data text-[15px] text-[var(--s-text-secondary)]">
                 <span className="font-semibold text-[var(--s-text)]">{tokens(Number(f.qtyTokens))}</span> {name}{' '}
                 <span className="text-[var(--s-text-muted)]">at {pricePerM(Number(f.execPriceMicroPerM))}</span>
               </div>
-              <div className="flex shrink-0 items-center gap-3 font-data text-[13px] tabular-nums">
+              <div className="flex shrink-0 items-center gap-3 font-data text-[15px] tabular-nums">
                 <span className="font-semibold text-[var(--s-emerald)]">{compactUsd(Number(f.costMicro))}</span>
                 <span className="hidden text-[var(--s-text-subtle)] sm:inline">tx ↗</span>
               </div>

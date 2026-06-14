@@ -42,7 +42,7 @@ export function WalletButton() {
         if (!isConnected || !address) {
           return (
             <button onClick={show} className="btn-primary h-10" disabled={status === 'reconnecting'}>
-              <span className="i-ph:wallet text-[16px]" />
+              <span className="i-ph:wallet text-[18px]" />
               {status === 'reconnecting' ? 'Reconnecting…' : 'Connect'}
             </button>
           )
@@ -56,7 +56,7 @@ export function WalletButton() {
               <span className="overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
                 <Identicon address={address as Address} size={28} />
               </span>
-              <span className="hidden font-data text-[13px] font-semibold text-[var(--s-text)] sm:inline">
+              <span className="hidden font-data text-[15px] font-semibold text-[var(--s-text)] sm:inline">
                 {truncate(address)}
               </span>
               {wrongChain ? (
@@ -73,10 +73,10 @@ export function WalletButton() {
                     <Identicon address={address as Address} size={36} />
                   </span>
                   <div className="min-w-0">
-                    <div className="font-data text-[14px] font-semibold text-[var(--s-text)]">
+                    <div className="font-data text-[15px] font-semibold text-[var(--s-text)]">
                       {truncate(address)}
                     </div>
-                    <div className="font-data text-[12px] text-[var(--s-text-muted)]">
+                    <div className="font-data text-[15px] text-[var(--s-text-muted)]">
                       {balance
                         ? `${(Number(balance.value) / 10 ** balance.decimals).toFixed(4)} ${balance.symbol}`
                         : '—'}{' '}
@@ -92,7 +92,7 @@ export function WalletButton() {
                       wrongChain ? 'bg-[var(--s-amber)] animate-pulse' : 'bg-[var(--s-emerald)]',
                     )}
                   />
-                  <span className="font-data text-[12px] text-[var(--s-text-secondary)]">
+                  <span className="font-data text-[15px] text-[var(--s-text-secondary)]">
                     {wrongChain ? `Wrong network (chain ${chainId})` : `Connected to ${SURPLUS_CHAIN.name}`}
                   </span>
                 </div>
@@ -132,7 +132,7 @@ export function WalletButton() {
                       disconnect()
                       setOpen(false)
                     }}
-                    className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[8px] border border-[var(--s-crimson)]/25 bg-[var(--s-crimson-soft)] font-data text-[13px] font-semibold uppercase tracking-wide text-[var(--s-crimson)] transition-colors hover:bg-[var(--s-crimson)]/20"
+                    className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[8px] border border-[var(--s-crimson)]/25 bg-[var(--s-crimson-soft)] font-data text-[15px] font-semibold uppercase tracking-wide text-[var(--s-crimson)] transition-colors hover:bg-[var(--s-crimson)]/20"
                   >
                     <span className="i-ph:x text-[15px]" />
                     Disconnect

@@ -68,17 +68,17 @@ export default function OperatorRegisterPage() {
               <ConnectKitButton.Custom>
                 {({ show }) => (
                   <button onClick={show} className="btn-primary h-11 w-full">
-                    <span className="i-ph:wallet text-[16px]" /> Connect wallet
+                    <span className="i-ph:wallet text-[18px]" /> Connect wallet
                   </button>
                 )}
               </ConnectKitButton.Custom>
             ) : bonded ? (
-              <div className="rounded-[8px] border border-[var(--s-emerald)]/30 bg-[var(--s-emerald-soft)] px-3 py-3 font-data text-[14px] text-[var(--s-emerald)]">
+              <div className="rounded-[8px] border border-[var(--s-emerald)]/30 bg-[var(--s-emerald-soft)] px-3 py-3 font-data text-[15px] text-[var(--s-emerald)]">
                 This wallet is a registered restaking operator.
               </div>
             ) : (
               <div className="grid gap-2.5">
-                <div className="flex items-center justify-between font-data text-[13px]">
+                <div className="flex items-center justify-between font-data text-[15px]">
                   <span className="text-[var(--s-text-muted)]">Your TNT</span>
                   <span className={cn('tabular-nums font-semibold', hasTnt ? 'text-[var(--s-text)]' : 'text-[var(--s-crimson)]')}>
                     {tntBalance.data !== undefined
@@ -112,7 +112,7 @@ export default function OperatorRegisterPage() {
                   {bond.isPending || bondRcpt.isLoading ? 'Bonding…' : 'Bond into restaking'}
                 </button>
                 {(approve.error || bond.error) && (
-                  <div className="rounded-[8px] border border-[var(--s-crimson)]/30 bg-[var(--s-crimson-soft)] px-3 py-2 font-data text-[12px] text-[var(--s-crimson)]">
+                  <div className="rounded-[8px] border border-[var(--s-crimson)]/30 bg-[var(--s-crimson-soft)] px-3 py-2 font-data text-[15px] text-[var(--s-crimson)]">
                     {(approve.error ?? bond.error)?.message.split('\n')[0]}
                   </div>
                 )}
@@ -122,8 +122,8 @@ export default function OperatorRegisterPage() {
         </Panel>
 
         <Panel title="Run the venue — register + serve">
-          <div className="px-4 py-4 font-data text-[13px]">
-            <p className="mb-3 font-body text-[13px] leading-relaxed text-[var(--s-text-muted)]">
+          <div className="px-4 py-4 font-data text-[15px]">
+            <p className="mb-3 font-body text-[15px] leading-relaxed text-[var(--s-text-muted)]">
               With the bond live, register for blueprint {CHAIN.blueprintId} and run the operator
               runtime. It joins the service set, quotes the book, and fulfills redemptions.
             </p>
@@ -132,7 +132,7 @@ export default function OperatorRegisterPage() {
             <Cmd>BLUEPRINT_ID={CHAIN.blueprintId} SERVICE_ID={CHAIN.serviceId} \
 TANGLE_CONTRACT={CHAIN.tangle} \
 surplus-operator run</Cmd>
-            <p className="mt-3 font-body text-[13px] leading-relaxed text-[var(--s-text-muted)]">
+            <p className="mt-3 font-body text-[15px] leading-relaxed text-[var(--s-text-muted)]">
               The live reference deployment serves{' '}
               <a className="text-[var(--s-accent)] hover:underline" href={VENUE_URL} target="_blank" rel="noreferrer">
                 {VENUE_URL.replace('https://', '')}
@@ -149,7 +149,7 @@ surplus-operator run</Cmd>
 
 function Cmd({ children }: { children: React.ReactNode }) {
   return (
-    <pre className="mb-2 overflow-x-auto rounded-[8px] border border-[var(--s-border)] bg-[var(--s-bg)] px-3 py-2.5 text-[12px] leading-relaxed text-[var(--s-text-secondary)]">
+    <pre className="mb-2 overflow-x-auto rounded-[8px] border border-[var(--s-border)] bg-[var(--s-bg)] px-3 py-2.5 text-[15px] leading-relaxed text-[var(--s-text-secondary)]">
       {children}
     </pre>
   )

@@ -158,7 +158,7 @@ export default function BuyPage() {
         {/* Model picker */}
         <Panel title="Model" className="lg:col-span-4" bodyClassName="max-h-[560px] overflow-y-auto">
           {tradeable.length === 0 && (
-            <div className="px-4 py-10 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+            <div className="px-4 py-10 text-center font-data text-[15px] text-[var(--s-text-muted)]">
               {instruments.isError ? 'Venue offline.' : 'Loading live markets…'}
             </div>
           )}
@@ -173,14 +173,14 @@ export default function BuyPage() {
             >
               <ProviderLogo provider={model.provider} size={30} />
               <div className="min-w-0 flex-1">
-                <div className="truncate font-body text-[14px] font-semibold text-[var(--s-text)]">
+                <div className="truncate font-body text-[15px] font-semibold text-[var(--s-text)]">
                   {model.name}
                 </div>
-                <div className="truncate font-data text-[12px] text-[var(--s-text-muted)]">
+                <div className="truncate font-data text-[15px] text-[var(--s-text-muted)]">
                   in {pricePerM(model.inputMicroPerM)} · out {pricePerM(model.outputMicroPerM)} list
                 </div>
               </div>
-              {model.id === modelId && <span className="i-ph:check text-[16px] text-[var(--s-accent)]" />}
+              {model.id === modelId && <span className="i-ph:check text-[18px] text-[var(--s-accent)]" />}
             </button>
           ))}
         </Panel>
@@ -192,24 +192,24 @@ export default function BuyPage() {
               <div>
                 <div className="flex items-baseline justify-between">
                   <span className="mono-label">Input tokens</span>
-                  <span className="font-data text-[16px] font-bold tabular-nums text-[var(--s-text)]">
+                  <span className="font-data text-[18px] font-bold tabular-nums text-[var(--s-text)]">
                     {tokens(inputM * 1_000_000)}
                   </span>
                 </div>
                 <Slider value={inputM} min={1} max={500} onChange={setInputM} className="mt-3" />
-                <p className="mt-2 font-data text-[12px] text-[var(--s-text-subtle)]">
+                <p className="mt-2 font-data text-[15px] text-[var(--s-text-subtle)]">
                   prompts, context, documents
                 </p>
               </div>
               <div>
                 <div className="flex items-baseline justify-between">
                   <span className="mono-label">Output tokens</span>
-                  <span className="font-data text-[16px] font-bold tabular-nums text-[var(--s-text)]">
+                  <span className="font-data text-[18px] font-bold tabular-nums text-[var(--s-text)]">
                     {tokens(outputM * 1_000_000)}
                   </span>
                 </div>
                 <Slider value={outputM} min={1} max={200} onChange={setOutputM} className="mt-3" />
-                <p className="mt-2 font-data text-[12px] text-[var(--s-text-subtle)]">
+                <p className="mt-2 font-data text-[15px] text-[var(--s-text-subtle)]">
                   completions, reasoning, code
                 </p>
               </div>
@@ -219,7 +219,7 @@ export default function BuyPage() {
           {entry && quote && (
             <Panel title="Firm quote — both legs">
               <div className="px-4 py-4">
-                <table className="w-full border-collapse font-data text-[14px]">
+                <table className="w-full border-collapse font-data text-[15px]">
                   <thead>
                     <tr className="border-b border-[var(--s-divider)] text-left">
                       <th className="mono-label h-9 text-left">Leg</th>
@@ -253,7 +253,7 @@ export default function BuyPage() {
                 </table>
 
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[10px] bg-[var(--s-emerald-soft)] px-4 py-3">
-                  <div className="font-data text-[14px] text-[var(--s-emerald)]">
+                  <div className="font-data text-[15px] text-[var(--s-emerald)]">
                     Monthly total {compactUsd(quote.costMicro)}{' '}
                     <span className="text-[var(--s-text-muted)] line-through">
                       {compactUsd(quote.listCostMicro)}
@@ -270,7 +270,7 @@ export default function BuyPage() {
                     <ConnectKitButton.Custom>
                       {({ show }) => (
                         <button onClick={show} className="btn-primary h-12 w-full !text-[15px]">
-                          <span className="i-ph:wallet text-[17px]" /> Connect to execute
+                          <span className="i-ph:wallet text-[18px]" /> Connect to execute
                         </button>
                       )}
                     </ConnectKitButton.Custom>
@@ -287,7 +287,7 @@ export default function BuyPage() {
                   )}
                 </div>
                 {receipts.length > 0 && (
-                  <div className="mt-3 rounded-[8px] border border-[var(--s-emerald)]/30 bg-[var(--s-emerald-soft)] px-3 py-2.5 font-data text-[13px] text-[var(--s-emerald)]">
+                  <div className="mt-3 rounded-[8px] border border-[var(--s-emerald)]/30 bg-[var(--s-emerald-soft)] px-3 py-2.5 font-data text-[15px] text-[var(--s-emerald)]">
                     Settled on Base Sepolia:{' '}
                     {receipts.map((r, i) => (
                       <span key={r.instrumentId}>
@@ -307,7 +307,7 @@ export default function BuyPage() {
                   </div>
                 )}
                 {error && (
-                  <div className="mt-3 rounded-[8px] border border-[var(--s-crimson)]/30 bg-[var(--s-crimson-soft)] px-3 py-2.5 font-data text-[13px] text-[var(--s-crimson)]">
+                  <div className="mt-3 rounded-[8px] border border-[var(--s-crimson)]/30 bg-[var(--s-crimson-soft)] px-3 py-2.5 font-data text-[15px] text-[var(--s-crimson)]">
                     {error}
                   </div>
                 )}
