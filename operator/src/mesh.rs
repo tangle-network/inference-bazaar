@@ -21,12 +21,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use bincode::Options;
 use blueprint_crypto::k256::K256Ecdsa;
 use blueprint_crypto::BytesEncoding;
-use blueprint_networking::service::NetworkCommandMessage;
 use blueprint_networking::service_handle::NetworkServiceHandle;
-use blueprint_networking::types::{MessageRouting, ProtocolMessage};
+use blueprint_networking::types::MessageRouting;
 use blueprint_networking::{AllowedKeys, NetworkConfig, NetworkService};
 use serde::{Deserialize, Serialize};
 use surplus_matcher::Attestation;
@@ -93,33 +91,11 @@ impl MeshNet {
             sender: self.handle.local_peer_id,
             recipient: None, // gossip to the whole whitelisted topic
         };
-        // Encode the ProtocolMessage envelope with bincode VARINT options —
-        // matching what the receive paths decode (`bincode::options()` in
-        // behaviour.rs/handler.rs). The handle's own `send()` encodes with
-        // plain `bincode::serialize` (FIXINT), which no receiver in
-        // blueprint-networking 0.2.0-alpha.7 can decode — the reason upstream's
-        // own gossip tests are `#[ignore]`d as "CI-flaky". Bypass it via the
-        // public command channel until the fix lands upstream.
-        let envelope = ProtocolMessage {
-            protocol: self.handle.blueprint_protocol_name.to_string(),
-            routing,
-            payload,
-        };
-        let raw = match bincode::options().serialize(&envelope) {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("mesh envelope encode failed: {e}");
-                return;
-            }
-        };
-        if let Err(e) = self
-            .handle
-            .send_network_message(NetworkCommandMessage::GossipMessage {
-                source: self.handle.local_peer_id,
-                topic: self.handle.blueprint_protocol_name.to_string(),
-                message: raw,
-            })
-        {
+        // `handle.send()` builds the ProtocolMessage envelope and encodes it
+        // with the canonical varint codec (blueprint #1454, networking
+        // 0.2.0-alpha.8), matching every receive path — so the prior manual
+        // envelope + bincode-varint workaround is gone.
+        if let Err(e) = self.handle.send(routing, payload) {
             tracing::warn!("mesh broadcast failed: {e}");
         }
     }
