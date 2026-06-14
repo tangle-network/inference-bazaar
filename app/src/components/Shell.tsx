@@ -193,39 +193,45 @@ export function Shell({ children }: { children: ReactNode }) {
           <NavItems collapsed={collapsed} />
         </div>
 
-        <div className={cn('mt-auto flex flex-col gap-2', !collapsed && 'px-1')}>
-          {/* Account dock — bottom-left, like the arena shell. Menu opens upward. */}
-          <WalletButton variant="sidebar" collapsed={collapsed} />
-          {/* Network status → the multi-instance operator directory. Shows the
-           * LIVE union count across all blueprint-17 instances, not a single
-           * pinned service. */}
-          <NavLink
-            to="/operators"
-            title={collapsed ? `Base Sepolia · Blueprint ${CHAIN.blueprintId} · ${liveLabel} — view operators` : undefined}
-            className={cn(
-              'panel panel-hover',
-              collapsed ? 'mx-auto flex h-10 w-11 items-center justify-center' : 'block px-3 py-3',
-            )}
-          >
-            {collapsed ? (
-              <span className="i-ph:cube text-[18px] text-[var(--s-accent)]" />
-            ) : (
-              <>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="i-ph:cube text-[18px] text-[var(--s-accent)]" />
-                    <span className="font-data text-[15px] font-semibold uppercase tracking-wider text-[var(--s-text-secondary)]">
-                      Base Sepolia
-                    </span>
-                  </div>
-                  <span className="i-ph:caret-right text-[14px] text-[var(--s-text-subtle)]" />
-                </div>
-                <p className="mt-1.5 font-data text-[15px] leading-snug text-[var(--s-text-muted)]">
-                  Blueprint {CHAIN.blueprintId} · {liveLabel}
-                </p>
-              </>
-            )}
-          </NavLink>
+        {/* Account dock — bottom-left, mirroring the arena shell: a recessed tray
+         * holding the account control + a clean network pill (no blueprint chrome). */}
+        <div className={cn('mt-auto', collapsed ? 'flex flex-col items-center gap-1.5' : 'px-1')}>
+          {collapsed ? (
+            <>
+              <WalletButton variant="sidebar" collapsed />
+              <NavLink
+                to="/operators"
+                title={`Base Sepolia · ${liveLabel} — view operators`}
+                className="relative flex h-10 w-11 items-center justify-center rounded-[8px] border border-[var(--s-border)] bg-[var(--s-panel)] text-[var(--s-text-muted)] transition-colors hover:border-[var(--s-border-hover)] hover:text-[var(--s-text)]"
+              >
+                <span className="i-ph:globe-hemisphere-west text-[18px]" />
+                <span
+                  className={cn(
+                    'absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-[var(--s-surface)]',
+                    liveOps > 0 ? 'bg-[var(--s-emerald)]' : 'bg-[var(--s-amber)]',
+                  )}
+                />
+              </NavLink>
+            </>
+          ) : (
+            <div className="rounded-[10px] border border-[var(--s-border)] bg-[var(--s-surface)] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+              <WalletButton variant="sidebar" />
+              <NavLink
+                to="/operators"
+                title={`Base Sepolia · ${liveLabel} — view operators`}
+                className="mt-1.5 flex h-10 w-full items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-panel)] px-2.5 text-[var(--s-text-secondary)] transition-colors hover:border-[var(--s-border-hover)] hover:text-[var(--s-text)]"
+              >
+                <span className="i-ph:globe-hemisphere-west shrink-0 text-[18px] text-[var(--s-text-muted)]" />
+                <span className="truncate font-data text-[15px] font-medium">Base Sepolia</span>
+                <span
+                  className={cn(
+                    'ml-auto h-2 w-2 shrink-0 rounded-full',
+                    liveOps > 0 ? 'bg-[var(--s-emerald)]' : 'bg-[var(--s-amber)]',
+                  )}
+                />
+              </NavLink>
+            </div>
+          )}
         </div>
       </aside>
 

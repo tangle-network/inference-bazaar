@@ -82,5 +82,6 @@ export default defineConfig({
     'i-ph:fire', 'i-ph:drop', 'i-ph:stack', 'i-ph:seal-check', 'i-ph:link-simple',
     'i-ph:key', 'i-ph:lock-simple', 'i-ph:trend-up', 'i-ph:trend-down',
     'i-ph:cube', 'i-ph:plugs-connected', 'i-ph:receipt', 'i-ph:list-dashes',
+    'i-ph:globe-hemisphere-west',
   ],
 })
