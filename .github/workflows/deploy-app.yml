@@ -1,0 +1,46 @@
+name: deploy-app
+
+# Auto-publish the market UI to Cloudflare Pages (project: surplus-market) on
+# every push to main that touches the app. The Pages project is Direct-Upload
+# (no git integration), so without this nothing redeploys and the live site
+# silently freezes at whatever was last uploaded by hand.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/deploy-app.yml"
+  workflow_dispatch: # manual redeploy of current main
+
+concurrency:
+  group: deploy-app
+  cancel-in-progress: true
+
+jobs:
+  pages:
+    name: build + deploy app to Cloudflare Pages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: install
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+      - name: build
+        working-directory: app
+        run: pnpm build
+      - name: deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # The project's production branch is "master"; deploying with that label
+          # lands the build on the production alias (surplus-market.pages.dev). The
+          # repo's working branch is main — for a Direct-Upload project the --branch
+          # flag is only the production/preview selector, not a git ref.
+          command: pages deploy app/dist --project-name=surplus-market --branch=master --commit-hash=${{ github.sha }}
