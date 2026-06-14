@@ -4,33 +4,8 @@ import { cn } from '~/lib/cn'
 import { toggleTheme, useTheme } from '~/lib/theme'
 import { privacyOn, setPrivacy } from '~/lib/privacy'
 import { WalletButton } from '~/components/WalletButton'
+import { NetworkSwitcher } from '~/components/NetworkSwitcher'
 import { SurplusBrand } from '~/components/TangleLogo'
-import { CHAIN, useVenueHealth } from '~/lib/api'
-import { useVenueRegistry } from '~/lib/venues'
-
-/** Measured, not asserted: live venue health + latency. */
-function VenueStatus() {
-  const health = useVenueHealth()
-  return (
-    <a
-      href={`${CHAIN.explorer}/address/${CHAIN.tangle}`}
-      target="_blank"
-      rel="noreferrer"
-      className="hidden items-center gap-2 rounded-[8px] border border-[var(--s-border)] px-2.5 py-1.5 transition-colors hover:border-[var(--s-border-hover)] lg:flex"
-      title="Home venue health · Surplus on Base Sepolia (Blueprint 17)"
-    >
-      <span
-        className={cn(
-          'h-2 w-2 rounded-full',
-          health.data?.ok ? 'bg-[var(--s-emerald)]' : health.isError ? 'bg-[var(--s-crimson)]' : 'bg-[var(--s-amber)] animate-pulse',
-        )}
-      />
-      <span className="font-data text-[15px] tabular-nums text-[var(--s-text-muted)]">
-        {health.data?.ok ? `venue ${health.data.latencyMs}ms` : health.isError ? 'venue down' : 'venue…'}
-      </span>
-    </a>
-  )
-}
 
 // Outcome-led: the buyer's two verbs first (get cheaper inference, hold it),
 // then the engine room (books, sellers, operators, the on-chain trail).
@@ -135,11 +110,6 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_KEY, collapsed ? 'true' : 'false')
   }, [collapsed])
-  // Multi-instance: how many operators are live across ALL blueprint-17 instances
-  // (the registry union), not a single pinned service.
-  const registry = useVenueRegistry()
-  const liveOps = (registry.data ?? []).filter((v) => v.healthy).length
-  const liveLabel = registry.data ? `${liveOps} operator${liveOps === 1 ? '' : 's'} live` : 'live on-chain'
   const loc = useLocation()
 
   return (
@@ -193,53 +163,41 @@ export function Shell({ children }: { children: ReactNode }) {
           <NavItems collapsed={collapsed} />
         </div>
 
-        {/* Account dock — bottom-left, mirroring the arena shell: a recessed tray
-         * holding the account control + a clean network pill (no blueprint chrome). */}
-        <div className={cn('mt-auto', collapsed ? 'flex flex-col items-center gap-1.5' : 'px-1')}>
+        {/* Controls dock — bottom-left (arena pattern). The top bar is killed on
+         * desktop, so theme + privacy, the account, and the network switcher all
+         * live here. */}
+        <div className={cn('mt-auto', collapsed ? 'flex flex-col items-center gap-1.5' : 'space-y-2 px-1')}>
           {collapsed ? (
             <>
+              <ThemeButton />
+              <PrivacyButton />
               <WalletButton variant="sidebar" collapsed />
-              <NavLink
-                to="/operators"
-                title={`Base Sepolia · ${liveLabel} — view operators`}
-                className="relative flex h-10 w-11 items-center justify-center rounded-[8px] border border-[var(--s-border)] bg-[var(--s-panel)] text-[var(--s-text-muted)] transition-colors hover:border-[var(--s-border-hover)] hover:text-[var(--s-text)]"
-              >
-                <span className="i-ph:globe-hemisphere-west text-[18px]" />
-                <span
-                  className={cn(
-                    'absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-[var(--s-surface)]',
-                    liveOps > 0 ? 'bg-[var(--s-emerald)]' : 'bg-[var(--s-amber)]',
-                  )}
-                />
-              </NavLink>
+              <NetworkSwitcher collapsed />
             </>
           ) : (
-            <div className="rounded-[10px] border border-[var(--s-border)] bg-[var(--s-surface)] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-              <WalletButton variant="sidebar" />
-              <NavLink
-                to="/operators"
-                title={`Base Sepolia · ${liveLabel} — view operators`}
-                className="mt-1.5 flex h-10 w-full items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-panel)] px-2.5 text-[var(--s-text-secondary)] transition-colors hover:border-[var(--s-border-hover)] hover:text-[var(--s-text)]"
-              >
-                <span className="i-ph:globe-hemisphere-west shrink-0 text-[18px] text-[var(--s-text-muted)]" />
-                <span className="truncate font-data text-[15px] font-medium">Base Sepolia</span>
-                <span
-                  className={cn(
-                    'ml-auto h-2 w-2 shrink-0 rounded-full',
-                    liveOps > 0 ? 'bg-[var(--s-emerald)]' : 'bg-[var(--s-amber)]',
-                  )}
-                />
-              </NavLink>
-            </div>
+            <>
+              <div className="flex items-center gap-1.5">
+                <ThemeButton />
+                <PrivacyButton />
+              </div>
+              <div className="rounded-[10px] border border-[var(--s-border)] bg-[var(--s-surface)] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+                <WalletButton variant="sidebar" />
+                <div className="mt-1.5">
+                  <NetworkSwitcher />
+                </div>
+              </div>
+            </>
           )}
         </div>
       </aside>
 
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Top bar */}
-        <header className="relative z-30 flex h-[var(--header-h)] shrink-0 items-center justify-between gap-3 border-b border-[var(--s-border)] bg-[color-mix(in_srgb,var(--s-surface)_55%,transparent)] px-4 backdrop-blur-xl">
-          <div className="flex items-center gap-3 lg:hidden">
+        {/* No desktop top bar — all controls live in the sidebar, so the content
+         * gets the full height. A slim bar appears only on mobile, where the
+         * sidebar is hidden. */}
+        <header className="relative z-30 flex h-[var(--header-h)] shrink-0 items-center justify-between gap-3 border-b border-[var(--s-border)] bg-[color-mix(in_srgb,var(--s-surface)_55%,transparent)] px-4 backdrop-blur-xl lg:hidden">
+          <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileNav((v) => !v)}
               className="flex h-9 w-9 items-center justify-center rounded-[6px] border border-[var(--s-border)] text-[var(--s-text-secondary)]"
@@ -248,15 +206,10 @@ export function Shell({ children }: { children: ReactNode }) {
             </button>
             <SurplusBrand />
           </div>
-          <VenueStatus />
           <div className="flex items-center gap-2">
             <PrivacyButton />
             <ThemeButton />
-            {/* Desktop docks the wallet in the sidebar; the top bar carries it only
-             * on mobile, where the sidebar is hidden. */}
-            <div className="lg:hidden">
-              <WalletButton />
-            </div>
+            <WalletButton />
           </div>
         </header>
 

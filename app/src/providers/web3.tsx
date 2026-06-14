@@ -40,3 +40,13 @@ export function Web3Provider({ children }: { children: ReactNode }) {
 }
 
 export const SURPLUS_CHAIN = baseSepolia
+
+/** Chains Surplus runs on, for the network switcher. Only Base Sepolia is live
+ * today; Base mainnet is listed (disabled) so the switcher is ready for the
+ * mainnet cutover — flip `live`, add the chain to `chains` above, and wire its
+ * contract addresses. */
+export type SurplusChainInfo = { id: number; name: string; short: string; live: boolean }
+export const SURPLUS_CHAINS: SurplusChainInfo[] = [
+  { id: baseSepolia.id, name: 'Base Sepolia', short: 'Base Sepolia', live: true },
+  { id: 8453, name: 'Base', short: 'Base mainnet', live: false },
+]
