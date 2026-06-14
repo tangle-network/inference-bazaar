@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { cn } from '~/lib/cn'
 import { toggleTheme, useTheme } from '~/lib/theme'
@@ -83,7 +83,7 @@ function PrivacyButton() {
   )
 }
 
-function NavItems({ onNavigate }: { onNavigate?: () => void }) {
+function NavItems({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   return (
     <nav className="flex flex-col gap-0.5">
       {NAV.map((item) => (
@@ -92,9 +92,13 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
           to={item.to}
           end={item.end}
           onClick={onNavigate}
+          // Collapsed: native tooltip carries the label the text span drops.
+          title={collapsed ? item.label : undefined}
+          aria-label={collapsed ? item.label : undefined}
           className={({ isActive }) =>
             cn(
-              'group relative flex items-center gap-3 rounded-[8px] px-3 py-2.5 font-data text-[14px] font-medium transition-colors',
+              'group relative flex items-center rounded-[8px] font-data text-[14px] font-medium transition-colors',
+              collapsed ? 'h-10 w-11 justify-center px-0' : 'gap-3 px-3 py-2.5',
               isActive
                 ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
                 : 'text-[var(--s-text-muted)] hover:bg-[var(--s-panel)] hover:text-[var(--s-text-secondary)]',
@@ -106,8 +110,8 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
               {isActive && (
                 <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-[var(--s-accent)]" />
               )}
-              <span className={cn(item.icon, 'text-[19px]')} />
-              {item.label}
+              <span className={cn(item.icon, 'shrink-0 text-[19px]')} />
+              {!collapsed && item.label}
             </>
           )}
         </NavLink>
@@ -116,37 +120,93 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+const SIDEBAR_KEY = 'surplus:sidebar-collapsed'
+
 export function Shell({ children }: { children: ReactNode }) {
   const [mobileNav, setMobileNav] = useState(false)
+  const [collapsed, setCollapsed] = useState(
+    () => typeof window !== 'undefined' && window.localStorage.getItem(SIDEBAR_KEY) === 'true',
+  )
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_KEY, collapsed ? 'true' : 'false')
+  }, [collapsed])
   const loc = useLocation()
 
   return (
     <div className="flex h-[100dvh] overflow-hidden">
-      {/* Sidebar — desktop */}
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-[var(--s-border)] bg-[color-mix(in_srgb,var(--s-surface)_70%,transparent)] px-3 py-4 lg:flex">
-        <div className="px-1.5">
-          <SurplusBrand />
+      {/* Sidebar — desktop. Collapsible to an icon rail (persisted). */}
+      <aside
+        className={cn(
+          'hidden shrink-0 flex-col border-r border-[var(--s-border)] bg-[color-mix(in_srgb,var(--s-surface)_70%,transparent)] py-4 transition-[width] duration-200 lg:flex',
+          collapsed ? 'w-16 px-2' : 'w-60 px-3',
+        )}
+      >
+        {/* Brand row + collapse control */}
+        {collapsed ? (
+          <div className="group/brand relative mx-auto h-10 w-10">
+            <NavLink
+              to="/"
+              aria-label="Surplus home"
+              className="flex h-10 w-10 items-center justify-center rounded-[8px] transition-colors hover:bg-[var(--s-panel)]"
+            >
+              <SurplusBrand compact />
+            </NavLink>
+            <button
+              onClick={() => setCollapsed(false)}
+              aria-label="Expand sidebar"
+              title="Expand sidebar"
+              className="pointer-events-none absolute inset-0 flex h-10 w-10 items-center justify-center rounded-[8px] border border-[var(--s-border-hover)] bg-[var(--s-panel)] text-[var(--s-text-secondary)] opacity-0 shadow-[var(--s-shadow-pop)] transition-opacity duration-150 hover:text-[var(--s-text)] focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/brand:pointer-events-auto group-hover/brand:opacity-100"
+            >
+              <span className="i-ph:caret-right-bold text-[16px]" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-2 pl-1.5">
+            <NavLink to="/" aria-label="Surplus home" className="min-w-0">
+              <SurplusBrand />
+            </NavLink>
+            <button
+              onClick={() => setCollapsed(true)}
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[var(--s-text-muted)] transition-colors hover:bg-[var(--s-panel)] hover:text-[var(--s-text)]"
+            >
+              <span className="i-ph:caret-left-bold text-[16px]" />
+            </button>
+          </div>
+        )}
+
+        <div className={cn('mt-6', !collapsed && 'px-1')}>
+          {!collapsed && <div className="mono-label mb-2 px-2">Market</div>}
+          <NavItems collapsed={collapsed} />
         </div>
-        <div className="mt-6 px-1">
-          <div className="mono-label mb-2 px-2">Market</div>
-          <NavItems />
-        </div>
-        <div className="mt-auto px-1">
+
+        <div className={cn('mt-auto', !collapsed && 'px-1')}>
           <a
             href={`${CHAIN.explorer}/address/${CHAIN.tangle}`}
             target="_blank"
             rel="noreferrer"
-            className="panel panel-hover block px-3 py-3"
+            title={collapsed ? `Base Sepolia · Blueprint ${CHAIN.blueprintId} · service ${CHAIN.serviceId}` : undefined}
+            className={cn(
+              'panel panel-hover',
+              collapsed ? 'mx-auto flex h-10 w-11 items-center justify-center' : 'block px-3 py-3',
+            )}
           >
-            <div className="flex items-center gap-2">
+            {collapsed ? (
               <span className="i-ph:shield-check-fill text-[16px] text-[var(--s-accent)]" />
-              <span className="font-data text-[12px] font-semibold uppercase tracking-wider text-[var(--s-text-secondary)]">
-                Base Sepolia
-              </span>
-            </div>
-            <p className="mt-1.5 font-data text-[12px] leading-snug text-[var(--s-text-muted)]">
-              Blueprint {CHAIN.blueprintId} · service {CHAIN.serviceId}
-            </p>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="i-ph:shield-check-fill text-[16px] text-[var(--s-accent)]" />
+                  <span className="font-data text-[12px] font-semibold uppercase tracking-wider text-[var(--s-text-secondary)]">
+                    Base Sepolia
+                  </span>
+                </div>
+                <p className="mt-1.5 font-data text-[12px] leading-snug text-[var(--s-text-muted)]">
+                  Blueprint {CHAIN.blueprintId} · service {CHAIN.serviceId}
+                </p>
+              </>
+            )}
           </a>
         </div>
       </aside>
