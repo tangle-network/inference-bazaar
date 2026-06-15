@@ -1,0 +1,6 @@
+# Cloudflare Pages headers. Fail-closed framing: allow the app to be embedded
+# ONLY by Tangle Cloud (the iframe-blueprint host), plus itself. Without this,
+# Pages sets no frame directive at all (fail-open). frame-ancestors is the modern
+# replacement for X-Frame-Options and supports multiple origins.
+/*
+  Content-Security-Policy: frame-ancestors 'self' https://cloud.tangle.tools https://develop.cloud.tangle.tools
