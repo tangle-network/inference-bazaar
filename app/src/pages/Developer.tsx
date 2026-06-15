@@ -1,13 +1,23 @@
 import { useState } from 'react'
-import { useAccount, useReadContract } from 'wagmi'
+import { useAccount, useReadContract, useSignTypedData } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
+import type { Address, Hex } from 'viem'
 import { PageHeader } from '~/components/PageHeader'
 import { ApiKeyMint } from '~/components/ApiKeyMint'
 import { Panel, Stat } from '~/components/ui'
 import { compactUsd, tokens, truncAddr } from '~/lib/format'
 import { CHAIN, VENUE_URL } from '~/lib/api'
-import { SETTLEMENT, SETTLEMENT_ABI, useMyLots, type CreditLot } from '~/lib/settlement'
-import { useVenueRegistry, endpointFor } from '~/lib/venues'
+import {
+  EIP712_DOMAIN,
+  SETTLEMENT,
+  SETTLEMENT_ABI,
+  USAGE_QUERY_TYPES,
+  fetchVenueUsage,
+  useMyLots,
+  type CreditLot,
+  type MeterRow,
+} from '~/lib/settlement'
+import { useVenueRegistry, endpointFor, type Venue } from '~/lib/venues'
 import { privacyOn } from '~/lib/privacy'
 
 function CopyButton({ text }: { text: string }) {
@@ -22,34 +32,47 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
-/** What a credit lot has drawn down vs what it was minted with — both on-chain. */
-function SpendMeter({ lot }: { lot: CreditLot }) {
+/** The venue that issued a lot — its operator is the only one that meters it. */
+function venueUrlForLot(lot: CreditLot, venues: Venue[] | undefined): string {
+  const issuer = venues?.find(
+    (v) => v.healthy && v.operator.toLowerCase() === lot.issuer.toLowerCase(),
+  )
+  return issuer ? endpointFor(issuer, privacyOn()) : VENUE_URL
+}
+
+/** On-chain draw-down (settled). When a signed live read is present, the
+ * vouchered-but-unsettled `inflight` is shown too — it's the spend the chain
+ * can't see yet. */
+function SpendMeter({ lot, live }: { lot: CreditLot; live?: MeterRow }) {
   const filled = Number(lot.filledTokens)
   const spendable = Number(lot.qtyTokens - lot.lockedTokens)
   const locked = Number(lot.lockedTokens)
   const spent = Math.max(0, filled - Number(lot.qtyTokens))
   const pctSpent = filled > 0 ? Math.min(100, (spent / filled) * 100) : 0
   const pctLocked = filled > 0 ? Math.min(100 - pctSpent, (locked / filled) * 100) : 0
+  const pctInflight =
+    live && filled > 0 ? Math.min(100 - pctSpent - pctLocked, (live.inflightTokens / filled) * 100) : 0
   return (
     <div className="w-full">
       <div className="flex items-baseline justify-between font-data text-[15px]">
         <span className="text-[var(--s-emerald)]">{tokens(spendable)} left</span>
-        <span className="text-[var(--s-text-muted)]">{tokens(spent)} spent of {tokens(filled)}</span>
+        <span className="text-[var(--s-text-muted)]">
+          {tokens(spent)} spent of {tokens(filled)}
+          {live && live.inflightTokens > 0 && (
+            <span className="text-[var(--s-accent)]"> · {tokens(live.inflightTokens)} in-flight</span>
+          )}
+        </span>
       </div>
       <div className="mt-1.5 flex h-1.5 w-full overflow-hidden rounded-full bg-[var(--s-emerald-soft)]">
         <span className="h-full bg-[var(--s-text-muted)]" style={{ width: `${pctSpent}%` }} />
         <span className="h-full bg-[var(--s-amber)]" style={{ width: `${pctLocked}%` }} />
+        <span className="h-full bg-[var(--s-accent)]" style={{ width: `${pctInflight}%` }} />
       </div>
     </div>
   )
 }
 
-function LotKey({ lot }: { lot: CreditLot }) {
-  const registry = useVenueRegistry()
-  const issuerVenue = registry.data?.find(
-    (v) => v.healthy && v.operator.toLowerCase() === lot.issuer.toLowerCase(),
-  )
-  const venueUrl = issuerVenue ? endpointFor(issuerVenue, privacyOn()) : VENUE_URL
+function LotKey({ lot, venueUrl, live }: { lot: CreditLot; venueUrl: string; live?: MeterRow }) {
   const expired = Number(lot.expiry) * 1000 < Date.now()
   return (
     <Panel bodyClassName="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -69,7 +92,7 @@ function LotKey({ lot }: { lot: CreditLot }) {
             {expired ? 'expired' : `expires ${new Date(Number(lot.expiry) * 1000).toLocaleDateString()}`}
           </span>
         </div>
-        <SpendMeter lot={lot} />
+        <SpendMeter lot={lot} live={live} />
       </div>
       <div className="shrink-0">
         <ApiKeyMint lot={lot} venueUrl={venueUrl} />
@@ -87,14 +110,61 @@ resp = client.chat.completions.create(
 )`
 
 /**
- * The developer surface: credits as an API. Balances and spend are read straight
- * from the chain (filled − remaining), so the numbers can't drift from what the
- * settlement contract enforces. Per-call telemetry (calls/USD) is a follow-up
- * served by the operator meter through the Tangle Router — not faked here.
+ * Holder-signed read of live spend across every venue the holder has lots with.
+ * ONE signature (UsageQuery is venue-independent) is fanned out to each distinct
+ * venue; an unreachable venue is skipped, not fatal. Returns rows keyed by lotId.
+ */
+function useLiveUsage(address: Address | undefined) {
+  const { signTypedDataAsync } = useSignTypedData()
+  const [rows, setRows] = useState<Map<Hex, MeterRow> | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function sync(lots: CreditLot[], venues: Venue[] | undefined) {
+    if (!address) return
+    setSyncing(true)
+    setError(null)
+    try {
+      const expiry = Math.floor(Date.now() / 1000) + 300
+      const sig = (await signTypedDataAsync({
+        domain: EIP712_DOMAIN,
+        types: USAGE_QUERY_TYPES,
+        primaryType: 'UsageQuery',
+        message: { holder: address, expiry: BigInt(expiry) },
+      })) as Hex
+      const urls = [...new Set(lots.map((l) => venueUrlForLot(l, venues)))]
+      const merged = new Map<Hex, MeterRow>()
+      const results = await Promise.allSettled(
+        urls.map((u) => fetchVenueUsage(u, address, expiry, sig)),
+      )
+      for (const r of results) {
+        if (r.status === 'fulfilled') for (const [k, v] of r.value) merged.set(k, v)
+      }
+      if (merged.size === 0 && results.every((r) => r.status === 'rejected')) {
+        throw new Error('no venue could be reached')
+      }
+      setRows(merged)
+    } catch (e) {
+      setError(e instanceof Error ? e.message.split('\n')[0]! : String(e))
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  return { rows, syncing, error, sync }
+}
+
+/**
+ * The developer surface: credits as an API. On-chain balances and spend are read
+ * straight from the chain (filled − remaining), so they can't drift from what the
+ * settlement contract enforces. "Sync live usage" signs a UsageQuery and overlays
+ * the real-time, vouchered-but-unsettled spend the chain can't show yet.
  */
 export default function DeveloperPage() {
   const { address, isConnected } = useAccount()
   const lots = useMyLots(address)
+  const registry = useVenueRegistry()
+  const meter = useLiveUsage(address)
   const settlementBalance = useReadContract({
     address: SETTLEMENT.address,
     abi: SETTLEMENT_ABI,
@@ -128,23 +198,47 @@ export default function DeveloperPage() {
   const all = lots.data ?? []
   const remaining = all.reduce((n, l) => n + Number(l.qtyTokens - l.lockedTokens), 0)
   const spent = all.reduce((n, l) => n + Math.max(0, Number(l.filledTokens - l.qtyTokens)), 0)
-  const live = all.filter((l) => l.qtyTokens - l.lockedTokens > 0n && Number(l.expiry) * 1000 > Date.now())
+  const liveKeys = all.filter((l) => l.qtyTokens - l.lockedTokens > 0n && Number(l.expiry) * 1000 > Date.now())
+  const inflight = meter.rows ? [...meter.rows.values()].reduce((n, r) => n + r.inflightTokens, 0) : null
 
   return (
     <div>
-      <PageHeader title="Developer" subtitle="Your inference credits, as an OpenAI-compatible API." />
+      <PageHeader
+        title="Developer"
+        subtitle="Your inference credits, as an OpenAI-compatible API."
+        right={
+          all.length > 0 ? (
+            <button
+              onClick={() => void meter.sync(all, registry.data)}
+              disabled={meter.syncing}
+              className="btn-secondary h-9 whitespace-nowrap"
+              title="Sign a read-only query to fetch live, unsettled spend from your operators"
+            >
+              <span className={meter.syncing ? 'i-ph:circle-notch animate-spin text-[16px]' : 'i-ph:pulse text-[16px]'} />
+              {meter.syncing ? 'Signing…' : meter.rows ? 'Refresh live usage' : 'Sync live usage'}
+            </button>
+          ) : undefined
+        }
+      />
 
       <div className="px-4 py-4 sm:px-6">
         <div className="panel grid grid-cols-2 divide-x divide-[var(--s-divider)] sm:grid-cols-4">
           <Stat label="Credits left" value={lots.isLoading ? '…' : tokens(remaining)} tone="emerald" sub="spendable tokens" />
-          <Stat label="Spent" value={lots.isLoading ? '…' : tokens(spent)} sub="drawn down on-chain" />
-          <Stat label="Active keys" value={lots.isLoading ? '…' : live.length} tone="accent" sub="usable lots" />
+          <Stat
+            label="Spent"
+            value={lots.isLoading ? '…' : tokens(spent)}
+            sub={inflight != null && inflight > 0 ? `+${tokens(inflight)} in-flight` : 'drawn down on-chain'}
+          />
+          <Stat label="Active keys" value={lots.isLoading ? '…' : liveKeys.length} tone="accent" sub="usable lots" />
           <Stat
             label="Settlement balance"
             value={settlementBalance.data !== undefined ? compactUsd(Number(settlementBalance.data)) : '…'}
             sub="deposited tsUSD"
           />
         </div>
+        {meter.error && (
+          <p className="mt-2 font-data text-[12px] text-[var(--s-crimson)]">Live usage: {meter.error}</p>
+        )}
       </div>
 
       <div className="px-4 sm:px-6">
@@ -179,7 +273,12 @@ export default function DeveloperPage() {
         ) : (
           <div className="flex flex-col gap-3">
             {all.map((lot) => (
-              <LotKey key={lot.lotId} lot={lot} />
+              <LotKey
+                key={lot.lotId}
+                lot={lot}
+                venueUrl={venueUrlForLot(lot, registry.data)}
+                live={meter.rows?.get(lot.lotId)}
+              />
             ))}
           </div>
         )}

@@ -67,6 +67,58 @@ export const RECEIPT_TYPES = {
   ],
 } as const
 
+/** Off-chain auth for the `/v1/usage` meter read: the holder signs this and the
+ * venue returns only that holder's channels. Bound to the settlement domain so a
+ * captured signature can't be replayed at another deployment. Must match the
+ * operator's USAGE_QUERY_TYPE (`UsageQuery(address holder,uint64 expiry)`). */
+export const USAGE_QUERY_TYPES = {
+  UsageQuery: [
+    { name: 'holder', type: 'address' },
+    { name: 'expiry', type: 'uint64' },
+  ],
+} as const
+
+/** One channel's live counters as the venue meters them. `served` runs ahead of
+ * on-chain `settled` by exactly `inflight` (vouchered-but-unsettled). */
+export interface MeterRow {
+  lotId: Hex
+  maxTokens: number
+  servedTokens: number
+  settledTokens: number
+  inflightTokens: number
+  remainingTokens: number
+}
+
+/** Holder-authenticated read of live spend from ONE venue. Returns its rows keyed
+ * by lotId; throws on a non-200 so the caller can skip an unreachable venue. */
+export async function fetchVenueUsage(
+  venueUrl: string,
+  holder: Address,
+  expiry: number,
+  sig: Hex,
+): Promise<Map<Hex, MeterRow>> {
+  const res = await fetch(`${venueUrl}/v1/usage`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ holder, expiry, sig }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  const out = (await res.json()) as { lots?: Array<Record<string, unknown>> }
+  const rows = new Map<Hex, MeterRow>()
+  for (const l of out.lots ?? []) {
+    const lotId = l.lotId as Hex
+    rows.set(lotId, {
+      lotId,
+      maxTokens: Number(l.maxTokens ?? 0),
+      servedTokens: Number(l.servedTokens ?? 0),
+      settledTokens: Number(l.settledTokens ?? 0),
+      inflightTokens: Number(l.inflightTokens ?? 0),
+      remainingTokens: Number(l.remainingTokens ?? 0),
+    })
+  }
+  return rows
+}
+
 export const ORDER_TYPES = {
   Order: [
     { name: 'instrument', type: 'bytes32' },
