@@ -110,6 +110,12 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_KEY, collapsed ? 'true' : 'false')
   }, [collapsed])
+  // Embedded as a Tangle Cloud iframe blueprint: the host supplies the blueprint
+  // identity/chrome, so drop our own brand lockup to avoid double identity.
+  const embedded =
+    typeof window !== 'undefined' &&
+    (window.self !== window.top ||
+      new URLSearchParams(window.location.search).get('embed') === '1')
   const loc = useLocation()
 
   return (
@@ -123,8 +129,8 @@ export function Shell({ children }: { children: ReactNode }) {
           collapsed ? 'w-16 px-2' : 'w-60 px-3',
         )}
       >
-        {/* Brand row + collapse control */}
-        {collapsed ? (
+        {/* Brand row + collapse control (hidden when embedded — host owns identity) */}
+        {embedded ? null : collapsed ? (
           <div className="group/brand relative mx-auto h-10 w-10">
             <NavLink
               to="/"
