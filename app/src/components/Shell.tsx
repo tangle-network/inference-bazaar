@@ -12,6 +12,7 @@ import { InferenceBazaarBrand } from '~/components/TangleLogo'
 const NAV = [
   { to: '/', label: 'Buy inference', icon: 'i-ph:lightning', end: true },
   { to: '/portfolio', label: 'Portfolio', icon: 'i-ph:wallet' },
+  { to: '/developer', label: 'Developer', icon: 'i-ph:code' },
   { to: '/markets', label: 'Order books', icon: 'i-ph:chart-line-up' },
   { to: '/sell', label: 'Sell', icon: 'i-ph:storefront' },
   { to: '/operators', label: 'Operators', icon: 'i-ph:hard-drives' },

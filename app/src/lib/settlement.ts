@@ -203,8 +203,11 @@ export async function flushSettlement(venueUrl?: string): Promise<Record<string,
 export interface CreditLot {
   lotId: Hex
   instrument: Hex
+  /** Tokens still spendable on-chain — decreases with each settled draw-down. */
   qtyTokens: bigint
   lockedTokens: bigint
+  /** Tokens this lot was minted with (from FillSettled). filled − qty = spent. */
+  filledTokens: bigint
   expiry: bigint
   notionalMicro: bigint
   issuer: Address
@@ -243,6 +246,8 @@ export function useMyLots(address: Address | undefined) {
           instrument,
           qtyTokens,
           lockedTokens,
+          // The fill that minted this lot — its size is the spend denominator.
+          filledTokens: (log.args.qtyTokens as bigint | undefined) ?? qtyTokens,
           expiry,
           notionalMicro,
           issuer,
