@@ -13,10 +13,10 @@ import { usePublicClient } from 'wagmi'
 import { CHAIN, VENUE_URL } from './api'
 
 export const SETTLEMENT = {
-  address: '0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83' as Address,
+  address: '0x31D0215d77A06ff97Cb61BbBe4b931Ac0D1da8aA' as Address,
   usd: '0x14Ff9231D03Fd9AD75e553004585f13Ff51db630' as Address,
   /** Block the contracts deployed at — event scans start here. */
-  fromBlock: 42755608n,
+  fromBlock: 42887343n,
 }
 
 export const EIP712_DOMAIN = {
@@ -31,7 +31,7 @@ export const SERVE_DOMAIN = {
   name: 'InferenceBazaarServe',
   version: '1',
   chainId: 84532,
-  verifyingContract: '0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83',
+  verifyingContract: '0x31D0215d77A06ff97Cb61BbBe4b931Ac0D1da8aA',
 } as const
 
 export const SERVE_TYPES = {
