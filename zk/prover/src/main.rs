@@ -17,13 +17,13 @@
 use anyhow::{bail, Context, Result};
 use sp1_sdk::blocking::{ProveRequest, Prover, ProverClient};
 use sp1_sdk::{include_elf, HashableKey, ProvingKey, SP1Stdin};
-use surplus_batch_types::{ProgramInput, ProvenOrder};
-use surplus_matcher::{match_epoch, orders_commitment};
-use surplus_settlement::SignedOrder;
-use surplus_settlement_core::alloy_primitives::{hex, Address, B256};
-use surplus_settlement_core::{batch_public_values, domain};
+use inference_bazaar_batch_types::{ProgramInput, ProvenOrder};
+use inference_bazaar_matcher::{match_epoch, orders_commitment};
+use inference_bazaar_settlement::SignedOrder;
+use inference_bazaar_settlement_core::alloy_primitives::{hex, Address, B256};
+use inference_bazaar_settlement_core::{batch_public_values, domain};
 
-const ELF: sp1_sdk::Elf = include_elf!("surplus-batch-program");
+const ELF: sp1_sdk::Elf = include_elf!("inference-bazaar-batch-program");
 
 struct Args {
     orders: String,
@@ -204,7 +204,7 @@ fn main() -> Result<()> {
                 println!("→ submitting settleBatchProven to {}…", args.rpc);
                 let rt = tokio::runtime::Runtime::new()?;
                 let tx = rt.block_on(async {
-                    let client = surplus_settlement::chain::SettlementClient::connect(
+                    let client = inference_bazaar_settlement::chain::SettlementClient::connect(
                         &args.rpc,
                         &args.key,
                         args.contract,

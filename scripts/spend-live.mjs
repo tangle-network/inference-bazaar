@@ -10,10 +10,10 @@ import fs from 'node:fs'
 
 const RPC = process.env.RPC ?? 'https://base-sepolia-rpc.publicnode.com'
 const SETTLEMENT = process.env.SETTLEMENT ?? '0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83'
-const VENUE = process.env.VENUE ?? 'https://surplus.178.104.232.124.sslip.io' // op4 — the issuer
+const VENUE = process.env.VENUE ?? 'https://inference-bazaar.178.104.232.124.sslip.io' // op4 — the issuer
 const FROM_BLOCK = BigInt(process.env.FROM_BLOCK ?? 42755608)
 
-const buyer = privateKeyToAccount(fs.readFileSync('/tmp/surplus-e2e-buyer.key', 'utf8').trim())
+const buyer = privateKeyToAccount(fs.readFileSync('/tmp/inference-bazaar-e2e-buyer.key', 'utf8').trim())
 const pub = createPublicClient({ chain: baseSepolia, transport: http(RPC) })
 const wallet = createWalletClient({ account: buyer, chain: baseSepolia, transport: http(RPC) })
 
@@ -23,7 +23,7 @@ const abi = parseAbi([
   'function spendPermitDigest((bytes32 lotId, address sessionKey, uint64 maxTokens, uint64 expiry) p) view returns (bytes32)',
 ])
 
-const domain = { name: 'SurplusSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT }
+const domain = { name: 'InferenceBazaarSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT }
 const permitTypes = { SpendPermit: [
   { name: 'lotId', type: 'bytes32' }, { name: 'sessionKey', type: 'address' },
   { name: 'maxTokens', type: 'uint64' }, { name: 'expiry', type: 'uint64' },
@@ -77,9 +77,9 @@ async function voucherHeaders(cumulative) {
     message: { lotId, sessionKey: session.address, servedCumulative: cumulative },
   })
   return {
-    'x-surplus-session': session.address,
-    'x-surplus-voucher-cum': String(cumulative),
-    'x-surplus-voucher-sig': sig,
+    'x-inference-bazaar-session': session.address,
+    'x-inference-bazaar-voucher-cum': String(cumulative),
+    'x-inference-bazaar-voucher-sig': sig,
   }
 }
 
@@ -90,7 +90,7 @@ const out = await post(
   await voucherHeaders(acked),
 )
 const served = out.usage.completion_tokens
-acked = out.surplus.nextCumulative
+acked = out.inference-bazaar.nextCumulative
 await post(`${VENUE}/v1/spend/ack`, {}, await voucherHeaders(acked)) // makes this request settleable
 console.log(`REAL completion (${served} tokens): "${out.choices[0].message.content.trim()}"`)
 

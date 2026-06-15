@@ -1,5 +1,5 @@
 /**
- * SurplusSettlement binding — the firm rail, live on Base Sepolia.
+ * InferenceBazaarSettlement binding — the firm rail, live on Base Sepolia.
  *
  * A trade is real here or it isn't a trade: the buyer signs an EIP-712 order
  * in their wallet, the venue pairs it with the operator's signed quote, and
@@ -20,7 +20,7 @@ export const SETTLEMENT = {
 }
 
 export const EIP712_DOMAIN = {
-  name: 'SurplusSettlement',
+  name: 'InferenceBazaarSettlement',
   version: '1',
   chainId: CHAIN.id,
   verifyingContract: SETTLEMENT.address,
@@ -28,7 +28,7 @@ export const EIP712_DOMAIN = {
 
 /** Holder authorization for one venue serve call (operator-verified EIP-712). */
 export const SERVE_DOMAIN = {
-  name: 'SurplusServe',
+  name: 'InferenceBazaarServe',
   version: '1',
   chainId: 84532,
   verifyingContract: '0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83',

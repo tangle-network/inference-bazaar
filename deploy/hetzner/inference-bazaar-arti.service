@@ -1,20 +1,20 @@
 [Unit]
-Description=Surplus venue Tor onion service (Arti)
+Description=InferenceBazaar venue Tor onion service (Arti)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 # Runs Arti as the venue's onion service (see arti.toml). Install Arti with
 # `cargo install arti` or the distro package; adjust ExecStart to its path.
-ExecStartPre=/usr/bin/install -d -o surplus -g surplus /opt/surplus/arti/state /opt/surplus/arti/cache
-ExecStart=/usr/local/bin/arti -c /opt/surplus/arti.toml proxy
+ExecStartPre=/usr/bin/install -d -o inference-bazaar -g inference-bazaar /opt/inference-bazaar/arti/state /opt/inference-bazaar/arti/cache
+ExecStart=/usr/local/bin/arti -c /opt/inference-bazaar/arti.toml proxy
 # Publish the generated .onion to the stable path the operator reads each time
 # Arti (re)writes it, so a fresh keypair is surfaced without a venue restart.
-ExecStartPost=/opt/surplus/publish-onion.sh
+ExecStartPost=/opt/inference-bazaar/publish-onion.sh
 Restart=always
 RestartSec=5
-User=surplus
-Group=surplus
+User=inference-bazaar
+Group=inference-bazaar
 
 [Install]
 WantedBy=multi-user.target

@@ -3,7 +3,7 @@ pragma solidity ^0.8.26;
 
 import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { SurplusSettlement } from "../../src/SurplusSettlement.sol";
+import { InferenceBazaarSettlement } from "../../src/InferenceBazaarSettlement.sol";
 import { MockUSD } from "../../src/dev/Mocks.sol";
 import { SettlementHandler } from "./SettlementHandler.sol";
 
@@ -13,13 +13,13 @@ import { SettlementHandler } from "./SettlementHandler.sol";
 /// holds at the lot-bearing states the property test stresses.
 contract HandlerSmoke is Test {
     MockUSD usd;
-    SurplusSettlement s;
+    InferenceBazaarSettlement s;
     SettlementHandler h;
     address feeRecipient = address(0xFEE);
 
     function setUp() public {
         usd = new MockUSD();
-        s = new SurplusSettlement(IERC20(address(usd)), 30 days, 6 hours, 1 hours, 500, 200, feeRecipient);
+        s = new InferenceBazaarSettlement(IERC20(address(usd)), 30 days, 6 hours, 1 hours, 500, 200, feeRecipient);
         address[] memory a = new address[](1);
         a[0] = address(0xA11CE);
         s.registerBook(keccak256("b"), a, 1, 0, address(0));

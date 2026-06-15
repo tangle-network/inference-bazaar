@@ -11,7 +11,7 @@ import { EIP712 } from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import { ISP1Verifier } from "./interfaces/ISP1Verifier.sol";
 
-/// @title SurplusSettlement — atomic settlement + redemption guarantee for inference-token credits.
+/// @title InferenceBazaarSettlement — atomic settlement + redemption guarantee for inference-token credits.
 ///
 /// The market trades EIP-712 *firm orders*: a CLOB order and an RFQ quote are the
 /// same signed struct, so one settlement path serves both. Settlement is atomic by
@@ -52,7 +52,7 @@ import { ISP1Verifier } from "./interfaces/ISP1Verifier.sol";
 ///
 /// Redemption attestation is bound to the lot's own issuing book (`lotBook`) so
 /// no foreign quorum can confiscate a credit.
-contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
+contract InferenceBazaarSettlement is EIP712, Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -352,7 +352,7 @@ contract SurplusSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         uint16 _feeBps,
         address _feeRecipient
     )
-        EIP712("SurplusSettlement", "1")
+        EIP712("InferenceBazaarSettlement", "1")
         Ownable(msg.sender)
     {
         if (_feeBps > 10_000 || _defaultPenaltyBps > 10_000) revert InvalidFee();

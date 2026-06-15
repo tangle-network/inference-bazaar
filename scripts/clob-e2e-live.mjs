@@ -11,8 +11,8 @@ import fs from 'node:fs'
 const RPC = process.env.RPC ?? 'https://base-sepolia-rpc.publicnode.com'
 const SETTLEMENT = process.env.SETTLEMENT ?? '0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83'
 const USD = process.env.USD ?? '0x14Ff9231D03Fd9AD75e553004585f13Ff51db630'
-const NODE_A = process.env.NODE_A ?? 'https://surplus2.178.104.232.124.sslip.io' // service 3 :9500
-const NODE_B = process.env.NODE_B ?? 'https://surplus.178.104.232.124.sslip.io'  // service 4 :9400
+const NODE_A = process.env.NODE_A ?? 'https://inference-bazaar2.178.104.232.124.sslip.io' // service 3 :9500
+const NODE_B = process.env.NODE_B ?? 'https://inference-bazaar.178.104.232.124.sslip.io'  // service 4 :9400
 const INSTRUMENT = process.env.INSTRUMENT ?? 'claude-sonnet-4-6:output'
 const BOOK = process.env.BOOK ?? '0x0000000000000000000000000000000000000000000000000000000000000000'
 const FUNDER_KEY = process.env.FUNDER_KEY
@@ -86,7 +86,7 @@ if (have < required) {
 }
 console.log('funded on Base Sepolia')
 
-const domain = { name: 'SurplusSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT }
+const domain = { name: 'InferenceBazaarSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT }
 const types = { Order: [
   { name: 'instrument', type: 'bytes32' }, { name: 'side', type: 'uint8' },
   { name: 'priceMicroPerM', type: 'uint64' }, { name: 'qtyTokens', type: 'uint64' },
@@ -160,7 +160,7 @@ const settleTx = await pub.getTransaction({ hash: batchLog.transactionHash })
 const decoded = decodeFunctionData({ abi: settleAbi, data: settleTx.input })
 const sigs = decoded.args[2]
 const digest = hashTypedData({
-  domain: { name: 'SurplusSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT },
+  domain: { name: 'InferenceBazaarSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT },
   types: { SettlementBatch: [{ name: 'bookId', type: 'bytes32' }, { name: 'batchNonce', type: 'uint64' }, { name: 'fillsHash', type: 'bytes32' }] },
   primaryType: 'SettlementBatch',
   message: { bookId: BOOK, batchNonce: nonce0, fillsHash: batchLog.args.fillsHash },

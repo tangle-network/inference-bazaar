@@ -49,7 +49,7 @@ export {
   type TorResponse,
 } from './tor'
 export {
-  SURPLUS_SETTLEMENT_DOMAIN,
+  INFERENCE_BAZAAR_SETTLEMENT_DOMAIN,
   SIDE_BUY,
   SIDE_SELL,
   ORDER_TYPES,

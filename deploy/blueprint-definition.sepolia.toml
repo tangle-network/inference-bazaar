@@ -1,11 +1,11 @@
-# Compact Surplus blueprint definition for live chains (Base Sepolia).
+# Compact InferenceBazaar blueprint definition for live chains (Base Sepolia).
 # Same blueprint as deploy/blueprint-definition.toml minus the 25 reserved
 # filler jobs: on a live chain the stored definition blob costs real gas and
 # the padded 31-job table exceeds the node's ~16.7M per-tx cap. Here
 # workflow_tick is POSITIONAL INDEX 5; the operator binary routes both 5
 # (compact) and 30 (padded devnet convention) to the same handler.
 
-metadata_uri = "https://github.com/tangle-network/surplus"
+metadata_uri = "https://github.com/tangle-network/inference-bazaar"
 manager = "0x0000000000000000000000000000000000000000"
 metadata_file = "blueprint-metadata.json"
 
@@ -16,7 +16,7 @@ author = "Tangle"
 category = "inference-market"
 license = "MIT OR Apache-2.0"
 
-# The BSM supports both models (see SurplusBSM); declare both so a service can be
+# The BSM supports both models (see InferenceBazaarBSM); declare both so a service can be
 # requested fixed or dynamic — the instance picks at request time.
 supported_memberships = ["fixed", "dynamic"]
 
@@ -47,21 +47,21 @@ description = "Periodic tick: pull reference price, fetch sidecar quotes, place/
 [[sources]]
 kind = "native"
 fetcher = "github"
-entrypoint = "surplus-operator"
+entrypoint = "inference-bazaar-operator"
 
 [sources.github]
 owner = "tangle-network"
-repo = "surplus"
+repo = "inference-bazaar"
 tag = "v0.1.0"
 
 [[sources.github.binaries]]
-name = "surplus-operator"
+name = "inference-bazaar-operator"
 arch = "amd64"
 os = "linux"
 sha256 = "abe6c37f140811f5b0196b968da605911689edcb66635e072bb2b9242446c1b5"
 
 [[sources.binaries]]
-name = "surplus-operator"
+name = "inference-bazaar-operator"
 arch = "amd64"
 os = "linux"
 sha256 = "abe6c37f140811f5b0196b968da605911689edcb66635e072bb2b9242446c1b5"

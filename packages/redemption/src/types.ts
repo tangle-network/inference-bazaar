@@ -1,5 +1,5 @@
 /**
- * Redemption types — the spending/metering side of a Surplus credit.
+ * Redemption types — the spending/metering side of a InferenceBazaar credit.
  * Issuance, escrow, and RFQ live with the settlement agent; everything here
  * starts from a credit that already exists and proves it is spendable.
  *

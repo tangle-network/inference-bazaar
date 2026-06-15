@@ -5,9 +5,9 @@
 
 use axum::http::StatusCode;
 use serde_json::{json, Value};
-use surplus_matcher::{elect_proposer, verify_proposal, BatchProposal, Verdict};
-use surplus_settlement::core::alloy_primitives::B256;
-use surplus_settlement::core::{batch_digest, recover_signer};
+use inference_bazaar_matcher::{elect_proposer, verify_proposal, BatchProposal, Verdict};
+use inference_bazaar_settlement::core::alloy_primitives::B256;
+use inference_bazaar_settlement::core::{batch_digest, recover_signer};
 
 use super::{Clob, WireAttestation, WireProposal};
 
@@ -55,7 +55,7 @@ impl Clob {
         let domain = self.domain().clone();
         let claimed_digest = batch_digest(wire.book_id, wire.batch_nonce, wire.fills_hash, &domain);
         let proposer_sig =
-            surplus_settlement::core::hex::decode(wire.proposer_sig.trim_start_matches("0x"))
+            inference_bazaar_settlement::core::hex::decode(wire.proposer_sig.trim_start_matches("0x"))
                 .unwrap_or_default();
         if recover_signer(claimed_digest, &proposer_sig) != Some(wire.proposer) {
             return Err((
@@ -122,7 +122,7 @@ impl Clob {
                     attester: self.me,
                     signature: format!(
                         "0x{}",
-                        surplus_settlement::core::hex::encode(self.signer().sign_digest(digest),)
+                        inference_bazaar_settlement::core::hex::encode(self.signer().sign_digest(digest),)
                     ),
                 })
             }

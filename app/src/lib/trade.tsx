@@ -2,7 +2,7 @@
  * The firm-trade routine, shared by every executing surface. One leg =
  * RFQ (operator's signed order) → buyer signs the matching EIP-712 order in
  * the wallet → venue pairs the fill → settleFills lands on Base Sepolia.
- * Funds are real: the buyer's deposited tsUSD in SurplusSettlement pays the
+ * Funds are real: the buyer's deposited tsUSD in InferenceBazaarSettlement pays the
  * issuer; the minted lot is the receipt.
  */
 import { useCallback } from 'react'

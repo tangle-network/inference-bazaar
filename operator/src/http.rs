@@ -1,5 +1,5 @@
 //! The lite HTTP venue surface. Thin handlers over [`Venue`]; the same ops the
-//! blueprint job handlers call. Used by the `surplus-operator-lite` bin and by
+//! blueprint job handlers call. Used by the `inference-bazaar-operator-lite` bin and by
 //! the blueprint bin's `BackgroundService` so the market is reachable over HTTP
 //! either way.
 
@@ -14,7 +14,7 @@ use axum::{
 };
 use serde::Deserialize;
 use std::sync::Arc;
-use surplus_orderbook::Side;
+use inference_bazaar_orderbook::Side;
 
 pub type Shared = Arc<Venue>;
 
@@ -54,14 +54,14 @@ pub fn rate_limited(app: Router) -> Router {
 }
 
 /// Background settlement pump: flush the outbox (and refresh the on-chain
-/// funding cache that bounds quoting) every `SURPLUS_FLUSH_INTERVAL_SECS`.
+/// funding cache that bounds quoting) every `INFERENCE_BAZAAR_FLUSH_INTERVAL_SECS`.
 /// Fills clear without any external poke; failures requeue and retry on the
 /// next tick. Spawned by both the lite and the blueprint bins.
 pub fn spawn_auto_flush(venue: Shared) {
     // Anti-grief: vouch service for served-but-unreceipted redemptions through the
     // quorum and finalize them, so a non-signing holder can't force a default.
     crate::redeem::spawn_redeem_attest(venue.clone());
-    let interval = std::env::var("SURPLUS_FLUSH_INTERVAL_SECS")
+    let interval = std::env::var("INFERENCE_BAZAAR_FLUSH_INTERVAL_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
         .filter(|v: &u64| *v >= 5)
@@ -130,8 +130,8 @@ async fn health() -> impl IntoResponse {
 /// The operator's Tor onion endpoint (if it runs Arti as an onion service),
 /// published over /health so discovery surfaces it and privacy-mode clients dial
 /// it instead of the clearnet URL. Two sources, in order:
-///   - SURPLUS_ONION_URL: a fixed onion endpoint.
-///   - SURPLUS_ONION_FILE: a path Arti's sidecar writes the freshly-generated
+///   - INFERENCE_BAZAAR_ONION_URL: a fixed onion endpoint.
+///   - INFERENCE_BAZAAR_ONION_FILE: a path Arti's sidecar writes the freshly-generated
 ///     `<hash>.onion` hostname to — read live so the operator publishes it as
 ///     soon as Arti bootstraps, no restart needed (see deploy/hetzner/arti.toml).
 /// The scheme is normalized to http:// (the onion forwards to the venue's port).
@@ -146,10 +146,10 @@ fn onion_url() -> Option<String> {
             Some(format!("http://{s}"))
         }
     };
-    if let Some(u) = std::env::var("SURPLUS_ONION_URL").ok().and_then(&normalize) {
+    if let Some(u) = std::env::var("INFERENCE_BAZAAR_ONION_URL").ok().and_then(&normalize) {
         return Some(u);
     }
-    std::env::var("SURPLUS_ONION_FILE")
+    std::env::var("INFERENCE_BAZAAR_ONION_FILE")
         .ok()
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(normalize)

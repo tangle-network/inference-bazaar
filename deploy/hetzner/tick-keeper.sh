@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Surplus workflow_tick keeper — submits the blueprint job on-chain on a timer.
+# InferenceBazaar workflow_tick keeper — submits the blueprint job on-chain on a timer.
 #
 # Submits Services.submitJob(uint64 serviceId, uint8 job, bytes args) to the
 # Tangle protocol contract on Base Sepolia. Encoding verified byte-for-byte
@@ -12,17 +12,17 @@
 # 0xde37cc48d21778e1c9a075c4e41c5aff6918c3ea6151221f0af3ce8121a29db5.
 #
 # Install (from repo root, BOX=your Hetzner host):
-#   scp deploy/hetzner/tick-keeper.sh                  root@$BOX:/opt/surplus/tick-keeper.sh
-#   scp deploy/hetzner/surplus-tick-keeper@.service    root@$BOX:/etc/systemd/system/
-#   scp deploy/hetzner/surplus-tick-keeper@.timer      root@$BOX:/etc/systemd/system/
-#   ssh root@$BOX 'chmod +x /opt/surplus/tick-keeper.sh && mkdir -p /etc/surplus'
+#   scp deploy/hetzner/tick-keeper.sh                  root@$BOX:/opt/inference-bazaar/tick-keeper.sh
+#   scp deploy/hetzner/inference-bazaar-tick-keeper@.service    root@$BOX:/etc/systemd/system/
+#   scp deploy/hetzner/inference-bazaar-tick-keeper@.timer      root@$BOX:/etc/systemd/system/
+#   ssh root@$BOX 'chmod +x /opt/inference-bazaar/tick-keeper.sh && mkdir -p /etc/inference-bazaar'
 #   # per-instance env (instance = on-chain service id):
-#   #   /etc/surplus/tick-keeper-3.env  e.g.  TICK_KEY_FILE=/tmp/surplus-op2.key
-#   #   /etc/surplus/tick-keeper-4.env  e.g.  TICK_KEY_FILE=/tmp/surplus-op2.key
-#   ssh root@$BOX 'systemctl daemon-reload && systemctl enable --now surplus-tick-keeper@3.timer surplus-tick-keeper@4.timer'
+#   #   /etc/inference-bazaar/tick-keeper-3.env  e.g.  TICK_KEY_FILE=/tmp/inference-bazaar-op2.key
+#   #   /etc/inference-bazaar/tick-keeper-4.env  e.g.  TICK_KEY_FILE=/tmp/inference-bazaar-op2.key
+#   ssh root@$BOX 'systemctl daemon-reload && systemctl enable --now inference-bazaar-tick-keeper@3.timer inference-bazaar-tick-keeper@4.timer'
 # Verify:
-#   systemctl list-timers 'surplus-tick-keeper@*'
-#   journalctl -u surplus-tick-keeper@3.service -n 20
+#   systemctl list-timers 'inference-bazaar-tick-keeper@*'
+#   journalctl -u inference-bazaar-tick-keeper@3.service -n 20
 #
 # Exit codes: 0 = submitted OK, or deliberately skipped (low balance, lock
 # held, transient RPC error). 1 = on-chain revert or hard config error, so
@@ -31,7 +31,7 @@ set -euo pipefail
 
 TICK_RPC="${TICK_RPC:-https://sepolia.base.org}"
 TANGLE_CONTRACT="${TANGLE_CONTRACT:-0x8299d60f373f3a4a8c4878e335cb9d840e6e3730}"
-TICK_KEY_FILE="${TICK_KEY_FILE:-/tmp/surplus-op2.key}"
+TICK_KEY_FILE="${TICK_KEY_FILE:-/tmp/inference-bazaar-op2.key}"
 TICK_JOB_INDEX="${TICK_JOB_INDEX:-5}"
 # KNOWN LIMITATION: submitJob is owner-gated on-chain, so this keeper shares
 # the operator key with the blueprint runtime's result consumer. If the
@@ -40,7 +40,7 @@ TICK_JOB_INDEX="${TICK_JOB_INDEX:-5}"
 # restarts it and the producer re-delivers the job — self-healing, verified.
 # workflow_tick takes one field: the instrument id. It must be a market the
 # venue actually quotes (live router reference) or the tick errors with
-# NoReference and no result lands. Override in /etc/surplus/tick-keeper-<id>.env.
+# NoReference and no result lands. Override in /etc/inference-bazaar/tick-keeper-<id>.env.
 TICK_INSTRUMENT="${TICK_INSTRUMENT:-claude-sonnet-4-6:output}"
 # Historical submission used gasLimit 234211 (gasUsed 0x3635d = 222045);
 # 400k gives headroom without risking a huge burn on revert.
@@ -81,7 +81,7 @@ INSTRUMENT_HEX=$(cast from-utf8 "$TICK_INSTRUMENT")
 JOB_ARGS=$(cast abi-encode "f((bytes))" "($INSTRUMENT_HEX)")
 
 # Serialize sends per service id so overlapping timer fires can't nonce-race.
-LOCK_FILE="/run/lock/surplus-tick-keeper-${TICK_SERVICE_ID}.lock"
+LOCK_FILE="/run/lock/inference-bazaar-tick-keeper-${TICK_SERVICE_ID}.lock"
 exec 200>"$LOCK_FILE"
 if ! flock -n 200; then
   log "previous tick for service $TICK_SERVICE_ID still in flight (lock $LOCK_FILE held), skipping"

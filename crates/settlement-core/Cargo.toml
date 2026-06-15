@@ -1,10 +1,10 @@
 # Shared by the operator (host) and the SP1 batch program (guest): the EIP-712
 # typed structs, digests, signature recovery, and stateless fill-validity rules
-# that mirror SurplusSettlement.sol. no_std-compatible so the zkVM guest can
+# that mirror InferenceBazaarSettlement.sol. no_std-compatible so the zkVM guest can
 # depend on it by path; drift against the contract is a fund-loss bug, pinned by
 # the cross-stack parity fixture (contracts/test/fixtures/eip712-parity.json).
 [package]
-name = "surplus-settlement-core"
+name = "inference-bazaar-settlement-core"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"

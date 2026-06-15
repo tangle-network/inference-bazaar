@@ -1,4 +1,4 @@
-# @surplus/mm-eval
+# @inference-bazaar/mm-eval
 
 Aggressive, deterministic evaluation of the market-maker's parameters against
 the seeded simulator. Sweep a `QuoteParams` grid × seeds, aggregate
@@ -7,8 +7,8 @@ PnL/volatility/drawdown/fills, and rank by a risk-adjusted score that
 market. Reproducible: same config → same ranking, so a tuning result is a fact.
 
 ```bash
-pnpm --filter @surplus/mm-eval sweep   # run the default sweep, print a scorecard
-pnpm --filter @surplus/mm-eval test
+pnpm --filter @inference-bazaar/mm-eval sweep   # run the default sweep, print a scorecard
+pnpm --filter @inference-bazaar/mm-eval test
 ```
 
 ## Finding from the default sweep (180 sessions, fair-mid flow)
@@ -40,14 +40,14 @@ Three decision-relevant reads:
 
 This is the important part. Pure MM around a *fair* mid is structurally
 ~breakeven-minus against random flow — that's a known result, and the harness
-confirms it for our params. **Surplus's real edge is not spread capture; it's
-sourcing surplus inference below the router's list price and reselling toward
+confirms it for our params. **Inference Bazaar's real edge is not spread capture; it's
+sourcing spare inference below the router's list price and reselling toward
 it.** That discount-to-list / inventory arbitrage is what makes an operator
 profitable, and the fair-mid sweep here deliberately does *not* model it — which
 is why it shows the floor (what you earn from spread alone: roughly nothing).
 
 **Next evaluator (parallelizable):** a discount-capture / cross-operator
-arbitrage backtest — a seller lists surplus below reference, the operator buys
+arbitrage backtest — a seller lists spare capacity below reference, the operator buys
 it cheap and reprices toward list; measure the captured discount. That isolates
 the actual profit source and is where the self-improving/arbitrage agents earn
 their keep.

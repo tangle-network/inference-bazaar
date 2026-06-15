@@ -1,6 +1,6 @@
-# @surplus/app — marketplace UI
+# @inference-bazaar/app — marketplace UI
 
-The Surplus Intelligence front end: buy discounted inference, sell your surplus,
+The Inference Bazaar front end: buy discounted inference, sell your spare capacity,
 make markets. React 19 + React Router 7 + UnoCSS, in the ai-trading-blueprint
 arena's "Obsidian Terminal" design language. See [DESIGN.md](./DESIGN.md) for
 the per-page layout rationale.

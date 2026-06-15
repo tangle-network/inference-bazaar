@@ -19,9 +19,9 @@
 #![no_main]
 sp1_zkvm::entrypoint!(main);
 
-use surplus_batch_types::ProgramInput;
-use surplus_matcher::{match_epoch, orders_commitment};
-use surplus_settlement_core::{batch_public_values, domain, verify_order, Order};
+use inference_bazaar_batch_types::ProgramInput;
+use inference_bazaar_matcher::{match_epoch, orders_commitment};
+use inference_bazaar_settlement_core::{batch_public_values, domain, verify_order, Order};
 
 fn main() {
     let input: ProgramInput = sp1_zkvm::io::read();

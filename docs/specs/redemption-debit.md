@@ -1,4 +1,4 @@
-# Spec — Redemption debit + router adapter (`@surplus/redemption`)
+# Spec — Redemption debit + router adapter (`@inference-bazaar/redemption`)
 
 **Phase 5 of `ROADMAP.md`. Delivers gate G1: a bought credit is spendable on real
 inference.** This is the spending/metering side of the system. It is
@@ -27,7 +27,7 @@ implements to debit a credit per call.
 **In scope (build this):**
 - A `Credit` model + a pure, deterministic **debit accounting** engine.
 - The **router metering adapter interface** — the typed seam the Tangle Router
-  implements to recognize a Surplus credit and debit its quota per call.
+  implements to recognize an Inference Bazaar credit and debit its quota per call.
 - An **end-to-end redemption proof**: buy → meter N calls → debit at strike →
   operator paid from escrow → exhaust → next credit / refund.
 - A `SimulatedRouter` + `MockOperator` so the proof runs with no live deps.
@@ -46,7 +46,7 @@ Same as the rest of the system (`market-core/types`):
 - price: integer **micro-tsUSD per 1M tokens** (e.g. `15_000_000` = $15.00/M).
 - money / notional / backing: integer **micro-tsUSD** (base units; $1 = 1e6).
 - Cost of `qty` tokens at price `p`: `round(p * qty / 1_000_000)` micro-tsUSD
-  (reuse `tokenLotCostBaseUnits` from `@surplus/router-bridge`).
+  (reuse `tokenLotCostBaseUnits` from `@inference-bazaar/router-bridge`).
 
 ## 4. Types
 
@@ -146,12 +146,12 @@ intents today. The settlement side executes them.
 
 ## 7. Router metering adapter interface (the seam)
 
-This is the contract the **Tangle Router** implements (or calls) so a Surplus
+This is the contract the **Tangle Router** implements (or calls) so an Inference Bazaar
 credit is spendable. Define it here; the router implements it later.
 
 ```ts
 /**
- * The router consults this on each inference call to decide whether a Surplus
+ * The router consults this on each inference call to decide whether an Inference Bazaar
  * credit covers it, and to debit the credit after metering. The router still
  * does the actual inference + token metering; this only handles credit
  * selection + debit + operator payout instruction.
@@ -205,7 +205,7 @@ Build `SimulatedRouter` + `MockOperator` and an e2e test asserting:
 
 ```
 packages/redemption/
-  package.json        # deps: @surplus/router-bridge (tokenLotCostBaseUnits) only
+  package.json        # deps: @inference-bazaar/router-bridge (tokenLotCostBaseUnits) only
   src/
     types.ts          # Credit, MeteredCall, DebitResult, DebitError, RefundIntent
     credit-book.ts    # CreditBook (the pure debit engine)
@@ -262,7 +262,7 @@ the debit engine onto it:
 
 ## 11. Definition of done
 
-`pnpm --filter @surplus/redemption test` green; `typecheck` clean; the e2e proof
+`pnpm --filter @inference-bazaar/redemption test` green; `typecheck` clean; the e2e proof
 demonstrates **tokens bought = tokens metered = tokens spent** with money
-conserved (operator payouts == backing). At that point a Surplus credit is
+conserved (operator payouts == backing). At that point an Inference Bazaar credit is
 *provably* spendable inference, and only the live-router wiring remains.

@@ -7,7 +7,7 @@ import { notionalMicro } from './types'
  */
 export class Ledger {
   readonly owner: string
-  /** Signed position, tokens. Positive = long surplus tokens. */
+  /** Signed position, tokens. Positive = long inference-bazaar tokens. */
   private position = 0
   /** Cash delta from trading, micro-tsUSD. Selling adds, buying subtracts. */
   private cash = 0

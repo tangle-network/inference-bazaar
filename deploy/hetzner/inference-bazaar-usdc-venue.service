@@ -1,0 +1,26 @@
+[Unit]
+Description=InferenceBazaar USDC venue (real Circle USDC rail, settlement 0xf6A64921)
+After=network.target inference-bazaar-mm-sidecar.service
+Wants=inference-bazaar-mm-sidecar.service
+
+[Service]
+Environment=RUST_LOG=info,inference_bazaar_operator=debug
+Environment=DATA_DIR=/opt/inference-bazaar-usdc/data
+Environment=INFERENCE_BAZAAR_SIDECAR_URL=http://127.0.0.1:9310
+Environment=INFERENCE_BAZAAR_ROUTER_URL=https://router.tangle.tools
+Environment=INFERENCE_BAZAAR_OPERATOR_ADDR=127.0.0.1:9600
+Environment=INFERENCE_BAZAAR_INSTRUMENT=claude-sonnet-4-6:output
+Environment=INFERENCE_BAZAAR_MM_SIZE=100000
+Environment=INFERENCE_BAZAAR_MM_LEVELS=2
+Environment=INFERENCE_BAZAAR_CHAIN_ID=84532
+Environment=INFERENCE_BAZAAR_SETTLEMENT_ADDR=0xf6A64921b62E09c9646675BEe6A11Fcd533d6783
+Environment=INFERENCE_BAZAAR_OPERATOR_KEY=<issuer-key>
+Environment=INFERENCE_BAZAAR_ROUTER_API_KEY=<router-api-key>
+Environment=INFERENCE_BAZAAR_RPC_URL=https://sepolia.base.org
+ExecStart=/opt/inference-bazaar/inference-bazaar-operator-lite
+Restart=always
+RestartSec=5
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

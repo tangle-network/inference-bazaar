@@ -15,7 +15,7 @@ import { useAggBook, useVenueRegistry } from '~/lib/venues'
 
 /**
  * Selling is transferring something you provably hold: a credit lot on
- * SurplusSettlement. The operator bids firm; your signed sell order moves the
+ * InferenceBazaarSettlement. The operator bids firm; your signed sell order moves the
  * lot and pays your settlement balance, atomically on-chain. Fresh issuance
  * (selling capacity you serve) is the operator path — it requires posted
  * collateral.

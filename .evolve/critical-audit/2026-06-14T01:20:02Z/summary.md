@@ -8,7 +8,7 @@ with real-system tests** in the same session (`/critical-audit and /harden`).
 
 1. [HIGH] operator/src/bin/gateway.rs:62 — per-channel `acked` was in-memory only; a
    restart re-signs `cum=0`, the operator 409s `stale_voucher`, the channel bricks.
-   Action: journal acked to `SURPLUS_GATEWAY_STATE` (atomic) on every advance; seed
+   Action: journal acked to `INFERENCE_BAZAAR_GATEWAY_STATE` (atomic) on every advance; seed
    from it on startup.
    Verification: `gateway-multilot-e2e` kills + restarts the gateway and asserts the
    post-restart call succeeds and bills further on-chain. ✅
@@ -21,8 +21,8 @@ with real-system tests** in the same session (`/critical-audit and /harden`).
 
 3. [HIGH] scripts/gateway-multilot-e2e.mjs:156 — streaming through the gateway untested.
    Action: add a `stream:true` call through the gateway; assert SSE content flows and the
-   private `surplus` event is stripped.
-   Verification: "streamed N chars through the gateway (surplus event stripped)". ✅
+   private `inference-bazaar` event is stripped.
+   Verification: "streamed N chars through the gateway (inference-bazaar event stripped)". ✅
 
 4. [HIGH] .github/workflows/ci.yml:142 — money-path e2e excluded from CI.
    Action: new `money-e2e` job runs `spend-e2e.sh` + `gateway-multilot-e2e.sh`; `viem`

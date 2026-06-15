@@ -1,4 +1,4 @@
-# Router integration — scoped PR plan to make Surplus real end-to-end
+# Router integration — scoped PR plan to make Inference Bazaar real end-to-end
 
 > Companion to [PAYMENT-ARCHITECTURE.md](./PAYMENT-ARCHITECTURE.md). Every target
 > below is a real `file:line` confirmed by reading source. Three changes, in
@@ -6,7 +6,7 @@
 
 Goal state: a buyer points an OpenAI client at `https://router.tangle.tools/v1`,
 and **either** (a) pays per-call in plain USDC, **or** (b) auto-spends a discounted
-surplus credit they hold — both routed to a bonded operator, no new base URL, no
+credit they hold — both routed to a bonded operator, no new base URL, no
 shielded pool required unless they want privacy.
 
 ---
@@ -59,18 +59,18 @@ primitive already exists and is tested — this PR *wires* it.
 **Risk:** Medium — touches the live billing path; must stay fail-closed (only mark
 paid after on-chain confirmation, mirror `route.ts:2596`). Ship behind a per-model
 flag.
-**Decouples from Surplus entirely** — this is a general router capability that also
+**Decouples from Inference Bazaar entirely** — this is a general router capability that also
 benefits every other blueprint. Build it first; it's the highest-leverage and
-least Surplus-specific.
+least Inference Bazaar-specific.
 
 ---
 
-## PR 2 — Surplus-credit redemption hook (held credits auto-apply)
+## PR 2 — Inference Bazaar credit redemption hook (held credits auto-apply)
 
 **Why:** makes a bought credit lot actually spendable on `/v1/chat/completions`.
 This is the "[ ] live router integration" box (`redemption-debit.md:260`).
 
-**Repo: `tangle-router` (+ a read API on the surplus venue/settlement).**
+**Repo: `tangle-router` (+ a read API on the Inference Bazaar venue/settlement).**
 
 **Insertion point — corrected:** *not* inside `lib/credit-check.ts` (that returns a
 USD balance; a credit is a per-`(model,kind)` token claim). It is a **pre-flight
@@ -78,11 +78,11 @@ short-circuit branch in the chat route**, parallel to SpendAuth:
 
 ```
 route.ts, after model resolution, BEFORE the credit/balance gate (~:2510):
-  const credit = await surplusSelectCredit(userId|address, resolvedModel, kind)   // adapter.ts:selectCredit
+  const credit = await inferenceBazaarSelectCredit(userId|address, resolvedModel, kind)   // adapter.ts:selectCredit
   if (credit) {
      route the request to credit.boundOperator                                    // sourcing pinned to the lot's issuer
      serve + meter as normal
-     surplusRedeem(credit, meteredTokens)  → emits the operator SpendAuth/payout   // shielded-rail.ts:authorize
+     inferenceBazaarRedeem(credit, meteredTokens)  → emits the operator SpendAuth/payout   // shielded-rail.ts:authorize
      spendAuthSettled = true   // reuse the existing short-circuit so checkCredits is skipped (route.ts:2633)
      return
   }
@@ -93,7 +93,7 @@ The contract for this already exists: `packages/redemption/adapter.ts:27`
 `selectCredit(owner, model, tokenKind, ts) → Credit | null` and
 `redeem(MeteredCall) → payout` (soonest-expiry-first, `:45-54`). The router needs a
 read path to the credit book — expose `GET /credits?owner=&model=&kind=` on the
-surplus venue (or read `SurplusSettlement.lots()` on-chain, already done client-side
+Inference Bazaar venue (or read `InferenceBazaarSettlement.lots()` on-chain, already done client-side
 in `app/src/lib/settlement.ts:168`).
 
 **Known imprecision to close:** the SpendAuth is signed pre-serve so it claims the
@@ -109,16 +109,16 @@ token (see PR 3 prerequisite) and the credit-book read API.
 
 ## PR 3 — Operators as routable inference providers + minimum-discount routing
 
-**Why:** "route me to the cheapest operator for this model" needs (a) surplus
+**Why:** "route me to the cheapest operator for this model" needs (a) spare-capacity
 inference operators in the router's provider catalog with a price, and (b) a
-buy-side, price-aware ordering. Today neither exists for surplus operators.
+buy-side, price-aware ordering. Today neither exists for spare-capacity operators.
 
 1. **Register inference operators in the router catalog.** The router already reads
    `GET /api/operators` with `RouterOperator { endpointUrl, models[].inputPrice/outputPrice }`
-   (`packages/router-bridge/src/router-client.ts:24-40`). A surplus *inference*
+   (`packages/router-bridge/src/router-client.ts:24-40`). An Inference Bazaar *inference*
    operator (llm-inference-blueprint, `InferenceBSM.configureModel(pricePerInputToken,
    pricePerOutputToken)` + `onRegister` endpoint) must publish into that catalog with
-   its **discounted** price. (The surplus *market-venue* operator does not serve
+   its **discounted** price. (The Inference Bazaar *market-venue* operator does not serve
    inference — keep the roles separate.)
 
 2. **Minimum-discount routing — a NEW buy-side policy.** Express it via the router's
@@ -135,9 +135,9 @@ landed). **This is where "Minimum-Discount Routing" from the docs becomes code.*
 
 ---
 
-## Surplus-side prerequisites (do in this repo, no router dependency)
+## Inference Bazaar-side prerequisites (do in this repo, no router dependency)
 
-- **Replace MockUSD with the real settlement asset.** `SurplusSettlement` is
+- **Replace MockUSD with the real settlement asset.** `InferenceBazaarSettlement` is
   deployed against `0x14Ff92…` MockUSD (`app/src/lib/settlement.ts:17`). For prod,
   point `paymentToken` at real USDC (Base) or the canonical tsUSD, and align the
   redemption SpendAuth `amount` units. Until then, lots are test-token-backed.
@@ -160,9 +160,9 @@ PR 3 (operator catalog + min-discount routing)  ──▶  "route to cheapest op
         │
 PR 2 (credit redemption hook)  ──▶  prepaid lots become spendable
         ▲
-        └── prerequisite: real settlement token + credit-book read API (surplus repo)
+        └── prerequisite: real settlement token + credit-book read API (inference-bazaar repo)
 ```
 
-Land PR 1 first: it's the most valuable, the least Surplus-specific, and it
+Land PR 1 first: it's the most valuable, the least Inference Bazaar-specific, and it
 delivers the "pay with normal crypto" rail you want without depending on the credit
 market at all. PRs 2–3 then layer the discounted-market product on top.

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.26;
 
 import { SettlementTestBase } from "./Base.t.sol";
-import { SurplusSettlement } from "../src/SurplusSettlement.sol";
+import { InferenceBazaarSettlement } from "../src/InferenceBazaarSettlement.sol";
 
 /// The spend rail as a one-way payment channel (see docs/specs/spend-rail.md).
 /// The holder signs ONE SpendPermit delegating a session key; the session key
@@ -22,13 +22,13 @@ contract SpendTest is SettlementTestBase {
         session = vm.addr(sessionKey);
     }
 
-    function permit(uint64 maxTokens, uint64 expiry) internal view returns (SurplusSettlement.SpendPermit memory) {
+    function permit(uint64 maxTokens, uint64 expiry) internal view returns (InferenceBazaarSettlement.SpendPermit memory) {
         return
-            SurplusSettlement.SpendPermit({ lotId: lotId, sessionKey: session, maxTokens: maxTokens, expiry: expiry });
+            InferenceBazaarSettlement.SpendPermit({ lotId: lotId, sessionKey: session, maxTokens: maxTokens, expiry: expiry });
     }
 
     /// Holder authorizes the session key (the one wallet signature).
-    function signPermit(uint256 key, SurplusSettlement.SpendPermit memory p) internal view returns (bytes memory) {
+    function signPermit(uint256 key, InferenceBazaarSettlement.SpendPermit memory p) internal view returns (bytes memory) {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, settlement.spendPermitDigest(p));
         return abi.encodePacked(r, s, v);
     }
@@ -40,7 +40,7 @@ contract SpendTest is SettlementTestBase {
     }
 
     function test_cumulativeSettle_debitsProRata() public {
-        SurplusSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 30 days));
+        InferenceBazaarSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 30 days));
         bytes memory holderSig = signPermit(buyerKey, p);
         uint256 liabilityBefore = settlement.liability(seller);
 
@@ -63,29 +63,29 @@ contract SpendTest is SettlementTestBase {
     /// session key did not sign. A voucher signed by the seller (or anyone but
     /// the session key) is rejected — over-billing is impossible by construction.
     function test_overBillImpossible_withoutSessionVoucher() public {
-        SurplusSettlement.SpendPermit memory p = permit(50_000, uint64(block.timestamp + 30 days));
+        InferenceBazaarSettlement.SpendPermit memory p = permit(50_000, uint64(block.timestamp + 30 days));
         bytes memory holderSig = signPermit(buyerKey, p);
         // The issuer holds the holderSig (from registration) and tries to settle
         // the full cap, forging the voucher with its OWN key. It does not hold the
         // session key, so the voucher recovers to the wrong address.
         bytes memory forgedVoucher = signVoucher(sellerKey, 50_000);
         bytes32 pd = settlement.spendPermitDigest(p);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.BadSpendAuth.selector, pd));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.BadSpendAuth.selector, pd));
         settlement.settleSpend(p, holderSig, 50_000, forgedVoucher);
         // Even a real session voucher for a DIFFERENT amount cannot be inflated:
         // settling 50k needs a voucher over 50k, not over 10k.
         bytes memory voucher10k = signVoucher(sessionKey, 10_000);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.BadSpendAuth.selector, pd));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.BadSpendAuth.selector, pd));
         settlement.settleSpend(p, holderSig, 50_000, voucher10k);
     }
 
     function test_capIsEnforced() public {
-        SurplusSettlement.SpendPermit memory p = permit(20_000, uint64(block.timestamp + 30 days));
+        InferenceBazaarSettlement.SpendPermit memory p = permit(20_000, uint64(block.timestamp + 30 days));
         bytes memory holderSig = signPermit(buyerKey, p);
         bytes memory over = signVoucher(sessionKey, 20_001);
         bytes memory atCap = signVoucher(sessionKey, 20_000);
         vm.expectRevert(
-            abi.encodeWithSelector(SurplusSettlement.SpendCapExceeded.selector, uint64(20_000), uint64(20_001))
+            abi.encodeWithSelector(InferenceBazaarSettlement.SpendCapExceeded.selector, uint64(20_000), uint64(20_001))
         );
         settlement.settleSpend(p, holderSig, 20_001, over);
         // Exactly the cap is fine.
@@ -93,20 +93,20 @@ contract SpendTest is SettlementTestBase {
     }
 
     function test_replayOldCumulativeReverts() public {
-        SurplusSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 30 days));
+        InferenceBazaarSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 30 days));
         bytes memory holderSig = signPermit(buyerKey, p);
         bytes memory v10k = signVoucher(sessionKey, 10_000);
         bytes memory v5k = signVoucher(sessionKey, 5000);
         settlement.settleSpend(p, holderSig, 10_000, v10k);
         bytes32 pd = settlement.spendPermitDigest(p);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.NothingToSettle.selector, pd));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.NothingToSettle.selector, pd));
         settlement.settleSpend(p, holderSig, 10_000, v10k);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.NothingToSettle.selector, pd));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.NothingToSettle.selector, pd));
         settlement.settleSpend(p, holderSig, 5000, v5k);
     }
 
     function test_revocationKillsTheChannel() public {
-        SurplusSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 30 days));
+        InferenceBazaarSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 30 days));
         bytes memory holderSig = signPermit(buyerKey, p);
         settlement.settleSpend(p, holderSig, 5000, signVoucher(sessionKey, 5000));
 
@@ -115,19 +115,19 @@ contract SpendTest is SettlementTestBase {
 
         bytes32 pd = settlement.spendPermitDigest(p);
         bytes memory v10k = signVoucher(sessionKey, 10_000);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.SpendKeyIsRevoked.selector, pd));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.SpendKeyIsRevoked.selector, pd));
         settlement.settleSpend(p, holderSig, 10_000, v10k);
     }
 
     function test_onlyHolderCanRevoke() public {
-        SurplusSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 30 days));
+        InferenceBazaarSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 30 days));
         vm.prank(seller);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.NotLotHolder.selector, lotId));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.NotLotHolder.selector, lotId));
         settlement.revokeSpendKey(p);
     }
 
     function test_resaleInvalidatesTheChannel() public {
-        SurplusSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 30 days));
+        InferenceBazaarSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 30 days));
         bytes memory holderSig = signPermit(buyerKey, p);
         settlement.settleSpend(p, holderSig, 5000, signVoucher(sessionKey, 5000));
 
@@ -137,35 +137,35 @@ contract SpendTest is SettlementTestBase {
 
         bytes32 pd = settlement.spendPermitDigest(p);
         bytes memory v10k = signVoucher(sessionKey, 10_000);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.BadSpendAuth.selector, pd));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.BadSpendAuth.selector, pd));
         settlement.settleSpend(p, holderSig, 10_000, v10k);
     }
 
     function test_expiredPermitReverts() public {
-        SurplusSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 1 hours));
+        InferenceBazaarSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 1 hours));
         bytes memory holderSig = signPermit(buyerKey, p);
         bytes32 pd = settlement.spendPermitDigest(p);
         bytes memory v10k = signVoucher(sessionKey, 10_000);
         vm.warp(block.timestamp + 2 hours);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.SpendAuthExpired.selector, pd));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.SpendAuthExpired.selector, pd));
         settlement.settleSpend(p, holderSig, 10_000, v10k);
     }
 
     function test_expiredLotReverts() public {
-        SurplusSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 365 days));
+        InferenceBazaarSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 365 days));
         bytes memory holderSig = signPermit(buyerKey, p);
         bytes memory v10k = signVoucher(sessionKey, 10_000);
         vm.warp(block.timestamp + 31 days); // creditTtl is 30 days
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.LotIsExpired.selector, lotId));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.LotIsExpired.selector, lotId));
         settlement.settleSpend(p, holderSig, 10_000, v10k);
     }
 
     function test_wrongHolderSigReverts() public {
-        SurplusSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 30 days));
+        InferenceBazaarSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 30 days));
         bytes memory badPermitSig = signPermit(sellerKey, p); // not the holder
         bytes32 pd = settlement.spendPermitDigest(p);
         bytes memory v10k = signVoucher(sessionKey, 10_000);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.BadSpendAuth.selector, pd));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.BadSpendAuth.selector, pd));
         settlement.settleSpend(p, badPermitSig, 10_000, v10k);
     }
 
@@ -174,12 +174,12 @@ contract SpendTest is SettlementTestBase {
         vm.prank(buyer);
         settlement.requestRedemption(lotId, 45_000);
 
-        SurplusSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 30 days));
+        InferenceBazaarSettlement.SpendPermit memory p = permit(40_000, uint64(block.timestamp + 30 days));
         bytes memory holderSig = signPermit(buyerKey, p);
         bytes memory v10k = signVoucher(sessionKey, 10_000);
         bytes memory v5k = signVoucher(sessionKey, 5000);
         vm.expectRevert(
-            abi.encodeWithSelector(SurplusSettlement.LotQtyUnavailable.selector, uint64(5000), uint64(10_000))
+            abi.encodeWithSelector(InferenceBazaarSettlement.LotQtyUnavailable.selector, uint64(5000), uint64(10_000))
         );
         settlement.settleSpend(p, holderSig, 10_000, v10k);
 
@@ -188,7 +188,7 @@ contract SpendTest is SettlementTestBase {
     }
 
     function test_fullDrawDeletesLot() public {
-        SurplusSettlement.SpendPermit memory p = permit(50_000, uint64(block.timestamp + 30 days));
+        InferenceBazaarSettlement.SpendPermit memory p = permit(50_000, uint64(block.timestamp + 30 days));
         bytes memory holderSig = signPermit(buyerKey, p);
         uint256 liabilityBefore = settlement.liability(seller);
         settlement.settleSpend(p, holderSig, 50_000, signVoucher(sessionKey, 50_000));
@@ -202,11 +202,11 @@ contract SpendTest is SettlementTestBase {
     /// Mirrored in operator/src/spend.rs::tests::digests_match_contract_pin.
     function test_spendDigestPins() public {
         vm.chainId(3799);
-        SurplusSettlement impl =
-            new SurplusSettlement(settlement.paymentToken(), 30 days, 6 hours, 1 hours, 500, 200, address(0xFEE));
+        InferenceBazaarSettlement impl =
+            new InferenceBazaarSettlement(settlement.paymentToken(), 30 days, 6 hours, 1 hours, 500, 200, address(0xFEE));
         vm.etch(address(0x1111111111111111111111111111111111111111), address(impl).code);
-        SurplusSettlement pinned = SurplusSettlement(address(0x1111111111111111111111111111111111111111));
-        SurplusSettlement.SpendPermit memory p = SurplusSettlement.SpendPermit({
+        InferenceBazaarSettlement pinned = InferenceBazaarSettlement(address(0x1111111111111111111111111111111111111111));
+        InferenceBazaarSettlement.SpendPermit memory p = InferenceBazaarSettlement.SpendPermit({
             lotId: keccak256("pin-lot"),
             sessionKey: 0x2222222222222222222222222222222222222222,
             maxTokens: 1_000_000,

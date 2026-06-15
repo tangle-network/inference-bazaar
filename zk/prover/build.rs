@@ -6,7 +6,7 @@ fn main() {
     if std::env::var("SP1_SKIP_PROGRAM_BUILD").is_ok() {
         let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("stub.elf");
         std::fs::write(&out, []).unwrap();
-        println!("cargo:rustc-env=SP1_ELF_surplus-batch-program={}", out.display());
+        println!("cargo:rustc-env=SP1_ELF_inference-bazaar-batch-program={}", out.display());
         return;
     }
     sp1_helper::build_program_with_args("../program", Default::default());

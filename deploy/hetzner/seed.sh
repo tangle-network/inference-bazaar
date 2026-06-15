@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Quoting loop for both Surplus venues. Each venue is an independent operator
+# Quoting loop for both InferenceBazaar venues. Each venue is an independent operator
 # with its own discount policy — the NBBO competition is real.
 set -u
 ROUTER=https://router.tangle.tools
@@ -36,5 +36,5 @@ for m in json.load(sys.stdin)['data']:
   curl -sf --max-time 30 -X POST "$VENUE/settlement/flush" >/dev/null || true
 }
 
-tick_venue http://127.0.0.1:9400 "${SURPLUS_DISCOUNT_BPS:-1200}"
-tick_venue http://127.0.0.1:9500 "${SURPLUS2_DISCOUNT_BPS:-900}"
+tick_venue http://127.0.0.1:9400 "${INFERENCE_BAZAAR_DISCOUNT_BPS:-1200}"
+tick_venue http://127.0.0.1:9500 "${INFERENCE_BAZAAR2_DISCOUNT_BPS:-900}"

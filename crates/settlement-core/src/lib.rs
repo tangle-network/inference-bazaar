@@ -1,4 +1,4 @@
-//! Mirror of `SurplusSettlement.sol`'s typed-data surface: EIP-712 structs,
+//! Mirror of `InferenceBazaarSettlement.sol`'s typed-data surface: EIP-712 structs,
 //! digests, signature recovery, and the stateless half of fill validity.
 //!
 //! The contract is the source of truth. Everything here must hash byte-for-byte
@@ -68,10 +68,10 @@ sol! {
 pub const SIDE_BUY: u8 = 0;
 pub const SIDE_SELL: u8 = 1;
 
-/// The contract's EIP-712 domain: `EIP712("SurplusSettlement", "1")`.
+/// The contract's EIP-712 domain: `EIP712("InferenceBazaarSettlement", "1")`.
 pub fn domain(chain_id: u64, verifying_contract: Address) -> Eip712Domain {
     eip712_domain! {
-        name: "SurplusSettlement",
+        name: "InferenceBazaarSettlement",
         version: "1",
         chain_id: chain_id,
         verifying_contract: verifying_contract,
@@ -143,7 +143,7 @@ pub fn fills_hash(fills: &[BatchFill]) -> B256 {
 ///   book, nor re-submitted after the book's nonce advances (a partial-fill proof
 ///   is otherwise replayable until the orders are exhausted).
 /// - `ordersCommitment` is the hash of the input order set the guest *matched*
-///   (see `surplus_matcher::orders_commitment`). Because the guest runs the match
+///   (see `inference_bazaar_matcher::orders_commitment`). Because the guest runs the match
 ///   in-circuit, the proof attests `fillsHash` is the canonical match of exactly
 ///   that set — the prover cannot mis-pair, pick an exec price within the spread,
 ///   or drop a crossing order from the set. The contract emits it for off-chain

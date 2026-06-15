@@ -2,7 +2,7 @@
  * Real wallet wiring — the arena pattern: wagmi config via ConnectKit's
  * getDefaultConfig, wrapped in blueprint-ui's Web3Shell (query client +
  * wagmi provider) and ConnectKitProvider. Chains: Base Sepolia first (where
- * the Surplus blueprint and settlement contracts live), then Tangle.
+ * the InferenceBazaar blueprint and settlement contracts live), then Tangle.
  */
 import type { ReactNode } from 'react'
 import { http } from 'wagmi'
@@ -39,14 +39,14 @@ export function Web3Provider({ children }: { children: ReactNode }) {
   )
 }
 
-export const SURPLUS_CHAIN = baseSepolia
+export const INFERENCE_BAZAAR_CHAIN = baseSepolia
 
-/** Chains Surplus runs on, for the network switcher. Only Base Sepolia is live
+/** Chains InferenceBazaar runs on, for the network switcher. Only Base Sepolia is live
  * today; Base mainnet is listed (disabled) so the switcher is ready for the
  * mainnet cutover — flip `live`, add the chain to `chains` above, and wire its
  * contract addresses. */
-export type SurplusChainInfo = { id: number; name: string; short: string; live: boolean }
-export const SURPLUS_CHAINS: SurplusChainInfo[] = [
+export type InferenceBazaarChainInfo = { id: number; name: string; short: string; live: boolean }
+export const INFERENCE_BAZAAR_CHAINS: InferenceBazaarChainInfo[] = [
   { id: baseSepolia.id, name: 'Base Sepolia', short: 'Base Sepolia', live: true },
   { id: 8453, name: 'Base', short: 'Base mainnet', live: false },
 ]

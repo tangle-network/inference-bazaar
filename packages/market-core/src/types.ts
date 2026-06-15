@@ -1,5 +1,5 @@
 /**
- * Surplus market domain types.
+ * InferenceBazaar market domain types.
  *
  * Units, fixed across the whole system:
  * - quantity: tokens (integer)

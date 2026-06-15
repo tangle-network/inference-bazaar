@@ -29,10 +29,10 @@ importers:
 
   packages/mm-eval:
     dependencies:
-      '@surplus/market-core':
+      '@inference-bazaar/market-core':
         specifier: workspace:*
         version: link:../market-core
-      '@surplus/mm-loop':
+      '@inference-bazaar/mm-loop':
         specifier: workspace:*
         version: link:../mm-loop
     devDependencies:
@@ -51,7 +51,7 @@ importers:
 
   packages/mm-loop:
     dependencies:
-      '@surplus/market-core':
+      '@inference-bazaar/market-core':
         specifier: workspace:*
         version: link:../market-core
       '@tangle-network/agent-runtime':
@@ -73,7 +73,7 @@ importers:
 
   packages/mm-sidecar:
     dependencies:
-      '@surplus/market-core':
+      '@inference-bazaar/market-core':
         specifier: workspace:*
         version: link:../market-core
     devDependencies:
@@ -92,7 +92,7 @@ importers:
 
   packages/redemption:
     dependencies:
-      '@surplus/router-bridge':
+      '@inference-bazaar/router-bridge':
         specifier: workspace:*
         version: link:../router-bridge
     devDependencies:

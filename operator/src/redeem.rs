@@ -27,12 +27,12 @@ use crate::venue::{Venue, VenueError};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use serde_json::{json, Value};
-use surplus_settlement::core::alloy_primitives::{keccak256, Address, B256, U256};
-use surplus_settlement::instrument_hash;
+use inference_bazaar_settlement::core::alloy_primitives::{keccak256, Address, B256, U256};
+use inference_bazaar_settlement::instrument_hash;
 
-/// EIP-712 domain `SurplusServe/1`, bound to the settlement contract + chain so
+/// EIP-712 domain `InferenceBazaarServe/1`, bound to the settlement contract + chain so
 /// an authorization for one deployment is meaningless on another.
-const SERVE_DOMAIN_NAME: &[u8] = b"SurplusServe";
+const SERVE_DOMAIN_NAME: &[u8] = b"InferenceBazaarServe";
 const SERVE_REQUEST_TYPE: &[u8] =
     b"ServeRequest(bytes32 redemptionId,bytes32 messagesHash,uint64 maxTokens,uint64 expiry)";
 
@@ -192,7 +192,7 @@ pub(crate) fn redeem_attest_action(
 /// operator into a default+slash. No-op without the `chain` feature.
 #[cfg(feature = "chain")]
 pub fn spawn_redeem_attest(venue: std::sync::Arc<Venue>) {
-    let interval = env_secs("SURPLUS_REDEEM_ATTEST_INTERVAL_SECS", 60).max(5);
+    let interval = env_secs("INFERENCE_BAZAAR_REDEEM_ATTEST_INTERVAL_SECS", 60).max(5);
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(interval));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -216,7 +216,7 @@ impl Venue {
     /// Serve one inference call against an open redemption of a lot we issued.
     #[cfg(feature = "chain")]
     pub async fn redeem_serve(&self, body: RedeemServeBody) -> Result<Value, VenueError> {
-        use surplus_settlement::core::{hex, recover_signer};
+        use inference_bazaar_settlement::core::{hex, recover_signer};
 
         let ctx = self.settle_ctx_pub()?;
         let (rpc, key) = match (ctx.rpc_url.as_deref(), ctx.submitter_key()) {
@@ -253,7 +253,7 @@ impl Venue {
         let signer = recover_signer(digest, &sig)
             .ok_or_else(|| VenueError::Rejected("unrecoverable auth signature".into()))?;
 
-        let client = surplus_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
+        let client = inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
             .await
             .map_err(|e| VenueError::Chain(e.to_string()))?;
 
@@ -374,7 +374,7 @@ impl Venue {
         // reproduce the commitment before signing.
         let model_id_hash = keccak256(inst.model_id.as_bytes());
         let out_hash = output_hash(&completion);
-        let work = surplus_settlement::work_commitment(model_id_hash, messages_hash, out_hash);
+        let work = inference_bazaar_settlement::work_commitment(model_id_hash, messages_hash, out_hash);
 
         {
             let mut redeem = self.redeem.lock().unwrap();
@@ -389,7 +389,7 @@ impl Venue {
 
         // Digest computed locally from the canonical core (no chain round-trip):
         // drift would be a fund-loss bug, pinned by the parity fixture.
-        let digest = surplus_settlement::receipt_digest(rid, total, work, &ctx.domain);
+        let digest = inference_bazaar_settlement::receipt_digest(rid, total, work, &ctx.domain);
 
         Ok(json!({
             "completion": completion,
@@ -412,7 +412,7 @@ impl Venue {
     /// Submit the holder's signed receipt; settles the redemption on-chain.
     #[cfg(feature = "chain")]
     pub async fn redeem_receipt(&self, body: RedeemReceiptBody) -> Result<Value, VenueError> {
-        use surplus_settlement::core::hex;
+        use inference_bazaar_settlement::core::hex;
 
         let ctx = self.settle_ctx_pub()?;
         let (rpc, key) = match (ctx.rpc_url.as_deref(), ctx.submitter_key()) {
@@ -430,7 +430,7 @@ impl Venue {
         let sig = hex::decode(body.signature.trim_start_matches("0x"))
             .map_err(|_| VenueError::Rejected("signature is not hex".into()))?;
 
-        let client = surplus_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
+        let client = inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
             .await
             .map_err(|e| VenueError::Chain(e.to_string()))?;
         client
@@ -462,7 +462,7 @@ impl Venue {
             .signer
             .as_ref()
             .ok_or(VenueError::SettlementUnconfigured("operator key"))?;
-        let grace = env_secs("SURPLUS_REDEEM_ATTEST_GRACE_SECS", 300);
+        let grace = env_secs("INFERENCE_BAZAAR_REDEEM_ATTEST_GRACE_SECS", 300);
         let margin = REDEEM_ATTEST_MARGIN_SECS;
 
         let pending: Vec<(String, u64, B256, u64)> = {
@@ -474,7 +474,7 @@ impl Venue {
         if pending.is_empty() {
             return Ok(json!({ "mode": "noop" }));
         }
-        let client = surplus_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
+        let client = inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
             .await
             .map_err(|e| VenueError::Chain(e.to_string()))?;
         let now = crate::market::now_unix();
@@ -500,7 +500,7 @@ impl Venue {
                     let Ok(book) = client.lot_book(r.lotId).await else {
                         continue;
                     };
-                    let digest = surplus_settlement::receipt_digest(rid, served, work, &ctx.domain);
+                    let digest = inference_bazaar_settlement::receipt_digest(rid, served, work, &ctx.domain);
                     let sig = signer.sign_digest(digest).to_vec();
                     match client
                         .settle_redemption_attested(book, rid, served, work, vec![sig])
@@ -597,8 +597,8 @@ mod tests {
         );
     }
     use serde_json::json;
-    use surplus_settlement::core::recover_signer;
-    use surplus_settlement::Signer;
+    use inference_bazaar_settlement::core::recover_signer;
+    use inference_bazaar_settlement::Signer;
 
     #[test]
     fn output_hash_ignores_nondeterministic_fields() {
@@ -626,19 +626,19 @@ mod tests {
         let m = keccak256(b"anthropic/claude-opus-4-8:output");
         let msg = keccak256(br#"[{"role":"user","content":"hi"}]"#);
         let out = output_hash(&json!({ "choices": [{ "message": { "content": "ok" } }] }));
-        let base = surplus_settlement::work_commitment(m, msg, out);
+        let base = inference_bazaar_settlement::work_commitment(m, msg, out);
         // Perturbing any input changes the commitment.
         assert_ne!(
             base,
-            surplus_settlement::work_commitment(keccak256(b"other"), msg, out)
+            inference_bazaar_settlement::work_commitment(keccak256(b"other"), msg, out)
         );
         assert_ne!(
             base,
-            surplus_settlement::work_commitment(m, keccak256(b"other"), out)
+            inference_bazaar_settlement::work_commitment(m, keccak256(b"other"), out)
         );
         assert_ne!(
             base,
-            surplus_settlement::work_commitment(m, msg, keccak256(b"other"))
+            inference_bazaar_settlement::work_commitment(m, msg, keccak256(b"other"))
         );
     }
 

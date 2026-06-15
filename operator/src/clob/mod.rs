@@ -1,7 +1,7 @@
 //! Shared-CLOB epoch service: the transport + chain wiring around
-//! `surplus_matcher`'s pure consensus.
+//! `inference_bazaar_matcher`'s pure consensus.
 //!
-//! Per epoch (a fixed wall-clock window, `SURPLUS_CLOB_EPOCH_SECS`):
+//! Per epoch (a fixed wall-clock window, `INFERENCE_BAZAAR_CLOB_EPOCH_SECS`):
 //!   1. Signed orders arrive at any operator (`POST /clob/order`) and fan out
 //!      to every peer over the [`ClobNet`] transport — the HTTP peer list, or
 //!      (feature `mesh`) blueprint-networking's PKI-gated gossip — so all
@@ -49,8 +49,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use surplus_settlement::core::alloy_primitives::{keccak256, Address, B256, U256};
-use surplus_settlement::SignedOrder;
+use inference_bazaar_settlement::core::alloy_primitives::{keccak256, Address, B256, U256};
+use inference_bazaar_settlement::SignedOrder;
 
 use crate::config::Instrument;
 use crate::market::now_unix;
@@ -88,11 +88,11 @@ pub fn attest_deadline(epoch_secs: u64) -> Duration {
     Duration::from_millis((epoch_secs * 800).clamp(1_000, 8_000))
 }
 
-// EIP-712 `SurplusCancel/1`, domain-separated from every other Surplus signature
+// EIP-712 `InferenceBazaarCancel/1`, domain-separated from every other InferenceBazaar signature
 // (settlement orders, serve auths) so a cancel can never be replayed as anything
 // else. Mirrors the on-chain `cancelOrder` authority (msg.sender == trader) with
 // a portable signature the gossip layer can carry.
-const CANCEL_DOMAIN_NAME: &[u8] = b"SurplusCancel";
+const CANCEL_DOMAIN_NAME: &[u8] = b"InferenceBazaarCancel";
 const CANCEL_TYPE: &[u8] = b"OrderCancel(bytes32 orderHash)";
 
 /// keccak256(\x19\x01 ‖ domainSeparator ‖ structHash) for an order cancel.
@@ -186,11 +186,11 @@ impl Clob {
         Ok(ctx
             .signer
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("shared CLOB requires SURPLUS_OPERATOR_KEY"))?
+            .ok_or_else(|| anyhow::anyhow!("shared CLOB requires INFERENCE_BAZAAR_OPERATOR_KEY"))?
             .address())
     }
 
-    /// HTTP-transport service (the `SURPLUS_CLOB_OPERATORS` peer list).
+    /// HTTP-transport service (the `INFERENCE_BAZAAR_CLOB_OPERATORS` peer list).
     pub fn new(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<Self> {
         let me = Self::attester_of(&venue)?;
         let net = Arc::new(HttpNet::new(&cfg, me));
@@ -208,7 +208,7 @@ impl Clob {
         let me = Self::attester_of(&venue)?;
         anyhow::ensure!(
             cfg.operators.iter().any(|(a, _)| *a == me),
-            "this operator ({me:#x}) is not in SURPLUS_CLOB_OPERATORS"
+            "this operator ({me:#x}) is not in INFERENCE_BAZAAR_CLOB_OPERATORS"
         );
         anyhow::ensure!(
             cfg.threshold >= 1 && cfg.threshold <= cfg.operators.len(),
@@ -252,7 +252,7 @@ impl Clob {
         (epoch + 1) * self.cfg.epoch_secs + EXPIRY_MARGIN_SECS
     }
 
-    pub(crate) fn domain(&self) -> &surplus_settlement::Eip712Domain {
+    pub(crate) fn domain(&self) -> &inference_bazaar_settlement::Eip712Domain {
         &self.venue.settle.as_ref().expect("checked in new()").domain
     }
 
@@ -260,7 +260,7 @@ impl Clob {
         self.cfg.book_id
     }
 
-    pub(crate) fn signer(&self) -> &surplus_settlement::Signer {
+    pub(crate) fn signer(&self) -> &inference_bazaar_settlement::Signer {
         self.venue
             .settle
             .as_ref()

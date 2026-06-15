@@ -49,7 +49,7 @@ await tx(await ow.writeContract({ address: USD, abi: usdAbi, functionName: 'mint
 await tx(await ow.writeContract({ address: USD, abi: usdAbi, functionName: 'approve', args: [SETTLEMENT, COLL] }))
 await tx(await ow.writeContract({ address: SETTLEMENT, abi: sAbi, functionName: 'depositCollateral', args: [COLL] }))
 
-const domain = { name: 'SurplusSettlement', version: '1', chainId: anvil.id, verifyingContract: SETTLEMENT }
+const domain = { name: 'InferenceBazaarSettlement', version: '1', chainId: anvil.id, verifyingContract: SETTLEMENT }
 const types = { Order: [
   { name: 'instrument', type: 'bytes32' }, { name: 'side', type: 'uint8' },
   { name: 'priceMicroPerM', type: 'uint64' }, { name: 'qtyTokens', type: 'uint64' },

@@ -60,7 +60,7 @@ await tx(await ow.writeContract({ address: USD, abi: usdAbi, functionName: 'mint
 await tx(await ow.writeContract({ address: USD, abi: usdAbi, functionName: 'approve', args: [SETTLEMENT, COLLATERAL] }))
 await tx(await ow.writeContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'depositCollateral', args: [COLLATERAL] }))
 
-const domain = { name: 'SurplusSettlement', version: '1', chainId: anvil.id, verifyingContract: SETTLEMENT }
+const domain = { name: 'InferenceBazaarSettlement', version: '1', chainId: anvil.id, verifyingContract: SETTLEMENT }
 const orderTypes = { Order: [
   { name: 'instrument', type: 'bytes32' }, { name: 'side', type: 'uint8' },
   { name: 'priceMicroPerM', type: 'uint64' }, { name: 'qtyTokens', type: 'uint64' },
@@ -141,17 +141,17 @@ async function chat(content, cumulative) {
     `${VENUE}/v1/chat/completions`,
     { model: reg.model, messages: [{ role: 'user', content }], max_tokens: 256 },
     {
-      'x-surplus-session': session.address,
-      'x-surplus-voucher-cum': String(cumulative),
-      'x-surplus-voucher-sig': await voucherSig(session, cumulative),
+      'x-inference-bazaar-session': session.address,
+      'x-inference-bazaar-voucher-cum': String(cumulative),
+      'x-inference-bazaar-voucher-sig': await voucherSig(session, cumulative),
     },
   )
 }
 async function ack(cumulative) {
   return post(`${VENUE}/v1/spend/ack`, {}, {
-    'x-surplus-session': session.address,
-    'x-surplus-voucher-cum': String(cumulative),
-    'x-surplus-voucher-sig': await voucherSig(session, cumulative),
+    'x-inference-bazaar-session': session.address,
+    'x-inference-bazaar-voucher-cum': String(cumulative),
+    'x-inference-bazaar-voucher-sig': await voucherSig(session, cumulative),
   })
 }
 
@@ -160,7 +160,7 @@ let acked = 0
 const c1 = await chat('hello from the spend rail', acked)
 const served1 = c1.usage.completion_tokens
 if (!c1.choices?.[0]?.message?.content) throw new Error('no completion content')
-acked = c1.surplus.nextCumulative
+acked = c1.inference-bazaar.nextCumulative
 await ack(acked) // trailing ack makes THIS request settleable
 console.log(`served ${served1} tokens: "${c1.choices[0].message.content}"`)
 
@@ -170,9 +170,9 @@ const forged = await fetch(`${VENUE}/v1/chat/completions`, {
   method: 'POST',
   headers: {
     'content-type': 'application/json',
-    'x-surplus-session': session.address,
-    'x-surplus-voucher-cum': String(acked),
-    'x-surplus-voucher-sig': await voucherSig(buyer, acked),
+    'x-inference-bazaar-session': session.address,
+    'x-inference-bazaar-voucher-cum': String(acked),
+    'x-inference-bazaar-voucher-sig': await voucherSig(buyer, acked),
   },
   body: JSON.stringify({ model: reg.model, messages: [{ role: 'user', content: 'forged' }] }),
 })
@@ -202,7 +202,7 @@ if (Number(lot0[3]) - Number(lot1[3]) !== served1) throw new Error('lot quantity
 // ── 5. Second call proves cumulative settlement ──────────────────────────────
 const c2 = await chat('again', acked)
 const served2 = c2.usage.completion_tokens
-acked = c2.surplus.nextCumulative
+acked = c2.inference-bazaar.nextCumulative
 await ack(acked)
 await post(`${VENUE}/v1/spend/flush`, {})
 const settledCum = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [digest] })
@@ -214,9 +214,9 @@ const streamRes = await fetch(`${VENUE}/v1/chat/completions`, {
   method: 'POST',
   headers: {
     'content-type': 'application/json',
-    'x-surplus-session': session.address,
-    'x-surplus-voucher-cum': String(acked),
-    'x-surplus-voucher-sig': await voucherSig(session, acked),
+    'x-inference-bazaar-session': session.address,
+    'x-inference-bazaar-voucher-cum': String(acked),
+    'x-inference-bazaar-voucher-sig': await voucherSig(session, acked),
   },
   body: JSON.stringify({
     model: reg.model,
@@ -236,10 +236,10 @@ if (events[events.length - 1] !== '[DONE]') throw new Error('stream did not term
 const parsed = events.filter((e) => e !== '[DONE]').map((e) => JSON.parse(e))
 const streamedText = parsed.map((c) => c.choices?.[0]?.delta?.content ?? '').join('')
 if (!streamedText.includes('stub reply')) throw new Error(`streamed content wrong: "${streamedText}"`)
-const surplusEv = parsed.find((c) => c.surplus)
-if (!surplusEv) throw new Error('operator did not emit a surplus event in the stream')
-const served3 = surplusEv.surplus.servedTokens
-acked = surplusEv.surplus.nextCumulative
+const inference-bazaarEv = parsed.find((c) => c.inference-bazaar)
+if (!inference-bazaarEv) throw new Error('operator did not emit a inference-bazaar event in the stream')
+const served3 = inference-bazaarEv.inference-bazaar.servedTokens
+acked = inference-bazaarEv.inference-bazaar.nextCumulative
 if (acked !== served1 + served2 + served3)
   throw new Error(`stream nextCumulative ${acked} != ${served1 + served2 + served3}`)
 await ack(acked)
@@ -262,9 +262,9 @@ const afterRevoke = await fetch(`${VENUE}/v1/chat/completions`, {
   method: 'POST',
   headers: {
     'content-type': 'application/json',
-    'x-surplus-session': session.address,
-    'x-surplus-voucher-cum': String(acked),
-    'x-surplus-voucher-sig': await voucherSig(session, acked),
+    'x-inference-bazaar-session': session.address,
+    'x-inference-bazaar-voucher-cum': String(acked),
+    'x-inference-bazaar-voucher-sig': await voucherSig(session, acked),
   },
   body: JSON.stringify({ model: reg.model, messages: [{ role: 'user', content: 'after revoke' }], max_tokens: 256 }),
 })

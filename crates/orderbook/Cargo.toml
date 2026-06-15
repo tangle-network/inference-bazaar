@@ -1,12 +1,12 @@
 [package]
-name = "surplus-orderbook"
+name = "inference-bazaar-orderbook"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Open orderbook for inference-token credit markets. A native, deterministic, verifiable price-time-priority engine behind a MatchingEngine seam, plus a local/remote BookClient seam for the shared book."
 
 [lib]
-name = "surplus_orderbook"
+name = "inference_bazaar_orderbook"
 path = "src/lib.rs"
 
 [dependencies]

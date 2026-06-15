@@ -1,7 +1,7 @@
-# Surplus Intelligence — Architecture
+# Inference Bazaar — Architecture
 
 > An open market for AI inference. **Buy** discounted inference. **Sell** your
-> surplus inference. Operators **make markets** in inference tokens; the spread
+> spare inference. Operators **make markets** in inference tokens; the spread
 > is the product.
 
 This repo is the blueprint that builds that system. It trades **prepaid
@@ -22,7 +22,7 @@ This is the live architecture, not a plan:
   the SAME `match_epoch` in-circuit — `zk/program` — and commits the input-set
   commitment + fills, so a lone prover has no pairing/price/omission discretion).
 - **Across instances** — there is NO global matcher. The single market is the one
-  canonical `SurplusSettlement` contract (book-scoped: per-instance attester
+  canonical `InferenceBazaarSettlement` contract (book-scoped: per-instance attester
   quorum, nonce, and fee), plus blueprint-wide **NBBO aggregation**, **portable
   signed EIP-712 orders**, and a **smart-order-router** in the app.
 - **Every operator is both a market-maker AND an inference server.** A seller
@@ -33,7 +33,7 @@ This is the live architecture, not a plan:
   challenge window on the quorum path.
 
 The quoting brain (where to price) is the stateless `mm-sidecar` over
-`@surplus/market-core`; execution (which crossing orders fill) is the epoch
+`@inference-bazaar/market-core`; execution (which crossing orders fill) is the epoch
 matcher. See [The market-making loop](#the-market-making-loop).
 
 ---
@@ -49,7 +49,7 @@ anthropic/claude-opus-4-8:input    — input tokens for Opus 4.8
 ...
 ```
 
-Units, fixed across the whole system (`@surplus/market-core/types`):
+Units, fixed across the whole system (`@inference-bazaar/market-core/types`):
 
 | Quantity   | Unit                                          |
 |------------|-----------------------------------------------|
@@ -59,11 +59,11 @@ Units, fixed across the whole system (`@surplus/market-core/types`):
 
 `tsUSD` has 6 decimals, so a price of `15_000_000` = **$15.00 per 1M tokens** —
 the same number the router reports as `pricing.completion = "0.000015"` USD/token.
-`@surplus/router-bridge` does that conversion (`usdPerTokenToMicroPerM`).
+`@inference-bazaar/router-bridge` does that conversion (`usdPerTokenToMicroPerM`).
 
 ### Two sides of the market
 
-- **Sellers** hold surplus inference (an operator with idle GPUs, or a buyer
+- **Sellers** hold spare inference (an operator with idle GPUs, or a buyer
   who over-purchased a prepaid pack) and list **asks**.
 - **Buyers** want inference below list price and lift **bids** / hit asks.
 - **Operators / market makers** quote **both sides** continuously, earning the
@@ -84,7 +84,7 @@ packages/
   router-bridge/   Tangle Router client, ShieldedCredits SpendAuth, Tor (Arti) privacy
 ```
 
-### `@surplus/market-core` — the market
+### `@inference-bazaar/market-core` — the market
 
 Pure, dependency-free, deterministic. Nothing reads a clock; timestamps are
 caller-supplied, so every test asserts exact behavior and every session replays.
@@ -102,12 +102,12 @@ caller-supplied, so every test asserts exact behavior and every session replays.
 - **`SimulatedMarket`** — seeded venue: reference price on a geometric random
   walk, Poisson taker flow crossing the book. Deterministic given a seed.
 
-### `@surplus/mm-loop` — OFFLINE research / agentic-quoting prototype
+### `@inference-bazaar/mm-loop` — OFFLINE research / agentic-quoting prototype
 
 A single-operator, continuous Avellaneda–Stoikov session built on the
 agent-runtime loops API (`@tangle-network/agent-runtime/loops`). **It is NOT the
 production maker** — nothing in the operator, sidecar, or any deploy unit imports
-it. It exists for two things: offline parameter sweeps (`@surplus/mm-eval`) and
+it. It exists for two things: offline parameter sweeps (`@inference-bazaar/mm-eval`) and
 as the worked example of *agentic* quoting (an LLM in the quote loop) that a
 future sidecar can adopt behind the same `/quote` HTTP contract. The live quoting
 brain is the stateless `mm-sidecar` (below); the live *matching* is the
@@ -115,7 +115,7 @@ set-deterministic epoch matcher (the continuous single-operator session can't
 give peers the bit-identical re-execution the shared book's co-signing needs).
 See [The market-making loop](#the-market-making-loop).
 
-### `@surplus/router-bridge` — payments + privacy
+### `@inference-bazaar/router-bridge` — payments + privacy
 
 - **`RouterClient`** — typed reads of the router's public surface: `/v1/models`
   (→ reference pricing) and `/api/operators` (→ who can sell / relay).
@@ -129,17 +129,17 @@ See [The market-making loop](#the-market-making-loop).
 
 ## The market-making loop
 
-> Scope: this describes the `@surplus/mm-loop` **research/agentic-prototype**
+> Scope: this describes the `@inference-bazaar/mm-loop` **research/agentic-prototype**
 > session shape. In production, quoting is the stateless `mm-sidecar` (one
 > risk-gated A–S quote set per `/quote` call, driven by the seed.sh tick) and
 > matching is the epoch matcher — NOT a continuous in-process runLoop. The two
-> share the same `@surplus/market-core` math; this section documents the loop
+> share the same `@inference-bazaar/market-core` math; this section documents the loop
 > kernel that the offline harness and the future agentic sidecar run on.
 
 A **market-making session is one `runLoop` run**. The mapping onto the
 agent-runtime loop kernel:
 
-| Loop concept       | Surplus binding                                                        |
+| Loop concept       | Inference Bazaar binding                                                        |
 |--------------------|------------------------------------------------------------------------|
 | `Task`             | `MarketTick` — a full snapshot (ref mid, book, inventory, equity, params, limits) |
 | `Driver`           | `marketMakerDriver` — refine chain, one round = one market tick         |
@@ -175,7 +175,7 @@ ticks, every verdict invalid).
 ### Two modes, one kernel
 
 ```ts
-import { runMarketMakingLoop, SimVenue, agenticRunSpec } from '@surplus/mm-loop'
+import { runMarketMakingLoop, SimVenue, agenticRunSpec } from '@inference-bazaar/mm-loop'
 
 // Algorithmic (default): deterministic A–S quoter, no sandbox, no tokens.
 const result = await runMarketMakingLoop({ venue, params, limits, horizonTicks: 120 })
@@ -245,13 +245,13 @@ settlement rail. Mirrors `llm-inference-blueprint` + `tangle-router/lib/shielded
 1. A party funds a **shielded credit account** on Tangle EVM
    (`ShieldedCredits.fundCredits(commitment, amount, token)`), 6-decimal tsUSD.
 2. To buy a token lot (or to claim a maker payout), they sign an **EIP-712
-   `SpendAuth`** off-chain (`@surplus/router-bridge/buildSpendAuthMessage`) —
+   `SpendAuth`** off-chain (`@inference-bazaar/router-bridge/buildSpendAuthMessage`) —
    `{ commitment, serviceId, jobIndex, amount, operator, nonce, expiry }`.
 3. The operator/marketplace `authorizeSpend(auth)` on-chain, fulfills, then
    `claimPayment(authHash, recipient)`. Nonce is per-account monotonic (replay
    protection); orphaned auths reconcile via the router's `SpendAuthRefund` path.
 
-`@surplus/router-bridge`'s SpendAuth is a deliberate copy of the router's typed
+`@inference-bazaar/router-bridge`'s SpendAuth is a deliberate copy of the router's typed
 data — **drift is a fund-loss bug**; change only in lockstep with the router.
 
 ### Rail 3 — Firm (the settlement spine)
@@ -261,7 +261,7 @@ true. Four layers, all built:
 
 **1. Discovery — CLOB + RFQ, one signed struct.** A CLOB order and an RFQ
 response are the *same* EIP-712 `Order` (`instrument, side, price, qty, lotId,
-trader, expiry, salt` under domain `SurplusSettlement/1`). RFQ
+trader, expiry, salt` under domain `InferenceBazaarSettlement/1`). RFQ
 (`POST /rfq`) returns a firm, signed, short-TTL quote for exactly the
 requested size, priced by the risk-gated sidecar and never better for the
 taker than the risk gate allowed; the requester countersigns and crosses
@@ -274,7 +274,7 @@ everything, so a malicious venue can censor, never forge or alter a fill.
 Firm quotes bound maker exposure by `expiry` (default TTL 120s); `cancelOrder`
 is the on-chain kill switch.
 
-**3. Settlement — atomic by construction** (`contracts/src/SurplusSettlement.sol`).
+**3. Settlement — atomic by construction** (`contracts/src/InferenceBazaarSettlement.sol`).
 There is deliberately **no escrow-then-release two-phase flow**: buyers deposit
 tsUSD into a balance they can withdraw at any time, and `settleFills` debits
 the buyer, pays the seller (minus the platform fee), and mints/transfers the
@@ -302,7 +302,7 @@ quorum in dispute). Deadline missed → `claimDefault` repays the holder the
 lot's paid value **plus the penalty, straight from issuer collateral** —
 compensation never depends on slash routing, because Tangle slashes flow to
 the staking system, not the harmed buyer. The default is recorded on-chain and
-`SurplusBSM.challengeDefault` (permissionless — the record is objective)
+`InferenceBazaarBSM.challengeDefault` (permissionless — the record is objective)
 proposes a restake slash through tnt-core's `proposeSlash` as deterrence on
 top. Expired lots refund their unredeemed value the same way: paid, unserved
 spend always comes back as cash.
@@ -343,7 +343,7 @@ exit, so the operator never learns the consumer's IP. This requires operators to
 
 Wired today:
 - **Operators publish `.onion`** — the venue advertises its onion endpoint via
-  `/health` (`SURPLUS_ONION_URL`), and on-chain discovery surfaces it
+  `/health` (`INFERENCE_BAZAAR_ONION_URL`), and on-chain discovery surfaces it
   (`app/src/lib/venues.ts` `Venue.onion`).
 - **The app dials the onion under privacy mode** — `endpointFor(venue, privacy)`
   returns the onion when the user's privacy preference is on (`app/src/lib/privacy.ts`,
@@ -352,17 +352,17 @@ Wired today:
   network anonymity is real only when the user runs a **Tor Browser / system Tor**
   (or the Node SDK below). The app guarantees the right *destination* (`.onion`);
   the transport is the user's.
-- **Programmatic consumers (Node)** use `@surplus/router-bridge` `TorRedemptionClient`
+- **Programmatic consumers (Node)** use `@inference-bazaar/router-bridge` `TorRedemptionClient`
   — an HTTP transport tunneling through Arti's SOCKS5 (`.onion` resolves inside
   Tor; default listener 9150), tested against a real in-process SOCKS5 exchange.
 - **Operator outbound** (`PRIVACY_MODE=tor`): when the operator is itself an
   outbound client (remote backend, or redemption client to another operator),
   `operator/src/inference.rs` routes through Arti's SOCKS5 (`socks5h`,
-  `SURPLUS_TOR_SOCKS`). This protects the operator's own calls; it does not (and
+  `INFERENCE_BAZAAR_TOR_SOCKS`). This protects the operator's own calls; it does not (and
   cannot) anonymize consumers dialing it.
 
 Still operator-deploy work: actually **running Arti and exposing `/redeem` as a
-Tor onion service** (so `SURPLUS_ONION_URL` is real). Until an operator does
+Tor onion service** (so `INFERENCE_BAZAAR_ONION_URL` is real). Until an operator does
 that, privacy mode falls back to its clearnet URL.
 
 ### 2. Operator-selection anti-stickiness → ours (Tor can't do it)
@@ -384,7 +384,7 @@ weight(op) = max(ε, 1 − penalty · recencyWeight(op))
 (`app/src/lib/trade.tsx`): under privacy mode, among quotes within a tight price
 tolerance of the best (so privacy never overpays), it picks anti-sticky and
 persists the recent list per buyer in `localStorage` (`app/src/lib/privacy.ts`,
-a faithful port of `@surplus/router-bridge`'s `selectOperators` + `OperatorMemory`,
+a faithful port of `@inference-bazaar/router-bridge`'s `selectOperators` + `OperatorMemory`,
 which the Node SDK uses with `TorRedemptionClient`).
 
 > **Feature-flag it.** `PRIVACY_MODE = tor | off`. `tor` routes through Arti;
@@ -402,13 +402,13 @@ tokens; reusing the inference blueprints for the operator/sell side.
 
 ### From `ai-trading-blueprint` (the shape)
 
-| Trading blueprint                                   | Surplus equivalent                                          | Status |
+| Trading blueprint                                   | Inference Bazaar equivalent                                          | Status |
 |-----------------------------------------------------|-------------------------------------------------------------|--------|
-| `trading-runtime` (intents, strategy, portfolio)    | `@surplus/market-core` (orderbook, quoting, ledger, risk)   | **built** |
-| trading agent sidecar (Claude in Docker)            | `@surplus/mm-loop` on agent-runtime loops                   | **built** |
+| `trading-runtime` (intents, strategy, portfolio)    | `@inference-bazaar/market-core` (orderbook, quoting, ledger, risk)   | **built** |
+| trading agent sidecar (Claude in Docker)            | `@inference-bazaar/mm-loop` on agent-runtime loops                   | **built** |
 | `JOB_WORKFLOW_TICK` cron (`0 */5 * * * *`)          | back-to-back MM sessions on the same tick cron              | migrate |
 | `trading-blueprint-lib` jobs (provision/start/stop) | marketplace jobs (list instrument / start MM / stop / status)| migrate |
-| `TradingVault` + validator-signed envelope          | `SurplusSettlement` + attester-quorum / SP1-proven batches  | **built** |
+| `TradingVault` + validator-signed envelope          | `InferenceBazaarSettlement` + attester-quorum / SP1-proven batches  | **built** |
 | `arena/` React Router 7 + blueprint-ui UI           | marketplace arena (leaderboard, books, MM dashboards)       | clone  |
 | operator TLV registration (`registration.rs`)       | operator registration (capacity, models, `.onion` address)  | migrate |
 

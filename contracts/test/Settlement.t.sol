@@ -2,7 +2,7 @@
 pragma solidity ^0.8.26;
 
 import { SettlementTestBase } from "./Base.t.sol";
-import { SurplusSettlement } from "../src/SurplusSettlement.sol";
+import { InferenceBazaarSettlement } from "../src/InferenceBazaarSettlement.sol";
 
 contract SettlementTest is SettlementTestBase {
     function test_atomicMintFill() public {
@@ -36,94 +36,94 @@ contract SettlementTest is SettlementTestBase {
 
     function test_notionalRoundsHalfUp() public {
         // price 1_000, qty 1_500 => raw 1_500_000 / 1e6 with +500_000 => 2 micro (1.5 rounds up)
-        SurplusSettlement.Order memory b = buyOrder(1000, 1_500_000);
-        SurplusSettlement.Order memory s = sellOrder(1000, 1_500_000);
+        InferenceBazaarSettlement.Order memory b = buyOrder(1000, 1_500_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(1000, 1_500_000);
         uint256 before = settlement.balances(buyer);
         settlement.settleFills(fillInput(b, s, 1500, 1000));
         assertEq(before - settlement.balances(buyer), 2, "half-up rounding");
     }
 
     function test_partialFillsAccumulate_thenOverfillReverts() public {
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 50_000);
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
         settlement.settleFills(fillInput(b, s, 30_000, 15_000_000));
         settlement.settleFills(fillInput(b, s, 20_000, 15_000_000));
         assertEq(settlement.filled(settlement.hashOrder(b)), 50_000);
-        SurplusSettlement.FillInput[] memory overfill = fillInput(b, s, 1000, 15_000_000);
+        InferenceBazaarSettlement.FillInput[] memory overfill = fillInput(b, s, 1000, 15_000_000);
         bytes32 buyHash = settlement.hashOrder(b);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.Overfill.selector, buyHash, 0, 1000));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.Overfill.selector, buyHash, 0, 1000));
         settlement.settleFills(overfill);
     }
 
     function test_badSignatureReverts() public {
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 50_000);
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 50_000);
-        SurplusSettlement.FillInput[] memory fills = fillInput(b, s, 50_000, 15_000_000);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.FillInput[] memory fills = fillInput(b, s, 50_000, 15_000_000);
         fills[0].buySig = sign(sellerKey, b); // wrong signer
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.BadSignature.selector, settlement.hashOrder(b)));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.BadSignature.selector, settlement.hashOrder(b)));
         settlement.settleFills(fills);
     }
 
     function test_tamperedOrderAfterSigningReverts() public {
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 50_000);
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 50_000);
-        SurplusSettlement.FillInput[] memory fills = fillInput(b, s, 50_000, 15_000_000);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.FillInput[] memory fills = fillInput(b, s, 50_000, 15_000_000);
         fills[0].buy.qtyTokens = 500_000; // venue inflates the buyer's order
         vm.expectRevert(); // digest changes => recovery mismatch
         settlement.settleFills(fills);
     }
 
     function test_expiredOrderReverts() public {
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 50_000);
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 50_000);
-        SurplusSettlement.FillInput[] memory fills = fillInput(b, s, 50_000, 15_000_000);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.FillInput[] memory fills = fillInput(b, s, 50_000, 15_000_000);
         vm.warp(block.timestamp + 301);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.OrderExpired.selector, settlement.hashOrder(b)));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.OrderExpired.selector, settlement.hashOrder(b)));
         settlement.settleFills(fills);
     }
 
     function test_cancelledOrderReverts() public {
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 50_000);
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
         vm.prank(buyer);
         settlement.cancelOrder(b);
-        SurplusSettlement.FillInput[] memory fills = fillInput(b, s, 50_000, 15_000_000);
+        InferenceBazaarSettlement.FillInput[] memory fills = fillInput(b, s, 50_000, 15_000_000);
         bytes32 buyHash = settlement.hashOrder(b);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.OrderIsCancelled.selector, buyHash));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.OrderIsCancelled.selector, buyHash));
         settlement.settleFills(fills);
     }
 
     function test_onlyTraderCancels() public {
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 50_000);
-        vm.expectRevert(SurplusSettlement.NotTrader.selector);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
+        vm.expectRevert(InferenceBazaarSettlement.NotTrader.selector);
         settlement.cancelOrder(b);
     }
 
     function test_priceOutsideLimitsReverts() public {
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 50_000);
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 50_000);
-        SurplusSettlement.FillInput[] memory above = fillInput(b, s, 50_000, 15_000_001);
-        SurplusSettlement.FillInput[] memory below = fillInput(b, s, 50_000, 13_999_999);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.FillInput[] memory above = fillInput(b, s, 50_000, 15_000_001);
+        InferenceBazaarSettlement.FillInput[] memory below = fillInput(b, s, 50_000, 13_999_999);
         vm.expectRevert(
-            abi.encodeWithSelector(SurplusSettlement.PriceOutsideLimits.selector, 15_000_001, 15_000_000, 14_000_000)
+            abi.encodeWithSelector(InferenceBazaarSettlement.PriceOutsideLimits.selector, 15_000_001, 15_000_000, 14_000_000)
         );
         settlement.settleFills(above);
         vm.expectRevert(
-            abi.encodeWithSelector(SurplusSettlement.PriceOutsideLimits.selector, 13_999_999, 15_000_000, 14_000_000)
+            abi.encodeWithSelector(InferenceBazaarSettlement.PriceOutsideLimits.selector, 13_999_999, 15_000_000, 14_000_000)
         );
         settlement.settleFills(below);
     }
 
     function test_insufficientBuyerBalanceReverts() public {
         // 8M tokens at $15/M = $120 > buyer's $100 deposit.
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 8_000_000);
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 8_000_000);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 8_000_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 8_000_000);
         // seller needs collateral for $120 too; top up so the buyer is the binding constraint
         vm.prank(seller);
         settlement.depositCollateral(900_000_000);
-        SurplusSettlement.FillInput[] memory fills = fillInput(b, s, 8_000_000, 15_000_000);
+        InferenceBazaarSettlement.FillInput[] memory fills = fillInput(b, s, 8_000_000, 15_000_000);
         vm.expectRevert(
-            abi.encodeWithSelector(SurplusSettlement.InsufficientBalance.selector, 100_000_000, 120_000_000)
+            abi.encodeWithSelector(InferenceBazaarSettlement.InsufficientBalance.selector, 100_000_000, 120_000_000)
         );
         settlement.settleFills(fills);
     }
@@ -131,31 +131,31 @@ contract SettlementTest is SettlementTestBase {
     function test_mintBlockedWithoutCollateralHeadroom() public {
         // Liability would be $90; required = $90 * 1.05 = $94.5 <= $100 OK.
         // Second mint pushing liability to $180 must revert (requires $189).
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 6_000_000);
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 6_000_000);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 6_000_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 6_000_000);
         vm.prank(buyer);
         settlement.deposit(100_000_000); // cash for both fills so collateral binds
         settlement.settleFills(fillInput(b, s, 6_000_000, 15_000_000));
         assertEq(settlement.liability(seller), 90_000_000);
 
-        SurplusSettlement.Order memory b2 = buyOrder(15_000_000, 6_000_000);
+        InferenceBazaarSettlement.Order memory b2 = buyOrder(15_000_000, 6_000_000);
         b2.salt = keccak256("buy-2");
-        SurplusSettlement.Order memory s2 = sellOrder(14_000_000, 6_000_000);
+        InferenceBazaarSettlement.Order memory s2 = sellOrder(14_000_000, 6_000_000);
         s2.salt = keccak256("sell-2");
-        SurplusSettlement.FillInput[] memory fills = fillInput(b2, s2, 6_000_000, 15_000_000);
+        InferenceBazaarSettlement.FillInput[] memory fills = fillInput(b2, s2, 6_000_000, 15_000_000);
         vm.expectRevert(
-            abi.encodeWithSelector(SurplusSettlement.InsufficientCollateral.selector, 100_000_000, 189_000_000)
+            abi.encodeWithSelector(InferenceBazaarSettlement.InsufficientCollateral.selector, 100_000_000, 189_000_000)
         );
         settlement.settleFills(fills);
     }
 
     function test_selfFillReverts() public {
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
         b.trader = seller;
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 50_000);
-        SurplusSettlement.FillInput[] memory fills = fillInput(b, s, 50_000, 15_000_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.FillInput[] memory fills = fillInput(b, s, 50_000, 15_000_000);
         fills[0].buySig = sign(sellerKey, b);
-        vm.expectRevert(SurplusSettlement.SelfFill.selector);
+        vm.expectRevert(InferenceBazaarSettlement.SelfFill.selector);
         settlement.settleFills(fills);
     }
 
@@ -171,7 +171,7 @@ contract SettlementTest is SettlementTestBase {
         settlement.deposit(10_000_000);
         vm.stopPrank();
 
-        SurplusSettlement.Order memory b2 = SurplusSettlement.Order({
+        InferenceBazaarSettlement.Order memory b2 = InferenceBazaarSettlement.Order({
             instrument: INSTRUMENT,
             side: 0,
             priceMicroPerM: 10_000_000,
@@ -181,7 +181,7 @@ contract SettlementTest is SettlementTestBase {
             expiry: uint64(block.timestamp + 300),
             salt: keccak256("b2")
         });
-        SurplusSettlement.Order memory s2 = SurplusSettlement.Order({
+        InferenceBazaarSettlement.Order memory s2 = InferenceBazaarSettlement.Order({
             instrument: INSTRUMENT,
             side: 1,
             priceMicroPerM: 10_000_000,
@@ -191,11 +191,11 @@ contract SettlementTest is SettlementTestBase {
             expiry: uint64(block.timestamp + 300),
             salt: keccak256("s2")
         });
-        SurplusSettlement.FillInput[] memory fills = new SurplusSettlement.FillInput[](1);
+        InferenceBazaarSettlement.FillInput[] memory fills = new InferenceBazaarSettlement.FillInput[](1);
         (uint8 v, bytes32 r, bytes32 sg) = vm.sign(buyer2Key, settlement.orderDigest(b2));
         bytes memory b2sig = abi.encodePacked(r, sg, v);
         (v, r, sg) = vm.sign(buyerKey, settlement.orderDigest(s2));
-        fills[0] = SurplusSettlement.FillInput({
+        fills[0] = InferenceBazaarSettlement.FillInput({
             buy: b2,
             buySig: b2sig,
             sell: s2,
@@ -226,7 +226,7 @@ contract SettlementTest is SettlementTestBase {
     function test_resaleInstrumentMismatchReverts() public {
         // Seller mints a lot of the cheap instrument Y...
         bytes32 instrY = keccak256("anthropic/claude-haiku-4-5:output");
-        SurplusSettlement.Order memory by = SurplusSettlement.Order({
+        InferenceBazaarSettlement.Order memory by = InferenceBazaarSettlement.Order({
             instrument: instrY,
             side: 0,
             priceMicroPerM: 250_000,
@@ -236,7 +236,7 @@ contract SettlementTest is SettlementTestBase {
             expiry: uint64(block.timestamp + 300),
             salt: keccak256("by")
         });
-        SurplusSettlement.Order memory sy = SurplusSettlement.Order({
+        InferenceBazaarSettlement.Order memory sy = InferenceBazaarSettlement.Order({
             instrument: instrY,
             side: 1,
             priceMicroPerM: 250_000,
@@ -259,7 +259,7 @@ contract SettlementTest is SettlementTestBase {
         settlement.deposit(100_000_000);
         vm.stopPrank();
 
-        SurplusSettlement.Order memory bx = SurplusSettlement.Order({
+        InferenceBazaarSettlement.Order memory bx = InferenceBazaarSettlement.Order({
             instrument: INSTRUMENT, // X — expensive
             side: 0,
             priceMicroPerM: 15_000_000,
@@ -269,7 +269,7 @@ contract SettlementTest is SettlementTestBase {
             expiry: uint64(block.timestamp + 300),
             salt: keccak256("bx")
         });
-        SurplusSettlement.Order memory sx = SurplusSettlement.Order({
+        InferenceBazaarSettlement.Order memory sx = InferenceBazaarSettlement.Order({
             instrument: INSTRUMENT, // X — but delivers lot Y
             side: 1,
             priceMicroPerM: 15_000_000,
@@ -279,11 +279,11 @@ contract SettlementTest is SettlementTestBase {
             expiry: uint64(block.timestamp + 300),
             salt: keccak256("sx")
         });
-        SurplusSettlement.FillInput[] memory fills = new SurplusSettlement.FillInput[](1);
+        InferenceBazaarSettlement.FillInput[] memory fills = new InferenceBazaarSettlement.FillInput[](1);
         (uint8 v, bytes32 r, bytes32 sg) = vm.sign(buyer2Key, settlement.orderDigest(bx));
         bytes memory bxSig = abi.encodePacked(r, sg, v);
         (v, r, sg) = vm.sign(buyerKey, settlement.orderDigest(sx));
-        fills[0] = SurplusSettlement.FillInput({
+        fills[0] = InferenceBazaarSettlement.FillInput({
             buy: bx,
             buySig: bxSig,
             sell: sx,
@@ -292,7 +292,7 @@ contract SettlementTest is SettlementTestBase {
             execPriceMicroPerM: 15_000_000
         });
         // The contract must reject delivering instrument Y for an X-priced order.
-        vm.expectRevert(SurplusSettlement.InvalidOrderPair.selector);
+        vm.expectRevert(InferenceBazaarSettlement.InvalidOrderPair.selector);
         settlement.settleFills(fills);
     }
 
@@ -310,7 +310,7 @@ contract SettlementTest is SettlementTestBase {
         vm.prank(seller);
         vm.expectRevert(
             abi.encodeWithSelector(
-                SurplusSettlement.InsufficientCollateral.selector, 100_000_000 - 787_500, 100_000_000
+                InferenceBazaarSettlement.InsufficientCollateral.selector, 100_000_000 - 787_500, 100_000_000
             )
         );
         settlement.withdrawCollateral(100_000_000);

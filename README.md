@@ -1,6 +1,6 @@
 # Inference Bazaar
 
-**An open market for AI inference.** Buy discounted inference. Sell your surplus
+**An open market for AI inference.** Buy discounted inference. Sell your spare
 inference. Operators make markets in inference tokens; the spread is the product.
 
 This is the Tangle Blueprint that builds [inference-bazaar.blueprint.tangle.tools](https://inference-bazaar.blueprint.tangle.tools/) —
@@ -13,7 +13,7 @@ modal-inference** blueprints for the sell side.
 ## What's here
 
 ```
-contracts/         SurplusSettlement (custody, lots, attested/proven batches) + BSM — live on Base Sepolia
+contracts/         InferenceBazaarSettlement (custody, lots, attested/proven batches) + BSM — live on Base Sepolia
 crates/
   orderbook/       the deterministic integer matching engine (NativeBook) + BookClient seam
   matcher/         set-deterministic epoch matcher + consensus (election, verification, quorum)
@@ -74,8 +74,8 @@ loop iterations 120, cost $0
 ## Using the loop
 
 ```ts
-import { runMarketMakingLoop, SimVenue } from '@surplus/mm-loop'
-import { SimulatedMarket } from '@surplus/market-core'
+import { runMarketMakingLoop, SimVenue } from '@inference-bazaar/mm-loop'
+import { SimulatedMarket } from '@inference-bazaar/market-core'
 
 const venue = new SimVenue(new SimulatedMarket(instrument, simConfig))
 const { decision, report } = await runMarketMakingLoop({

@@ -3,7 +3,7 @@ import {
   computeQuotes,
   type QuoteParams,
   type RiskLimits,
-} from '@surplus/market-core'
+} from '@inference-bazaar/market-core'
 
 /**
  * The sidecar's per-tick contract. The Rust operator owns the venue (the

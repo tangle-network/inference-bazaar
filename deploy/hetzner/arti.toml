@@ -2,17 +2,17 @@
 # can reach the operator without learning its IP. Arti generates a stable
 # <hash>.onion and forwards onion port 80 to the local venue HTTP port.
 #
-#   arti -c /opt/surplus/arti.toml proxy
+#   arti -c /opt/inference-bazaar/arti.toml proxy
 #
 # The generated hostname lives under <state_dir>/.../hostname; publish-onion.sh
-# copies it to /opt/surplus/onion-hostname, which the operator reads via
-# SURPLUS_ONION_FILE and publishes over /health.
+# copies it to /opt/inference-bazaar/onion-hostname, which the operator reads via
+# INFERENCE_BAZAAR_ONION_FILE and publishes over /health.
 
 [storage]
-state_dir = "/opt/surplus/arti/state"
-cache_dir = "/opt/surplus/arti/cache"
+state_dir = "/opt/inference-bazaar/arti/state"
+cache_dir = "/opt/inference-bazaar/arti/cache"
 
-[onion_services."surplus-venue"]
+[onion_services."inference-bazaar-venue"]
 # Onion :80 → the local venue API (op #1 clearnet port). Change the target to
-# match SURPLUS_OPERATOR_ADDR on this host.
+# match INFERENCE_BAZAAR_OPERATOR_ADDR on this host.
 proxy_ports = [["80", "127.0.0.1:9400"]]

@@ -13,14 +13,14 @@
 //! the OpenAI-compat interface, so the URL seam loses nothing.
 //!
 //! Selection (env), in precedence order:
-//!   SURPLUS_VLLM_MODEL        — spawn `python3 -m vllm.entrypoints.openai.api_server`
-//!                               serving this model on SURPLUS_VLLM_PORT
-//!                               (default 8901; SURPLUS_VLLM_ARGS appended) and
+//!   INFERENCE_BAZAAR_VLLM_MODEL        — spawn `python3 -m vllm.entrypoints.openai.api_server`
+//!                               serving this model on INFERENCE_BAZAAR_VLLM_PORT
+//!                               (default 8901; INFERENCE_BAZAAR_VLLM_ARGS appended) and
 //!                               serve from it.
-//!   SURPLUS_INFERENCE_URL     — serve from this OpenAI-compat base URL
-//!                               (SURPLUS_INFERENCE_API_KEY as bearer).
+//!   INFERENCE_BAZAAR_INFERENCE_URL     — serve from this OpenAI-compat base URL
+//!                               (INFERENCE_BAZAAR_INFERENCE_API_KEY as bearer).
 //!   neither                   — serve through the Tangle Router
-//!                               (SURPLUS_ROUTER_URL + SURPLUS_ROUTER_API_KEY),
+//!                               (INFERENCE_BAZAAR_ROUTER_URL + INFERENCE_BAZAAR_ROUTER_API_KEY),
 //!                               the legacy proxy behavior, unchanged.
 
 use serde_json::{json, Value};
@@ -46,11 +46,11 @@ pub struct InferenceBackend {
 /// when this process acts as a redemption client to another operator — by
 /// routing them through Arti's SOCKS5 listener. `socks5h` (not `socks5`) sends
 /// the hostname to the proxy so `.onion` names resolve inside Tor.
-/// `SURPLUS_TOR_SOCKS` overrides the default Arti listener (127.0.0.1:9150).
+/// `INFERENCE_BAZAAR_TOR_SOCKS` overrides the default Arti listener (127.0.0.1:9150).
 fn http_client() -> reqwest::Client {
     let mut b = reqwest::Client::builder().timeout(Duration::from_secs(300));
     if std::env::var("PRIVACY_MODE").as_deref() == Ok("tor") {
-        let socks = std::env::var("SURPLUS_TOR_SOCKS")
+        let socks = std::env::var("INFERENCE_BAZAAR_TOR_SOCKS")
             .unwrap_or_else(|_| "socks5h://127.0.0.1:9150".to_string());
         let proxy = reqwest::Proxy::all(&socks)
             .unwrap_or_else(|e| panic!("PRIVACY_MODE=tor but SOCKS proxy {socks} is invalid: {e}"));
@@ -73,12 +73,12 @@ impl InferenceBackend {
 
     /// Must run inside a tokio runtime (a managed vLLM spawn needs one).
     pub fn from_env(router_url: &str) -> Self {
-        let api_key = std::env::var("SURPLUS_INFERENCE_API_KEY")
-            .or_else(|_| std::env::var("SURPLUS_ROUTER_API_KEY"))
+        let api_key = std::env::var("INFERENCE_BAZAAR_INFERENCE_API_KEY")
+            .or_else(|_| std::env::var("INFERENCE_BAZAAR_ROUTER_API_KEY"))
             .ok();
 
-        if let Ok(model) = std::env::var("SURPLUS_VLLM_MODEL") {
-            let port: u16 = std::env::var("SURPLUS_VLLM_PORT")
+        if let Ok(model) = std::env::var("INFERENCE_BAZAAR_VLLM_MODEL") {
+            let port: u16 = std::env::var("INFERENCE_BAZAAR_VLLM_PORT")
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(8901);
@@ -86,7 +86,7 @@ impl InferenceBackend {
             cmd.args(["-m", "vllm.entrypoints.openai.api_server"])
                 .args(["--model", &model])
                 .args(["--port", &port.to_string()]);
-            if let Ok(extra) = std::env::var("SURPLUS_VLLM_ARGS") {
+            if let Ok(extra) = std::env::var("INFERENCE_BAZAAR_VLLM_ARGS") {
                 cmd.args(extra.split_whitespace());
             }
             cmd.kill_on_drop(true);
@@ -102,12 +102,12 @@ impl InferenceBackend {
                 Err(e) => {
                     // Refusing to boot beats silently serving from the wrong
                     // backend: the operator configured its own GPU on purpose.
-                    panic!("SURPLUS_VLLM_MODEL set but vLLM failed to spawn: {e}");
+                    panic!("INFERENCE_BAZAAR_VLLM_MODEL set but vLLM failed to spawn: {e}");
                 }
             }
         }
 
-        if let Ok(url) = std::env::var("SURPLUS_INFERENCE_URL") {
+        if let Ok(url) = std::env::var("INFERENCE_BAZAAR_INFERENCE_URL") {
             return Self::new(url, api_key);
         }
         let mut b = Self::new(router_url, api_key);

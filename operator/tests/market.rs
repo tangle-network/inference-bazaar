@@ -2,13 +2,13 @@
 //! stub sidecar, countersign + fill, signed CLOB crossing, and the outbox.
 
 use std::sync::Arc;
-use surplus_operator::config::{
+use inference_bazaar_operator::config::{
     Instrument, OperatorConfig, QuoteParams, RiskLimits, SettlementConfig,
 };
-use surplus_operator::market::{RfqFillBody, SignedOrderBody};
-use surplus_operator::Venue;
-use surplus_settlement::core::alloy_primitives::B256;
-use surplus_settlement::{domain, instrument_hash, Order, Signer, SIDE_BUY};
+use inference_bazaar_operator::market::{RfqFillBody, SignedOrderBody};
+use inference_bazaar_operator::Venue;
+use inference_bazaar_settlement::core::alloy_primitives::B256;
+use inference_bazaar_settlement::{domain, instrument_hash, Order, Signer, SIDE_BUY};
 
 const INSTRUMENT: &str = "anthropic/claude-opus-4-8:output";
 const CONTRACT: &str = "0x1111111111111111111111111111111111111111";
@@ -91,7 +91,7 @@ async fn rfq_quote_countersign_fill_outbox() {
 
     // 1. RFQ: buyer asks to buy 30k tokens; operator returns a signed firm ask.
     let quote = venue
-        .rfq_quote(INSTRUMENT, surplus_orderbook::Side::Buy, 30_000)
+        .rfq_quote(INSTRUMENT, inference_bazaar_orderbook::Side::Buy, 30_000)
         .await
         .unwrap();
     assert_eq!(quote["quoting"], true);
@@ -108,8 +108,8 @@ async fn rfq_quote_countersign_fill_outbox() {
     // The signature is real and verifies under the settlement domain.
     let dom = domain(31_337, CONTRACT.parse().unwrap());
     let sig = quote["signature"].as_str().unwrap();
-    let sig_bytes = surplus_settlement::core::hex::decode(sig.trim_start_matches("0x")).unwrap();
-    assert!(surplus_settlement::verify_order(
+    let sig_bytes = inference_bazaar_settlement::core::hex::decode(sig.trim_start_matches("0x")).unwrap();
+    assert!(inference_bazaar_settlement::verify_order(
         &maker_order,
         &sig_bytes,
         &dom
@@ -140,7 +140,7 @@ async fn rfq_quote_countersign_fill_outbox() {
             taker: SignedOrderBody {
                 instrument_id: INSTRUMENT.into(),
                 order: taker.order.clone(),
-                signature: surplus_settlement::core::hex::encode_prefixed(&taker.signature),
+                signature: inference_bazaar_settlement::core::hex::encode_prefixed(&taker.signature),
             },
         })
         .unwrap();
@@ -166,7 +166,7 @@ async fn rfq_quote_countersign_fill_outbox() {
         taker: SignedOrderBody {
             instrument_id: INSTRUMENT.into(),
             order: taker.order,
-            signature: surplus_settlement::core::hex::encode_prefixed(&taker.signature),
+            signature: inference_bazaar_settlement::core::hex::encode_prefixed(&taker.signature),
         },
     });
     assert!(again.is_err(), "venue-side fill bookkeeping caps reuse");
@@ -211,7 +211,7 @@ async fn signed_clob_orders_cross_and_pair() {
         .place_signed(SignedOrderBody {
             instrument_id: INSTRUMENT.into(),
             order: ask.order.clone(),
-            signature: surplus_settlement::core::hex::encode_prefixed(&ask.signature),
+            signature: inference_bazaar_settlement::core::hex::encode_prefixed(&ask.signature),
         })
         .unwrap();
     assert!(resting["resting"].is_object(), "ask rests");
@@ -224,7 +224,7 @@ async fn signed_clob_orders_cross_and_pair() {
         .place_signed(SignedOrderBody {
             instrument_id: INSTRUMENT.into(),
             order: bad,
-            signature: surplus_settlement::core::hex::encode_prefixed(&ask.signature),
+            signature: inference_bazaar_settlement::core::hex::encode_prefixed(&ask.signature),
         })
         .is_err());
 
@@ -246,7 +246,7 @@ async fn signed_clob_orders_cross_and_pair() {
         .place_signed(SignedOrderBody {
             instrument_id: INSTRUMENT.into(),
             order: bid.order,
-            signature: surplus_settlement::core::hex::encode_prefixed(&bid.signature),
+            signature: inference_bazaar_settlement::core::hex::encode_prefixed(&bid.signature),
         })
         .unwrap();
     assert_eq!(crossed["signedFills"], 1);

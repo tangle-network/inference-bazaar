@@ -4,7 +4,7 @@ import {
   type QuoteParams,
   type RiskLimits,
   SimulatedMarket,
-} from '@surplus/market-core'
+} from '@inference-bazaar/market-core'
 import type { SandboxClient, SandboxEvent, SandboxInstance } from '@tangle-network/agent-runtime/loops'
 import { describe, expect, it } from 'vitest'
 import { agenticRunSpec } from '../src/executors'

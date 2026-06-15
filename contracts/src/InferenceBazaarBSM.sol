@@ -4,9 +4,9 @@ pragma solidity ^0.8.26;
 import { BlueprintServiceManagerBase } from "tnt-core/BlueprintServiceManagerBase.sol";
 import { ITangleSlashing } from "tnt-core/interfaces/ITangleSlashing.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import { SurplusSettlement } from "./SurplusSettlement.sol";
+import { InferenceBazaarSettlement } from "./InferenceBazaarSettlement.sol";
 
-/// @title SurplusBSM — the Surplus blueprint's on-chain manager.
+/// @title InferenceBazaarBSM — the InferenceBazaar blueprint's on-chain manager.
 ///
 /// Two jobs:
 ///
@@ -22,7 +22,7 @@ import { SurplusSettlement } from "./SurplusSettlement.sol";
 ///
 ///  2. SLASHING. Compensation is the settlement contract's job (a redemption
 ///     default pays the holder from issuer collateral); this manager adds the
-///     restake consequence. A default recorded on-chain by SurplusSettlement is
+///     restake consequence. A default recorded on-chain by InferenceBazaarSettlement is
 ///     objective evidence, so `challengeDefault` is permissionless — but it can
 ///     only target an operator that is actually a member of the named service.
 ///     The manager is the blueprint's slashing origin (the base defaults
@@ -34,7 +34,7 @@ import { SurplusSettlement } from "./SurplusSettlement.sol";
 /// emit attribution events: the on-chain jobs are market-making control/telemetry
 /// (list instrument, status, tick), not value transfer, so the manager records
 /// who produced what rather than adjudicating results on-chain.
-contract SurplusBSM is BlueprintServiceManagerBase {
+contract InferenceBazaarBSM is BlueprintServiceManagerBase {
     using EnumerableSet for EnumerableSet.AddressSet;
 
     /// Restake slashed per redemption default, in basis points of exposed stake.
@@ -45,7 +45,7 @@ contract SurplusBSM is BlueprintServiceManagerBase {
     /// protocol's default exitQueueDuration (BlueprintServiceManagerBase: 7 days).
     uint64 public constant SLASH_GRACE_WINDOW = 7 days;
 
-    SurplusSettlement public settlement;
+    InferenceBazaarSettlement public settlement;
     mapping(uint256 => bool) public defaultChallenged;
     /// slashId (from proposeSlash) => the defaultId it was raised for — lets
     /// governance map a disputed/cancelled core slash back to its challenge.
@@ -97,7 +97,7 @@ contract SurplusBSM is BlueprintServiceManagerBase {
     error AlreadyChallenged(uint256 defaultId);
     error NotServiceOperator(uint64 serviceId, address operator);
 
-    function setSettlement(SurplusSettlement _settlement) external onlyBlueprintOwner {
+    function setSettlement(InferenceBazaarSettlement _settlement) external onlyBlueprintOwner {
         if (address(settlement) != address(0)) revert SettlementAlreadySet();
         settlement = _settlement;
         emit SettlementSet(address(_settlement));
@@ -258,7 +258,7 @@ contract SurplusBSM is BlueprintServiceManagerBase {
         if (!member && !inGrace) revert NotServiceOperator(serviceId, issuer);
         defaultChallenged[defaultId] = true;
         bytes32 evidence =
-            keccak256(abi.encode("surplus_redemption_default", defaultId, issuer, amountMicro, redemptionId));
+            keccak256(abi.encode("inference_bazaar_redemption_default", defaultId, issuer, amountMicro, redemptionId));
         slashId = ITangleSlashing(tangleCore).proposeSlash(serviceId, issuer, DEFAULT_SLASH_BPS, evidence);
         slashToDefault[slashId] = defaultId;
         emit DefaultChallenged(defaultId, serviceId, issuer, slashId, operatorExposureBps[serviceId][issuer]);

@@ -4,8 +4,8 @@ pragma solidity ^0.8.26;
 import { Script, console } from "forge-std/Script.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { TimelockController } from "@openzeppelin/contracts/governance/TimelockController.sol";
-import { SurplusSettlement } from "../src/SurplusSettlement.sol";
-import { SurplusBSM } from "../src/SurplusBSM.sol";
+import { InferenceBazaarSettlement } from "../src/InferenceBazaarSettlement.sol";
+import { InferenceBazaarBSM } from "../src/InferenceBazaarBSM.sol";
 import { MockUSD, SP1MockVerifierStrict } from "../src/dev/Mocks.sol";
 
 /// Deploys the settlement spine.
@@ -45,7 +45,7 @@ contract Deploy is Script {
             console.log("MockUSD:", token);
         }
 
-        SurplusSettlement settlement = new SurplusSettlement(
+        InferenceBazaarSettlement settlement = new InferenceBazaarSettlement(
             IERC20(token),
             uint64(vm.envOr("CREDIT_TTL", uint256(30 days))),
             uint64(vm.envOr("REDEMPTION_WINDOW", uint256(6 hours))),
@@ -54,10 +54,10 @@ contract Deploy is Script {
             uint16(vm.envOr("FEE_BPS", uint256(200))),
             vm.envOr("FEE_RECIPIENT", deployer)
         );
-        console.log("SurplusSettlement:", address(settlement));
+        console.log("InferenceBazaarSettlement:", address(settlement));
 
-        SurplusBSM bsm = new SurplusBSM();
-        console.log("SurplusBSM:", address(bsm));
+        InferenceBazaarBSM bsm = new InferenceBazaarBSM();
+        console.log("InferenceBazaarBSM:", address(bsm));
 
         // Wire the manager so it is functional from block 0. In a Tangle
         // production deploy the runtime deploys + bootstraps the manager
@@ -69,7 +69,7 @@ contract Deploy is Script {
         address tangleCore = vm.envOr("TANGLE_CORE", deployer);
         bsm.onBlueprintCreated(blueprintId, deployer, tangleCore);
         bsm.setSettlement(settlement);
-        console.log("SurplusBSM wired -> settlement; tangleCore:", tangleCore);
+        console.log("InferenceBazaarBSM wired -> settlement; tangleCore:", tangleCore);
 
         // SP1 proven path: wire the verifier + the guest program's vkey so
         // settleBatchProven is live. On anvil with DEPLOY_DEV_VERIFIER, use the
@@ -93,7 +93,7 @@ contract Deploy is Script {
         // the real quorum post-deploy via the timelock; for dev/testnet (or when
         // REGISTER_BOOK=1) register a single-attester book owned by the deployer.
         if (vm.envOr("REGISTER_BOOK", uint256(0)) == 1 || block.chainid == 31_337) {
-            bytes32 bookId = vm.envOr("BOOK_ID", keccak256("surplus.book.0"));
+            bytes32 bookId = vm.envOr("BOOK_ID", keccak256("inference-bazaar.book.0"));
             address[] memory defaultAtt = new address[](1);
             defaultAtt[0] = deployer;
             address[] memory attesters = vm.envOr("BOOK_ATTESTERS", ",", defaultAtt);
@@ -122,7 +122,7 @@ contract Deploy is Script {
     /// every owner action goes schedule -> wait TIMELOCK_DELAY -> execute, with
     /// no EOA shortcut and no way to shorten the delay except through the
     /// timelock itself.
-    function _ownByTimelock(SurplusSettlement settlement, address deployer) internal {
+    function _ownByTimelock(InferenceBazaarSettlement settlement, address deployer) internal {
         uint256 delay = vm.envOr("TIMELOCK_DELAY", uint256(24 hours));
         address admin = vm.envOr("TIMELOCK_ADMIN", deployer);
 

@@ -21,7 +21,7 @@ function typeString(name: string, fields: readonly { name: string; type: string 
 }
 
 // The canonical typehash preimages, pinned INDEPENDENTLY here (these exact
-// strings are the typehash inputs in contracts/src/SurplusSettlement.sol,
+// strings are the typehash inputs in contracts/src/InferenceBazaarSettlement.sol,
 // crates/settlement-core/src/lib.rs, and operator/src/redeem.rs). Asserting the
 // types objects against these literals — NOT against CANONICAL_TYPE_STRINGS,
 // which lives in the same module — is what catches a real drift (e.g. a missing
@@ -34,7 +34,7 @@ const PINNED = {
   ServeRequest: 'ServeRequest(bytes32 redemptionId,bytes32 messagesHash,uint64 maxTokens,uint64 expiry)',
 } as const
 
-describe('EIP-712 type parity with SurplusSettlement.sol / settlement-core', () => {
+describe('EIP-712 type parity with InferenceBazaarSettlement.sol / settlement-core', () => {
   // Each types object must produce the canonical typehash preimage byte-for-byte,
   // AND the module's own CANONICAL_TYPE_STRINGS must equal the same literal — so
   // a wallet, the contract, and the Rust core all hash identical typehashes.
@@ -74,7 +74,7 @@ describe('buildOrderMessage', () => {
   it('assembles domain + message for eth_signTypedData_v4', () => {
     const msg = buildOrderMessage(order, 3799, '0x1111111111111111111111111111111111111111')
     expect(msg.domain).toEqual({
-      name: 'SurplusSettlement',
+      name: 'InferenceBazaarSettlement',
       version: '1',
       chainId: 3799,
       verifyingContract: '0x1111111111111111111111111111111111111111',
@@ -106,9 +106,9 @@ describe('buildOrderMessage', () => {
     expect(Object.keys(msg.message)).toEqual(BATCH_TYPES.SettlementBatch.map((f) => f.name))
   })
 
-  it('builds serve requests under the SurplusServe domain', () => {
+  it('builds serve requests under the InferenceBazaarServe domain', () => {
     const msg = buildServeMessage('0x' + '01'.repeat(32), '0x' + '02'.repeat(32), 1024n, 1_900_000_000n, 3799, '0x' + '11'.repeat(20))
-    expect(msg.domain.name).toBe('SurplusServe')
+    expect(msg.domain.name).toBe('InferenceBazaarServe')
     expect(msg.primaryType).toBe('ServeRequest')
   })
 })

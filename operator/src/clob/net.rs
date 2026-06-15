@@ -5,8 +5,8 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use surplus_matcher::Attestation;
-use surplus_settlement::core::alloy_primitives::{Address, B256};
+use inference_bazaar_matcher::Attestation;
+use inference_bazaar_settlement::core::alloy_primitives::{Address, B256};
 
 use super::{ClobConfig, WireAttestation, WireCancel, WireOrder, WireProposal};
 
@@ -39,7 +39,7 @@ pub trait ClobNet: Send + Sync {
     ) -> Vec<Attestation>;
 }
 
-/// The static peer-list HTTP transport (`SURPLUS_CLOB_OPERATORS`).
+/// The static peer-list HTTP transport (`INFERENCE_BAZAAR_CLOB_OPERATORS`).
 pub struct HttpNet {
     me: Address,
     operators: Vec<(Address, String)>,
@@ -78,7 +78,7 @@ impl HttpNet {
         let att: WireAttestation = resp.json().await?;
         Ok(Attestation {
             attester: att.attester,
-            signature: surplus_settlement::core::hex::decode(
+            signature: inference_bazaar_settlement::core::hex::decode(
                 att.signature.trim_start_matches("0x"),
             )?,
         })

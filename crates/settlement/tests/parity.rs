@@ -4,7 +4,7 @@
 //! either side changes a struct, BOTH tests fail and point at the drift.
 
 use alloy_primitives::{address, b256, Address, B256};
-use surplus_settlement::{
+use inference_bazaar_settlement::{
     batch_digest, domain, fills_hash, instrument_hash, order_digest, receipt_digest, BatchFill,
     Order, SIDE_BUY, SIDE_SELL,
 };
@@ -42,7 +42,7 @@ fn fixture_sell() -> Order {
 
 #[test]
 fn print_fixture_values() {
-    // Run with `cargo test -p surplus-settlement --test parity -- --nocapture`
+    // Run with `cargo test -p inference-bazaar-settlement --test parity -- --nocapture`
     // to regenerate the constants pinned below and in Eip712Parity.t.sol.
     let dom = domain(CHAIN_ID, VERIFYING);
     let fills = vec![BatchFill {
@@ -76,12 +76,12 @@ fn pinned_digests_match() {
     }];
     assert_eq!(
         dom.separator(),
-        b256!("0de24ff3d7a13aaf2d2f45a220740d46c8e4f672e6ec27ec07f887383aec631e"),
+        b256!("c67b5358a9a9d13922a738ee1200fa32b6d032e18e552410766ee7c3da4d020b"),
         "domain separator drifted"
     );
     assert_eq!(
         order_digest(&fixture_buy(), &dom),
-        b256!("42429ee1902dced9a55e9d57665f224d30760bf116a4a5fb433667bd411da720"),
+        b256!("61fa3867c8944a9b0c4bd08bcde2ec0f8e32a60b6a4ed95297cdb902fd03bd48"),
         "buy order digest drifted"
     );
     // The sell order exercises different field values (side=1, salt=0xbb,
@@ -89,7 +89,7 @@ fn pinned_digests_match() {
     // a symmetric cross-stack pin.
     assert_eq!(
         order_digest(&fixture_sell(), &dom),
-        b256!("68a403f61ba389d67aaeb883f03a9e441dc347b3b0ec9f47dca89cb5be0fc2aa"),
+        b256!("cc986c6927f2274a04ed697bc9d4b624cb32fd433f41cf756464e5e5cffe3766"),
         "sell order digest drifted"
     );
     assert_eq!(
@@ -99,12 +99,12 @@ fn pinned_digests_match() {
     );
     assert_eq!(
         receipt_digest(B256::with_last_byte(0x01), 20_000, WORK, &dom),
-        b256!("a6a5e6031cf2233a6c6a25b2b61a1ce8984703e76bbb577dc5812a0fef97644f"),
+        b256!("53d4416fa58999e8515e4a695711f2e8c5e1c9801e99a1b9d983b94e969919ec"),
         "receipt digest drifted"
     );
     assert_eq!(
         batch_digest(B256::ZERO, 0, fills_hash(&fills), &dom),
-        b256!("bf7f321f498636d52728a1ea71a7fac4116795252c2299103f4d989278b36dbd"),
+        b256!("f6fa2ab8e1c2e9090ac39e20712ac33852b12a05f7492b97ef65b61054e7b8b1"),
         "batch digest drifted"
     );
 }

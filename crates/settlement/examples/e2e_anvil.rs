@@ -10,14 +10,14 @@
 //!   anvil &
 //!   (cd contracts && PRIVATE_KEY=<anvil#0> DEPLOY_DEV_VERIFIER=1 \
 //!      forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast)
-//!   cargo run -p surplus-settlement --features chain --example e2e_anvil -- \
+//!   cargo run -p inference-bazaar-settlement --features chain --example e2e_anvil -- \
 //!      <settlement> <mockUSD> <verifier>
 
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::sol;
 use alloy_primitives::{keccak256, Address, B256, U256};
-use surplus_settlement::chain::SettlementClient;
-use surplus_settlement::{
+use inference_bazaar_settlement::chain::SettlementClient;
+use inference_bazaar_settlement::{
     domain, instrument_hash, Batch, Order, SignedFill, Signer, SIDE_BUY, SIDE_SELL,
 };
 
@@ -144,12 +144,12 @@ async fn main() -> anyhow::Result<()> {
 
     // ── 2. Redemption happy path: holder receipt (with work commitment) ──────
     let redemption = buyer_client.request_redemption(lot1, 50_000).await?;
-    let work = surplus_settlement::work_commitment(
-        surplus_settlement::core::alloy_primitives::keccak256(b"anthropic/claude-opus-4-8:output"),
-        surplus_settlement::core::alloy_primitives::keccak256(
+    let work = inference_bazaar_settlement::work_commitment(
+        inference_bazaar_settlement::core::alloy_primitives::keccak256(b"anthropic/claude-opus-4-8:output"),
+        inference_bazaar_settlement::core::alloy_primitives::keccak256(
             br#"[{"role":"user","content":"hi"}]"#,
         ),
-        surplus_settlement::core::alloy_primitives::keccak256(b"served output"),
+        inference_bazaar_settlement::core::alloy_primitives::keccak256(b"served output"),
     );
     let receipt_sig = buyer.sign_receipt(redemption, 50_000, work, &dom).to_vec();
     seller_client
@@ -216,7 +216,7 @@ async fn main() -> anyhow::Result<()> {
     )?);
     let nonce = operator.book_nonce(book_id).await?;
     let digest = batch.attestation_digest(book_id, nonce, &dom);
-    let sigs = surplus_settlement::sort_quorum_sigs(
+    let sigs = inference_bazaar_settlement::sort_quorum_sigs(
         digest,
         attesters
             .iter()
@@ -246,9 +246,9 @@ async fn main() -> anyhow::Result<()> {
         4_000_000_000 - 1,
         &dom,
     )?);
-    let orders_commitment = surplus_settlement::orders_commitment(&[sell_o, buy_o], &dom);
+    let orders_commitment = inference_bazaar_settlement::orders_commitment(&[sell_o, buy_o], &dom);
     let proven_nonce = operator.book_nonce(book_id).await?;
-    let public_values = surplus_settlement::batch_public_values(
+    let public_values = inference_bazaar_settlement::batch_public_values(
         dom.separator(),
         book_id,
         proven_nonce,
@@ -281,14 +281,14 @@ async fn main() -> anyhow::Result<()> {
     let red3 = buyer_client.request_redemption(att_lot, 40_000).await?;
     let liab_before = operator.liability_of(seller.address()).await?;
     let defaults_before = operator.defaults_count().await?;
-    let work3 = surplus_settlement::work_commitment(
+    let work3 = inference_bazaar_settlement::work_commitment(
         keccak256(b"anthropic/claude-opus-4-8:output"),
         keccak256(br#"[{"role":"user","content":"hi"}]"#),
         keccak256(b"attested output"),
     );
     // The book quorum signs the receipt digest — the holder never does.
-    let rdigest = surplus_settlement::receipt_digest(red3, 40_000, work3, &dom);
-    let rsigs = surplus_settlement::sort_quorum_sigs(
+    let rdigest = inference_bazaar_settlement::receipt_digest(red3, 40_000, work3, &dom);
+    let rsigs = inference_bazaar_settlement::sort_quorum_sigs(
         rdigest,
         attesters
             .iter()

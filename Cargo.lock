@@ -5584,6 +5584,77 @@ dependencies = [
 ]
 
 [[package]]
+name = "inference-bazaar-matcher"
+version = "0.1.0"
+dependencies = [
+ "inference-bazaar-orderbook",
+ "inference-bazaar-settlement",
+ "inference-bazaar-settlement-core",
+]
+
+[[package]]
+name = "inference-bazaar-operator"
+version = "0.1.0"
+dependencies = [
+ "alloy-sol-types",
+ "anyhow",
+ "async-trait",
+ "axum 0.7.9",
+ "bincode",
+ "blueprint-crypto",
+ "blueprint-networking",
+ "blueprint-sdk",
+ "crossbeam-channel",
+ "futures",
+ "inference-bazaar-matcher",
+ "inference-bazaar-orderbook",
+ "inference-bazaar-settlement",
+ "libp2p",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber 0.3.23",
+]
+
+[[package]]
+name = "inference-bazaar-orderbook"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "tokio",
+]
+
+[[package]]
+name = "inference-bazaar-settlement"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "alloy-primitives",
+ "alloy-sol-types",
+ "anyhow",
+ "inference-bazaar-orderbook",
+ "inference-bazaar-settlement-core",
+ "k256",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "inference-bazaar-settlement-core"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-sol-types",
+ "k256",
+ "serde",
+]
+
+[[package]]
 name = "inout"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9179,77 +9250,6 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
-
-[[package]]
-name = "surplus-matcher"
-version = "0.1.0"
-dependencies = [
- "surplus-orderbook",
- "surplus-settlement",
- "surplus-settlement-core",
-]
-
-[[package]]
-name = "surplus-operator"
-version = "0.1.0"
-dependencies = [
- "alloy-sol-types",
- "anyhow",
- "async-trait",
- "axum 0.7.9",
- "bincode",
- "blueprint-crypto",
- "blueprint-networking",
- "blueprint-sdk",
- "crossbeam-channel",
- "futures",
- "libp2p",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "surplus-matcher",
- "surplus-orderbook",
- "surplus-settlement",
- "tokio",
- "tracing",
- "tracing-subscriber 0.3.23",
-]
-
-[[package]]
-name = "surplus-orderbook"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde",
- "tokio",
-]
-
-[[package]]
-name = "surplus-settlement"
-version = "0.1.0"
-dependencies = [
- "alloy",
- "alloy-primitives",
- "alloy-sol-types",
- "anyhow",
- "k256",
- "serde",
- "serde_json",
- "surplus-orderbook",
- "surplus-settlement-core",
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
-name = "surplus-settlement-core"
-version = "0.1.0"
-dependencies = [
- "alloy-primitives",
- "alloy-sol-types",
- "k256",
- "serde",
-]
 
 [[package]]
 name = "syn"

@@ -1,4 +1,4 @@
-use surplus_orderbook::{MatchError, MatchingEngine, NativeBook, Order, Side};
+use inference_bazaar_orderbook::{MatchError, MatchingEngine, NativeBook, Order, Side};
 
 const INST: &str = "anthropic/claude-opus-4-8:output";
 
@@ -128,7 +128,7 @@ fn cancel_and_depth_snapshot() {
 
 #[test]
 fn two_sided_market_seller_lists_buyer_lifts() {
-    // The product flow: a seller lists surplus tokens (ask), an MM posts a bid,
+    // The product flow: a seller lists inference-bazaar tokens (ask), an MM posts a bid,
     // a buyer crosses the ask.
     let mut b = book();
     b.place(order(

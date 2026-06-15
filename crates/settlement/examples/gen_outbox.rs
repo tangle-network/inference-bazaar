@@ -1,10 +1,10 @@
 //! Generate a signed-fill outbox JSON for the SP1 prover's execute/prove modes
 //! and for e2e smoke. Mirrors what `GET /settlement/outbox` returns.
 //!
-//!   cargo run -p surplus-settlement --example gen_outbox -- <chain-id> <contract> > outbox.json
+//!   cargo run -p inference-bazaar-settlement --example gen_outbox -- <chain-id> <contract> > outbox.json
 
 use alloy_primitives::{Address, B256};
-use surplus_settlement::{
+use inference_bazaar_settlement::{
     domain, instrument_hash, Batch, Order, SignedFill, Signer, SIDE_BUY, SIDE_SELL,
 };
 

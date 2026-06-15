@@ -1,0 +1,52 @@
+[Unit]
+Description=InferenceBazaar blueprint runtime (Base Sepolia blueprint 17 service 3)
+After=network.target inference-bazaar-mm-sidecar.service inference-bazaar-arti.service
+Wants=inference-bazaar-mm-sidecar.service inference-bazaar-arti.service
+
+[Service]
+Environment=RUST_LOG=info,inference_bazaar_operator=debug
+Environment=HTTP_RPC_URL=https://base-sepolia-rpc.publicnode.com/
+Environment=WS_RPC_URL=wss://base-sepolia.drpc.org/
+Environment=KEYSTORE_URI=/opt/inference-bazaar/keystore
+Environment=DATA_DIR=/opt/inference-bazaar/data
+Environment=BLUEPRINT_ID=17
+Environment=SERVICE_ID=4
+Environment=TANGLE_CONTRACT=0x8299d60f373f3a4a8c4878e335cb9d840e6e3730
+Environment=STAKING_CONTRACT=0x91b1186f4f31d6e02e481c0af29c7244a3fe417d
+Environment=STATUS_REGISTRY_CONTRACT=0x2a7ceb96a9b18721b5bbb0022b4d358b3c50bcb2
+Environment=PROTOCOL=tangle
+Environment=TEST_MODE=true
+Environment=INFERENCE_BAZAAR_SIDECAR_URL=http://127.0.0.1:9310
+Environment=INFERENCE_BAZAAR_ROUTER_URL=https://router.tangle.tools
+# A BONDED ISSUER must serve its own model — router-proxy mode is now refused at
+# boot (a lot must be backed by inference this operator runs, not resold). Set a
+# real backend: INFERENCE_BAZAAR_VLLM_MODEL=<hf-model> (managed vLLM) OR
+# INFERENCE_BAZAAR_INFERENCE_URL=<openai-compat-url> (+ INFERENCE_BAZAAR_INFERENCE_API_KEY).
+Environment=INFERENCE_BAZAAR_INFERENCE_URL=<issuer-openai-compatible-backend>
+Environment=INFERENCE_BAZAAR_OPERATOR_ADDR=127.0.0.1:9400
+# Tor onion endpoint: Arti (inference-bazaar-arti.service) generates it; publish-onion.sh
+# writes the hostname here and the operator surfaces it over /health. PRIVACY_MODE
+# also routes outbound inference through Arti's SOCKS proxy.
+Environment=INFERENCE_BAZAAR_ONION_FILE=/opt/inference-bazaar/onion-hostname
+Environment=INFERENCE_BAZAAR_MM_SIZE=2000000
+Environment=INFERENCE_BAZAAR_MM_LEVELS=4
+Environment=INFERENCE_BAZAAR_CHAIN_ID=84532
+Environment=INFERENCE_BAZAAR_SETTLEMENT_ADDR=0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83
+# Attester / co-sign identity (its address must be in the book's on-chain
+# attesters). It should NOT send txs.
+Environment=INFERENCE_BAZAAR_OPERATOR_KEY=<issuer-attester-key>
+# Separate hot key that pays gas + sends settlement txs (key separation). Falls
+# back to INFERENCE_BAZAAR_OPERATOR_KEY if unset (dev only — set it in production).
+Environment=INFERENCE_BAZAAR_SUBMITTER_KEY=<gas-submitter-key>
+Environment=INFERENCE_BAZAAR_RPC_URL=https://sepolia.base.org
+# Optional Tor onion endpoint (run Arti + expose /redeem as an onion service);
+# published via /health so privacy-mode clients dial it. Leave unset if no onion.
+# Environment=INFERENCE_BAZAAR_ONION_URL=http://<your-onion>.onion
+# Environment=PRIVACY_MODE=tor   # route the operator's OWN outbound calls via Arti
+ExecStart=/opt/inference-bazaar/inference-bazaar-operator run
+Restart=always
+RestartSec=5
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

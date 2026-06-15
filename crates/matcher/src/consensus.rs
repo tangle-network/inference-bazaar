@@ -21,8 +21,8 @@
 
 use std::collections::HashSet;
 
-use surplus_settlement::SignedOrder;
-use surplus_settlement_core::{
+use inference_bazaar_settlement::SignedOrder;
+use inference_bazaar_settlement_core::{
     alloy_primitives::{Address, B256},
     batch_digest, instrument_hash, order_digest, recover_signer, Eip712Domain, Order,
 };
@@ -188,8 +188,8 @@ pub fn aggregate_attestation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use surplus_settlement::Signer;
-    use surplus_settlement_core::{domain, SIDE_BUY, SIDE_SELL};
+    use inference_bazaar_settlement::Signer;
+    use inference_bazaar_settlement_core::{domain, SIDE_BUY, SIDE_SELL};
 
     // Well-known Anvil private keys — test material only.
     const KEYS: [&str; 3] = [

@@ -1,5 +1,5 @@
 {
-  "name": "@surplus/market-core",
+  "name": "@inference-bazaar/market-core",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",

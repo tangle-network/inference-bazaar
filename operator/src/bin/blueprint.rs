@@ -1,4 +1,4 @@
-//! `surplus-operator` — the full on-chain blueprint.
+//! `inference-bazaar-operator` — the full on-chain blueprint.
 //!
 //! The venue (open orderbook + sidecar quoting + settlement) runs INSIDE the
 //! Tangle `BlueprintRunner`: it starts as a [`BackgroundService`], and on-chain
@@ -22,8 +22,8 @@ use blueprint_sdk::tangle::{TangleConsumer, TangleProducer};
 use blueprint_sdk::Job;
 use tokio::sync::oneshot;
 
-use surplus_operator::config::Instrument;
-use surplus_operator::{http, Venue};
+use inference_bazaar_operator::config::Instrument;
+use inference_bazaar_operator::{http, Venue};
 
 // --- Job IDs (mirror blueprint.toml) ---
 pub const LIST_INSTRUMENT_JOB: u8 = 0;
@@ -201,14 +201,14 @@ impl BackgroundService for MarketVenueService {
     async fn start(&self) -> Result<oneshot::Receiver<Result<(), RunnerError>>, RunnerError> {
         let (tx, rx) = oneshot::channel();
         // Publish the venue so job handlers can reach it.
-        surplus_operator::metrics::init();
+        inference_bazaar_operator::metrics::init();
         let _ = VENUE.set(self.venue.clone());
         http::spawn_auto_flush(self.venue.clone());
         let mut app = http::router(self.venue.clone());
-        // Shared CLOB (opt-in via SURPLUS_CLOB_OPERATORS): gossip + epoch
+        // Shared CLOB (opt-in via INFERENCE_BAZAAR_CLOB_OPERATORS): gossip + epoch
         // consensus. Transport: PKI mesh when built with `mesh` and
-        // SURPLUS_MESH_ADDR is set, else the HTTP peer list.
-        match surplus_operator::clob::start_from_env(self.venue.clone()) {
+        // INFERENCE_BAZAAR_MESH_ADDR is set, else the HTTP peer list.
+        match inference_bazaar_operator::clob::start_from_env(self.venue.clone()) {
             Ok(Some((_clob, clob_router))) => {
                 app = app.merge(clob_router);
                 tracing::info!("shared CLOB epoch service enabled");
@@ -225,16 +225,16 @@ impl BackgroundService for MarketVenueService {
         }
         // Spend channel: lots consumed via a delegated session key over the OpenAI
         // surface (the gateway signs vouchers; see docs/specs/spend-rail.md).
-        let spend = Arc::new(surplus_operator::spend::SpendSvc::new(self.venue.clone()));
-        surplus_operator::spend::spawn_spend_flush(spend.clone());
-        app = app.merge(surplus_operator::spend::router(spend));
+        let spend = Arc::new(inference_bazaar_operator::spend::SpendSvc::new(self.venue.clone()));
+        inference_bazaar_operator::spend::spawn_spend_flush(spend.clone());
+        app = app.merge(inference_bazaar_operator::spend::router(spend));
         // Rate limiting wraps the MERGED app — `merge` does not propagate layers.
         let app = http::rate_limited(app);
         let addr = self.addr.clone();
         tokio::spawn(async move {
             match tokio::net::TcpListener::bind(&addr).await {
                 Ok(listener) => {
-                    tracing::info!("surplus venue (blueprint background) on http://{addr}");
+                    tracing::info!("inference-bazaar venue (blueprint background) on http://{addr}");
                     if let Err(e) = axum::serve(listener, app).await {
                         let _ = tx.send(Err(RunnerError::Other(e.to_string().into())));
                     }
@@ -287,7 +287,7 @@ async fn main() -> Result<(), blueprint_sdk::Error> {
     for inst in load_instruments() {
         venue.register_instrument(inst);
     }
-    let addr = std::env::var("SURPLUS_OPERATOR_ADDR").unwrap_or_else(|_| "127.0.0.1:9100".into());
+    let addr = std::env::var("INFERENCE_BAZAAR_OPERATOR_ADDR").unwrap_or_else(|_| "127.0.0.1:9100".into());
 
     let env = BlueprintEnvironment::load()?;
 

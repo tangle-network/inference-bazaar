@@ -3,18 +3,18 @@ pragma solidity ^0.8.26;
 
 import { SettlementTestBase } from "./Base.t.sol";
 import { SP1MockVerifierAccept, SP1MockVerifierStrict } from "../src/dev/Mocks.sol";
-import { SurplusSettlement } from "../src/SurplusSettlement.sol";
+import { InferenceBazaarSettlement } from "../src/InferenceBazaarSettlement.sol";
 
 contract BatchTest is SettlementTestBase {
-    function batchFills() internal view returns (SurplusSettlement.BatchFill[] memory fills) {
-        fills = new SurplusSettlement.BatchFill[](2);
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 50_000);
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 50_000);
-        fills[0] = SurplusSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 30_000, execPriceMicroPerM: 15_000_000 });
-        fills[1] = SurplusSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 20_000, execPriceMicroPerM: 14_500_000 });
+    function batchFills() internal view returns (InferenceBazaarSettlement.BatchFill[] memory fills) {
+        fills = new InferenceBazaarSettlement.BatchFill[](2);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
+        fills[0] = InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 30_000, execPriceMicroPerM: 15_000_000 });
+        fills[1] = InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 20_000, execPriceMicroPerM: 14_500_000 });
     }
 
-    function attestBatch(SurplusSettlement.BatchFill[] memory fills) internal view returns (bytes[] memory) {
+    function attestBatch(InferenceBazaarSettlement.BatchFill[] memory fills) internal view returns (bytes[] memory) {
         bytes32 fillsHash = keccak256(abi.encode(fills));
         bytes32 digest = keccak256(
             abi.encodePacked(
@@ -27,7 +27,7 @@ contract BatchTest is SettlementTestBase {
     }
 
     function test_attestedBatchApplies_bothFills() public {
-        SurplusSettlement.BatchFill[] memory fills = batchFills();
+        InferenceBazaarSettlement.BatchFill[] memory fills = batchFills();
         uint256 buyerBefore = settlement.balances(buyer);
         settlement.settleBatchAttested(BOOK, fills, attestBatch(fills));
 
@@ -39,25 +39,25 @@ contract BatchTest is SettlementTestBase {
     }
 
     function test_attestationReplayRejected_nonceAdvanced() public {
-        SurplusSettlement.BatchFill[] memory fills = batchFills();
+        InferenceBazaarSettlement.BatchFill[] memory fills = batchFills();
         bytes[] memory sigs = attestBatch(fills);
         settlement.settleBatchAttested(BOOK, fills, sigs);
         // Same signatures again: digest now embeds nonce 1, recovery yields non-attesters.
-        vm.expectRevert(SurplusSettlement.BadQuorum.selector);
+        vm.expectRevert(InferenceBazaarSettlement.BadQuorum.selector);
         settlement.settleBatchAttested(BOOK, fills, sigs);
     }
 
     function test_belowThresholdRejected() public {
-        SurplusSettlement.BatchFill[] memory fills = batchFills();
+        InferenceBazaarSettlement.BatchFill[] memory fills = batchFills();
         bytes[] memory sigs = attestBatch(fills);
         bytes[] memory one = new bytes[](1);
         one[0] = sigs[0];
-        vm.expectRevert(SurplusSettlement.BadQuorum.selector);
+        vm.expectRevert(InferenceBazaarSettlement.BadQuorum.selector);
         settlement.settleBatchAttested(BOOK, fills, one);
     }
 
     function test_nonAttesterSignatureRejected() public {
-        SurplusSettlement.BatchFill[] memory fills = batchFills();
+        InferenceBazaarSettlement.BatchFill[] memory fills = batchFills();
         bytes32 fillsHash = keccak256(abi.encode(fills));
         bytes32 digest = keccak256(
             abi.encodePacked(
@@ -71,29 +71,29 @@ contract BatchTest is SettlementTestBase {
         sigs[0] = abi.encodePacked(r, s, v);
         (v, r, s) = vm.sign(0xBAD2, digest);
         sigs[1] = abi.encodePacked(r, s, v);
-        vm.expectRevert(SurplusSettlement.BadQuorum.selector);
+        vm.expectRevert(InferenceBazaarSettlement.BadQuorum.selector);
         settlement.settleBatchAttested(BOOK, fills, sigs);
     }
 
     function test_duplicateSignerRejected_byStrictOrdering() public {
-        SurplusSettlement.BatchFill[] memory fills = batchFills();
+        InferenceBazaarSettlement.BatchFill[] memory fills = batchFills();
         bytes[] memory sigs = attestBatch(fills);
         bytes[] memory dup = new bytes[](2);
         dup[0] = sigs[0];
         dup[1] = sigs[0];
-        vm.expectRevert(SurplusSettlement.BadQuorum.selector);
+        vm.expectRevert(InferenceBazaarSettlement.BadQuorum.selector);
         settlement.settleBatchAttested(BOOK, fills, dup);
     }
 
     function test_attestedBatchStillEnforcesLimits() public {
         // Quorum cannot push a fill past the signed order's quantity.
-        SurplusSettlement.BatchFill[] memory fills = new SurplusSettlement.BatchFill[](1);
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 50_000);
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 50_000);
-        fills[0] = SurplusSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 60_000, execPriceMicroPerM: 15_000_000 });
+        InferenceBazaarSettlement.BatchFill[] memory fills = new InferenceBazaarSettlement.BatchFill[](1);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
+        fills[0] = InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 60_000, execPriceMicroPerM: 15_000_000 });
         bytes[] memory sigs = attestBatch(fills);
         vm.expectRevert(
-            abi.encodeWithSelector(SurplusSettlement.Overfill.selector, settlement.hashOrder(b), 50_000, 60_000)
+            abi.encodeWithSelector(InferenceBazaarSettlement.Overfill.selector, settlement.hashOrder(b), 50_000, 60_000)
         );
         settlement.settleBatchAttested(BOOK, fills, sigs);
     }
@@ -102,17 +102,17 @@ contract BatchTest is SettlementTestBase {
     bytes32 internal constant OC = keccak256("orders-commitment");
 
     function test_provenPathDisabledByDefault() public {
-        SurplusSettlement.BatchFill[] memory fills = batchFills();
-        vm.expectRevert(SurplusSettlement.ProvenPathDisabled.selector);
+        InferenceBazaarSettlement.BatchFill[] memory fills = batchFills();
+        vm.expectRevert(InferenceBazaarSettlement.ProvenPathDisabled.selector);
         settlement.settleBatchProven(BOOK, OC, fills, hex"");
     }
 
     function test_provenBatch_bindsMatchPublicValues() public {
         SP1MockVerifierStrict verifier = new SP1MockVerifierStrict();
-        bytes32 vkey = keccak256("surplus-batch-program-vkey");
+        bytes32 vkey = keccak256("inference-bazaar-batch-program-vkey");
         settlement.setSp1Verifier(address(verifier), vkey);
 
-        SurplusSettlement.BatchFill[] memory fills = batchFills();
+        InferenceBazaarSettlement.BatchFill[] memory fills = batchFills();
         bytes32 fillsHash = keccak256(abi.encode(fills));
         verifier.expect(vkey, abi.encode(settlement.domainSeparator(), BOOK, settlement.bookNonce(BOOK), OC, fillsHash));
 
@@ -133,10 +133,10 @@ contract BatchTest is SettlementTestBase {
         settlement.registerBook(OTHER, atts, 2, 0, address(0));
 
         SP1MockVerifierStrict verifier = new SP1MockVerifierStrict();
-        bytes32 vkey = keccak256("surplus-batch-program-vkey");
+        bytes32 vkey = keccak256("inference-bazaar-batch-program-vkey");
         settlement.setSp1Verifier(address(verifier), vkey);
 
-        SurplusSettlement.BatchFill[] memory fills = batchFills();
+        InferenceBazaarSettlement.BatchFill[] memory fills = batchFills();
         bytes32 fillsHash = keccak256(abi.encode(fills));
         // Proof was made for BOOK at nonce 0.
         verifier.expect(vkey, abi.encode(settlement.domainSeparator(), BOOK, uint64(0), OC, fillsHash));
@@ -150,10 +150,10 @@ contract BatchTest is SettlementTestBase {
     /// is what ties the on-chain fills to the matched input set.
     function test_provenBatch_bindsOrdersCommitment() public {
         SP1MockVerifierStrict verifier = new SP1MockVerifierStrict();
-        bytes32 vkey = keccak256("surplus-batch-program-vkey");
+        bytes32 vkey = keccak256("inference-bazaar-batch-program-vkey");
         settlement.setSp1Verifier(address(verifier), vkey);
 
-        SurplusSettlement.BatchFill[] memory fills = batchFills();
+        InferenceBazaarSettlement.BatchFill[] memory fills = batchFills();
         bytes32 fillsHash = keccak256(abi.encode(fills));
         verifier.expect(vkey, abi.encode(settlement.domainSeparator(), BOOK, settlement.bookNonce(BOOK), OC, fillsHash));
         // Submit a DIFFERENT ordersCommitment than the one proven => mismatch.
@@ -163,10 +163,10 @@ contract BatchTest is SettlementTestBase {
 
     function test_provenBatch_rejectsWrongPublicValues() public {
         SP1MockVerifierStrict verifier = new SP1MockVerifierStrict();
-        bytes32 vkey = keccak256("surplus-batch-program-vkey");
+        bytes32 vkey = keccak256("inference-bazaar-batch-program-vkey");
         settlement.setSp1Verifier(address(verifier), vkey);
 
-        SurplusSettlement.BatchFill[] memory fills = batchFills();
+        InferenceBazaarSettlement.BatchFill[] memory fills = batchFills();
         // Verifier expects different fills => the contract-computed publicValues mismatch.
         verifier.expect(
             vkey, abi.encode(settlement.domainSeparator(), BOOK, settlement.bookNonce(BOOK), OC, keccak256("other"))
@@ -177,15 +177,15 @@ contract BatchTest is SettlementTestBase {
 
     function test_provenBatch_emitsOrdersCommitment() public {
         settlement.setSp1Verifier(address(new SP1MockVerifierAccept()), bytes32("vk"));
-        SurplusSettlement.BatchFill[] memory fills = batchFills();
+        InferenceBazaarSettlement.BatchFill[] memory fills = batchFills();
         bytes32 fillsHash = keccak256(abi.encode(fills));
         vm.expectEmit(true, true, false, true, address(settlement));
-        emit SurplusSettlement.BatchSettled(BOOK, settlement.bookNonce(BOOK), fillsHash, fills.length, true, OC);
+        emit InferenceBazaarSettlement.BatchSettled(BOOK, settlement.bookNonce(BOOK), fillsHash, fills.length, true, OC);
         settlement.settleBatchProven(BOOK, OC, fills, hex"");
     }
 
     function test_provenReplaySafe_fillCapsBlockDoubleApply() public {
-        SurplusSettlement.BatchFill[] memory fills = batchFills();
+        InferenceBazaarSettlement.BatchFill[] memory fills = batchFills();
         settlement.setSp1Verifier(address(new SP1MockVerifierAccept()), bytes32("vk"));
         settlement.settleBatchProven(BOOK, OC, fills, hex"");
         // Orders are now fully filled; re-applying the same proof/batch reverts.
@@ -202,7 +202,7 @@ contract BatchTest is SettlementTestBase {
         atts[2] = vm.addr(att3Key);
         // BOOK is already registered in setUp; re-registering (the retroactive
         // fee-skim vector) must revert.
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.BookAlreadyRegistered.selector, BOOK));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.BookAlreadyRegistered.selector, BOOK));
         settlement.registerBook(BOOK, atts, 2, 1000, address(0xFEE));
     }
 
@@ -210,7 +210,7 @@ contract BatchTest is SettlementTestBase {
         address[] memory atts = new address[](1);
         atts[0] = vm.addr(att1Key);
         bytes32 noBook = settlement.NO_BOOK();
-        vm.expectRevert(SurplusSettlement.ReservedBookId.selector);
+        vm.expectRevert(InferenceBazaarSettlement.ReservedBookId.selector);
         settlement.registerBook(noBook, atts, 1, 0, address(0));
     }
 
@@ -239,19 +239,19 @@ contract BatchTest is SettlementTestBase {
         bytes32 GHOST = keccak256("ghost");
         address[] memory rot = new address[](1);
         rot[0] = vm.addr(att1Key);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.UnknownBook.selector, GHOST));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.UnknownBook.selector, GHOST));
         settlement.rotateAttesters(GHOST, rot, 1);
     }
 
     function test_hashFillsMatchesAbiEncode() public view {
-        SurplusSettlement.BatchFill[] memory fills = batchFills();
+        InferenceBazaarSettlement.BatchFill[] memory fills = batchFills();
         assertEq(settlement.hashFills(toCalldataish(fills)), keccak256(abi.encode(fills)));
     }
 
-    function toCalldataish(SurplusSettlement.BatchFill[] memory fills)
+    function toCalldataish(InferenceBazaarSettlement.BatchFill[] memory fills)
         internal
         pure
-        returns (SurplusSettlement.BatchFill[] memory)
+        returns (InferenceBazaarSettlement.BatchFill[] memory)
     {
         return fills;
     }

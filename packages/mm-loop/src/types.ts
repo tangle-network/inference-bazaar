@@ -5,7 +5,7 @@ import type {
   QuoteParams,
   QuoteSet,
   RiskLimits,
-} from '@surplus/market-core'
+} from '@inference-bazaar/market-core'
 
 /**
  * One tick of market-making work — the loop's `Task` type. A tick is a full

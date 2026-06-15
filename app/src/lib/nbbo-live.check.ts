@@ -12,8 +12,8 @@ import { nbboTouch, planRoute } from './router'
 
 const INSTRUMENT = process.env.INSTRUMENT ?? 'claude-sonnet-4-6:output'
 const venues = [
-  { operator: '0x2420FFf17c4213A4075cf5f7B6dc33429Aaf22Bb' as Address, url: 'https://surplus2.178.104.232.124.sslip.io', healthy: true },
-  { operator: '0x483fA87BE29E007bc21349A1fE9380CAf1f4Bb48' as Address, url: 'https://surplus.178.104.232.124.sslip.io', healthy: true },
+  { operator: '0x2420FFf17c4213A4075cf5f7B6dc33429Aaf22Bb' as Address, url: 'https://inference-bazaar2.178.104.232.124.sslip.io', healthy: true },
+  { operator: '0x483fA87BE29E007bc21349A1fE9380CAf1f4Bb48' as Address, url: 'https://inference-bazaar.178.104.232.124.sslip.io', healthy: true },
   { operator: '0x72831d25c8B385E98B22a7abF59331251E060D5a' as Address, url: 'http://95.216.8.253:9500', healthy: true },
 ] as unknown as Venue[]
 

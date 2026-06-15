@@ -5,13 +5,13 @@
 //! truth for the attester set).
 
 use serde_json::{json, Value};
-use surplus_matcher::{aggregate_attestation, match_epoch, Attestation};
-use surplus_settlement::core::{batch_digest, BatchFill, Order};
-use surplus_settlement::SignedOrder;
+use inference_bazaar_matcher::{aggregate_attestation, match_epoch, Attestation};
+use inference_bazaar_settlement::core::{batch_digest, BatchFill, Order};
+use inference_bazaar_settlement::SignedOrder;
 
 // Used only by the pre-match simulation, which is itself `chain`-gated.
 #[cfg(feature = "chain")]
-use surplus_settlement::core::order_digest;
+use inference_bazaar_settlement::core::order_digest;
 
 use super::{Clob, WireProposal};
 use crate::config::Instrument;
@@ -48,7 +48,7 @@ impl Clob {
                 configured_threshold = self.cfg.threshold, on_chain_threshold = chain_threshold,
                 "CLOB membership drift: configured operator set/threshold does not match the \
                  contract's bookAttesters. This node will NOT propose until reconciled \
-                 (rotateAttesters on-chain or fix SURPLUS_CLOB_OPERATORS/THRESHOLD)."
+                 (rotateAttesters on-chain or fix INFERENCE_BAZAAR_CLOB_OPERATORS/THRESHOLD)."
             );
         }
     }
@@ -63,11 +63,11 @@ impl Clob {
     async fn simulate_doomed(
         &self,
         fills: &[BatchFill],
-        domain: &surplus_settlement::Eip712Domain,
-    ) -> anyhow::Result<std::collections::HashSet<surplus_settlement::core::alloy_primitives::B256>>
+        domain: &inference_bazaar_settlement::Eip712Domain,
+    ) -> anyhow::Result<std::collections::HashSet<inference_bazaar_settlement::core::alloy_primitives::B256>>
     {
-        use surplus_settlement::core::alloy_primitives::{B256, U256};
-        use surplus_settlement::core::{order_struct_hash, SIDE_BUY};
+        use inference_bazaar_settlement::core::alloy_primitives::{B256, U256};
+        use inference_bazaar_settlement::core::{order_struct_hash, SIDE_BUY};
         let Some(client) = self.chain_client().await? else {
             return Ok(Default::default()); // no chain configured: cannot simulate
         };
@@ -189,7 +189,7 @@ impl Clob {
             batch_nonce,
             instrument_id: inst.id.clone(),
             proposer: self.me,
-            proposer_sig: format!("0x{}", surplus_settlement::core::hex::encode(self_sig)),
+            proposer_sig: format!("0x{}", inference_bazaar_settlement::core::hex::encode(self_sig)),
             orders: snapshot,
             fills_hash: batch.fills_hash,
         };
@@ -272,7 +272,7 @@ impl Clob {
         tracing::info!(
             fills = fills.len(),
             sigs = sigs.len(),
-            "dry mode: quorum reached, would submit settleBatchAttested (needs --features chain + SURPLUS_RPC_URL)"
+            "dry mode: quorum reached, would submit settleBatchAttested (needs --features chain + INFERENCE_BAZAAR_RPC_URL)"
         );
         Ok("dry".into())
     }
@@ -280,14 +280,14 @@ impl Clob {
     #[cfg(feature = "chain")]
     async fn chain_client(
         &self,
-    ) -> anyhow::Result<Option<surplus_settlement::chain::SettlementClient>> {
+    ) -> anyhow::Result<Option<inference_bazaar_settlement::chain::SettlementClient>> {
         use std::sync::atomic::Ordering;
         let ctx = self.venue.settle.as_ref().expect("checked in new()");
         let (Some(rpc), Some(key)) = (ctx.rpc_url.as_deref(), ctx.submitter_key()) else {
             return Ok(None);
         };
         let client =
-            surplus_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract).await?;
+            inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract).await?;
         // Verify the on-chain domain separator once before we ever submit: a wrong
         // chain id / contract address would otherwise produce batch digests the
         // quorum can't verify, failing every settle confusingly. Fail closed.

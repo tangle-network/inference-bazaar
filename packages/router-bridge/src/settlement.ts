@@ -1,7 +1,7 @@
 /**
  * Two-sided settlement, two rails.
  *
- * A filled token-credit trade has to move money. Surplus supports BOTH rails
+ * A filled token-credit trade has to move money. InferenceBazaar supports BOTH rails
  * the fleet already runs, chosen per order — never one hard-wired:
  *
  *  - `router-credits`: the buyer's balance lives on the live platform
@@ -111,8 +111,8 @@ export class RouterCreditsRail implements SettlementRail<RouterCreditsOrder> {
   async settle(order: RouterCreditsOrder): Promise<SettlementReceipt> {
     const amount = tokenLotCostBaseUnits(order.priceMicroPerM, order.qtyTokens)
     const { operator, platform } = splitFee(amount, this.fee)
-    const ref = await this.port.deduct(order.buyer, amount, `surplus:${order.orderId}`)
-    await this.port.credit(order.operator, operator, `surplus:${order.orderId}`)
+    const ref = await this.port.deduct(order.buyer, amount, `inference-bazaar:${order.orderId}`)
+    await this.port.credit(order.operator, operator, `inference-bazaar:${order.orderId}`)
     return {
       orderId: order.orderId,
       rail: this.kind,

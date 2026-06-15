@@ -1,4 +1,4 @@
-import type { QuoteParams, QuoteSet, RiskLimits } from '@surplus/market-core'
+import type { QuoteParams, QuoteSet, RiskLimits } from '@inference-bazaar/market-core'
 import {
   type AgentRunSpec,
   type LoopResult,
@@ -18,7 +18,7 @@ export interface MMLoopOptions {
   params: QuoteParams
   limits: RiskLimits
   horizonTicks: number
-  /** Ledger/order owner id. Default 'surplus-mm'. */
+  /** Ledger/order owner id. Default 'inference-bazaar-mm'. */
   owner?: string
   /**
    * Algorithmic (default): deterministic A–S quoter, no sandbox, no tokens.
@@ -47,7 +47,7 @@ export async function runMarketMakingLoop(opts: MMLoopOptions): Promise<MMLoopRe
   const mode = opts.mode ?? 'algorithmic'
   const session = new MarketMakingSession({
     venue: opts.venue,
-    owner: opts.owner ?? 'surplus-mm',
+    owner: opts.owner ?? 'inference-bazaar-mm',
     params: opts.params,
     limits: opts.limits,
   })
