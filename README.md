@@ -3,7 +3,7 @@
 **An open market for AI inference.** Buy discounted inference. Sell your surplus
 inference. Operators make markets in inference tokens; the spread is the product.
 
-This is the Tangle Blueprint that builds [surplus-market.pages.dev](https://surplus-market.pages.dev/) —
+This is the Tangle Blueprint that builds [inference-bazaar.blueprint.tangle.tools](https://inference-bazaar.blueprint.tangle.tools/) —
 a two-sided marketplace for **prepaid inference token credits**, settled through
 the Tangle Router. It is modeled on the **ai-trading-blueprint** (operator-run
 autonomous agents, arena UI, validator-gated on-chain settlement) but trades
