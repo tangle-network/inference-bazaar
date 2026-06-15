@@ -90,4 +90,4 @@ shielded_credits_address = ""
 # fill settlement, collateral-backed credit lots, redemption defaults, batched
 # verification by attester quorum or SP1 proof. Deploy via
 # contracts/script/Deploy.s.sol; set per network.
-inference_bazaar_settlement_address = ""
+inference_bazaar_settlement_address = "0x31D0215d77A06ff97Cb61BbBe4b931Ac0D1da8aA"
