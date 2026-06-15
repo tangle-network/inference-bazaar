@@ -1,4 +1,4 @@
-# Surplus Intelligence
+# Inference Bazaar
 
 **An open market for AI inference.** Buy discounted inference. Sell your surplus
 inference. Operators make markets in inference tokens; the spread is the product.

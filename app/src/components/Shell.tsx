@@ -134,7 +134,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <div className="group/brand relative mx-auto h-10 w-10">
             <NavLink
               to="/"
-              aria-label="Surplus home"
+              aria-label="Inference Bazaar home"
               className="flex h-10 w-10 items-center justify-center rounded-[8px] transition-colors hover:bg-[var(--s-panel)]"
             >
               <SurplusBrand compact />
@@ -150,7 +150,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
         ) : (
           <div className="flex items-center justify-between gap-2 pl-1.5">
-            <NavLink to="/" aria-label="Surplus home" className="min-w-0">
+            <NavLink to="/" aria-label="Inference Bazaar home" className="min-w-0">
               <SurplusBrand />
             </NavLink>
             <button

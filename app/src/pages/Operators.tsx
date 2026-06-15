@@ -70,7 +70,7 @@ export default function OperatorsPage() {
     <div>
       <PageHeader
         title="Operators"
-        subtitle="Every operator across Surplus's live instances on Base Sepolia — bonded restake, slashed for refusing valid redemptions."
+        subtitle="Every operator across Inference Bazaar's live instances on Base Sepolia — bonded restake, slashed for refusing valid redemptions."
         right={
           <Link to="/operators/register" className="btn-primary h-10">
             <span className="i-ph:plus text-[15px]" /> Become an operator

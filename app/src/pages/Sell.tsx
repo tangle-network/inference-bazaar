@@ -81,7 +81,7 @@ export default function SellPage() {
         <div className="flex flex-col items-center gap-4 px-6 py-20 text-center">
           <span className="i-ph:storefront text-[44px] text-[var(--s-text-subtle)]" />
           <p className="max-w-sm font-body text-[15px] text-[var(--s-text-muted)]">
-            Connect to see the credit lots you hold on SurplusSettlement.
+            Connect to see the credit lots you hold on the settlement contract.
           </p>
           <ConnectKitButton.Custom>
             {({ show }) => (
