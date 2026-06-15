@@ -37,6 +37,9 @@ use crate::venue::{Venue, VenueError};
 const SPEND_EXPIRY_MARGIN_SECS: u64 = 120;
 /// Per-request completion cap, mirroring `/redeem`.
 const MAX_TOKENS_PER_REQUEST: u32 = 8192;
+/// How far in the future a signed usage query may be dated — bounds replay of a
+/// captured `/v1/usage` signature to a short window.
+const USAGE_QUERY_MAX_AGE_SECS: u64 = 600;
 
 // ─────────────────────────────── Digests ─────────────────────────────────────
 
@@ -44,6 +47,10 @@ const PERMIT_TYPE: &[u8] =
     b"SpendPermit(bytes32 lotId,address sessionKey,uint64 maxTokens,uint64 expiry)";
 const VOUCHER_TYPE: &[u8] =
     b"SpendVoucher(bytes32 lotId,address sessionKey,uint64 servedCumulative)";
+/// Off-chain only (no contract counterpart): the message a holder signs to read
+/// their own spend on a venue. Bound to the settlement domain so a signature
+/// can't be replayed against a different deployment.
+const USAGE_QUERY_TYPE: &[u8] = b"UsageQuery(address holder,uint64 expiry)";
 
 fn settlement_domain_separator(chain_id: U256, settlement: Address) -> B256 {
     let mut dom = Vec::with_capacity(160);
@@ -107,6 +114,26 @@ pub fn spend_voucher_digest(
     st.extend_from_slice(&[0u8; 12]);
     st.extend_from_slice(session_key.as_slice());
     st.extend_from_slice(&U256::from(served_cumulative).to_be_bytes::<32>());
+    eip712(
+        settlement_domain_separator(chain_id, settlement),
+        keccak256(&st),
+    )
+}
+
+/// The digest a HOLDER signs to read their own spend on a venue. Off-chain only,
+/// but bound to the settlement domain (chain + contract) so the signature is
+/// non-replayable across deployments.
+pub fn usage_query_digest(
+    chain_id: U256,
+    settlement: Address,
+    holder: Address,
+    expiry: u64,
+) -> B256 {
+    let mut st = Vec::with_capacity(96);
+    st.extend_from_slice(keccak256(USAGE_QUERY_TYPE).as_slice());
+    st.extend_from_slice(&[0u8; 12]);
+    st.extend_from_slice(holder.as_slice());
+    st.extend_from_slice(&U256::from(expiry).to_be_bytes::<32>());
     eip712(
         settlement_domain_separator(chain_id, settlement),
         keccak256(&st),
@@ -829,6 +856,94 @@ impl SpendSvc {
             "unsettledTokens": unsettled,
         })
     }
+
+    /// A holder-authenticated read of their live spend on THIS venue. The holder
+    /// signs a short-lived `UsageQuery { holder, expiry }`; we return per-lot
+    /// metered/settled counters for every channel they opened here. This is the
+    /// real-time meter — `served` runs ahead of on-chain `settled` by exactly the
+    /// in-flight, vouchered-but-unsettled tokens, which the app can't see from the
+    /// chain alone. The signature is the gate: no signature, no read, and a holder
+    /// can only ever see their own channels (never another holder's).
+    pub fn usage(
+        &self,
+        holder: Address,
+        expiry: u64,
+        sig_hex: &str,
+    ) -> Result<Value, (StatusCode, Value)> {
+        let ctx = self.venue.settle_ctx_pub().map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                oai_err("unconfigured", "settlement not configured"),
+            )
+        })?;
+        let now = Self::now();
+        if expiry <= now {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                oai_err("expired_query", "usage query has expired"),
+            ));
+        }
+        if expiry > now + USAGE_QUERY_MAX_AGE_SECS {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                oai_err("bad_query", "usage query expiry is too far out"),
+            ));
+        }
+        let sig = hex::decode(sig_hex.trim_start_matches("0x"))
+            .map_err(|_| (StatusCode::BAD_REQUEST, oai_err("bad_sig", "signature is not hex")))?;
+        let chain_id = ctx.domain.chain_id.unwrap_or_default();
+        let digest = usage_query_digest(chain_id, ctx.contract, holder, expiry);
+        if inference_bazaar_settlement::core::recover_signer(digest, &sig) != Some(holder) {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                oai_err("bad_sig", "query not signed by the holder"),
+            ));
+        }
+        let j = self.state.lock().unwrap();
+        Ok(usage_rows(&j, holder))
+    }
+}
+
+/// Pure projection of one holder's channels out of the journal — separated from
+/// `usage` so it's testable without a venue or a live signature. `served` is the
+/// live meter; `settled` is on-chain truth; their difference is in-flight.
+fn usage_rows(j: &SpendJournal, holder: Address) -> Value {
+    let mut lots = Vec::new();
+    let (mut t_max, mut t_served, mut t_settled) = (0u64, 0u64, 0u64);
+    for (sk, p) in j.permits.iter() {
+        if p.holder != holder {
+            continue;
+        }
+        let served = j.served.get(sk).copied().unwrap_or(0);
+        let settled = j.settled.get(sk).copied().unwrap_or(0);
+        t_max += p.max_tokens;
+        t_served += served;
+        t_settled += settled;
+        lots.push(json!({
+            "lotId": format!("{:#x}", p.lot_id),
+            "sessionKey": format!("{:#x}", sk),
+            "model": p.model_id,
+            "instrument": p.instrument_id,
+            "maxTokens": p.max_tokens,
+            "servedTokens": served,
+            "settledTokens": settled,
+            "inflightTokens": served.saturating_sub(settled),
+            "remainingTokens": p.max_tokens.saturating_sub(served),
+            "expiry": p.expiry,
+        }));
+    }
+    json!({
+        "holder": format!("{:#x}", holder),
+        "channels": lots.len(),
+        "totals": {
+            "maxTokens": t_max,
+            "servedTokens": t_served,
+            "settledTokens": t_settled,
+            "inflightTokens": t_served.saturating_sub(t_settled),
+            "remainingTokens": t_max.saturating_sub(t_served),
+        },
+        "lots": lots,
+    })
 }
 
 /// OpenAI-style error envelope so SDKs surface the message verbatim.
@@ -870,6 +985,15 @@ pub struct RegisterBody {
     pub holder_sig: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageBody {
+    pub holder: Address,
+    pub expiry: u64,
+    /// Holder's EIP-712 signature over the UsageQuery digest, 0x-hex.
+    pub sig: String,
+}
+
 /// The latest consumer-signed voucher, carried per request. The gateway sets
 /// these headers; a vanilla client never sees them.
 pub struct VoucherHeader {
@@ -898,6 +1022,7 @@ pub fn router(svc: SharedSpend) -> Router {
         .route("/v1/models", get(models))
         .route("/v1/spend/status", get(spend_status))
         .route("/v1/spend/flush", post(spend_flush))
+        .route("/v1/usage", post(usage_handler))
         .with_state(svc)
 }
 
@@ -986,6 +1111,19 @@ async fn spend_status(State(s): State<SharedSpend>) -> impl IntoResponse {
     Json(s.status())
 }
 
+/// The developer-facing meter: a holder's own live spend across the channels
+/// they opened here. Holder-authenticated (signed `UsageQuery`); reachable
+/// through the venue's privacy front like every other `/v1/*` route.
+async fn usage_handler(
+    State(s): State<SharedSpend>,
+    Json(b): Json<UsageBody>,
+) -> impl IntoResponse {
+    match s.usage(b.holder, b.expiry, &b.sig) {
+        Ok(v) => Json(v).into_response(),
+        Err((code, v)) => (code, Json(v)).into_response(),
+    }
+}
+
 async fn spend_flush(State(s): State<SharedSpend>) -> impl IntoResponse {
     match s.flush().await {
         Ok(v) => Json(v).into_response(),
@@ -1038,7 +1176,7 @@ mod tests {
         );
         assert_eq!(
             format!("{permit:#x}"),
-            "0xd72728151c11d0185dc7253e7463f04a3e0294ff367a2c6b56f90679aba68209",
+            "0xd915cc914ae9c69618ef09dbdeb9d9626922d546624d48352e3583b5adcc1856",
             "permit digest drifted from the contract's spendPermitDigest"
         );
         let voucher = spend_voucher_digest(
@@ -1050,8 +1188,74 @@ mod tests {
         );
         assert_eq!(
             format!("{voucher:#x}"),
-            "0xa75906fa000d678d16c687c32cb65cc2a65cd27e8809c56d9bdf092b92f7d0df",
+            "0x8ea3a19053e267d4ef473ea2e9c3c04bd8a381915437467dbc53b20e3b843559",
             "voucher digest drifted from the contract's spendVoucherDigest"
         );
+    }
+
+    fn permit_for(holder: Address, session: Address, max_tokens: u64) -> StoredPermit {
+        StoredPermit {
+            lot_id: keccak256(session.as_slice()),
+            session_key: session,
+            max_tokens,
+            expiry: 1_800_000_000,
+            holder_sig: String::new(),
+            holder,
+            instrument_id: "anthropic/claude-opus-4-8:output".into(),
+            model_id: "anthropic/claude-opus-4-8".into(),
+            token_kind: "output".into(),
+        }
+    }
+
+    /// usage_rows returns ONLY the queried holder's channels and reports
+    /// in-flight = served − settled.
+    #[test]
+    fn usage_rows_are_per_holder_and_report_inflight() {
+        let me: Address = "0x1111111111111111111111111111111111111111".parse().unwrap();
+        let other: Address = "0x2222222222222222222222222222222222222222".parse().unwrap();
+        let s_a: Address = "0xaaaa000000000000000000000000000000000000".parse().unwrap();
+        let s_b: Address = "0xbbbb000000000000000000000000000000000000".parse().unwrap();
+        let s_c: Address = "0xcccc000000000000000000000000000000000000".parse().unwrap();
+
+        let mut j = SpendJournal::default();
+        j.permits.insert(s_a, permit_for(me, s_a, 1_000));
+        j.permits.insert(s_b, permit_for(me, s_b, 4_000));
+        j.permits.insert(s_c, permit_for(other, s_c, 9_000));
+        j.served.insert(s_a, 600);
+        j.settled.insert(s_a, 500);
+        j.served.insert(s_b, 1_000);
+        j.settled.insert(s_b, 1_000);
+        j.served.insert(s_c, 7_000); // other holder — must not leak in
+
+        let v = usage_rows(&j, me);
+        assert_eq!(v["channels"], 2, "only the holder's two channels");
+        assert_eq!(v["totals"]["maxTokens"], 5_000);
+        assert_eq!(v["totals"]["servedTokens"], 1_600);
+        assert_eq!(v["totals"]["settledTokens"], 1_500);
+        assert_eq!(v["totals"]["inflightTokens"], 100, "served − settled");
+        assert_eq!(v["totals"]["remainingTokens"], 3_400, "max − served");
+        let lots = v["lots"].as_array().unwrap();
+        assert!(
+            lots.iter().all(|l| l["sessionKey"] != format!("{s_c:#x}")),
+            "another holder's channel must never appear"
+        );
+    }
+
+    /// The usage digest is stable and distinct from the permit/voucher digests
+    /// over the same domain, so signatures can't be cross-used.
+    #[test]
+    fn usage_query_digest_is_distinct() {
+        let settlement: Address = "0x1111111111111111111111111111111111111111".parse().unwrap();
+        let holder: Address = "0x3333333333333333333333333333333333333333".parse().unwrap();
+        let d = usage_query_digest(U256::from(3799u64), settlement, holder, 1_800_000_000);
+        let permit = spend_permit_digest(
+            U256::from(3799u64),
+            settlement,
+            keccak256(holder.as_slice()),
+            holder,
+            1_000_000,
+            1_800_000_000,
+        );
+        assert_ne!(d, permit, "usage digest must not collide with permit digest");
     }
 }

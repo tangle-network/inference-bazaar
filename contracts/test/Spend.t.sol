@@ -220,6 +220,6 @@ contract SpendTest is SettlementTestBase {
         );
     }
 
-    bytes32 internal constant PERMIT_PIN = 0xd72728151c11d0185dc7253e7463f04a3e0294ff367a2c6b56f90679aba68209;
-    bytes32 internal constant VOUCHER_PIN = 0xa75906fa000d678d16c687c32cb65cc2a65cd27e8809c56d9bdf092b92f7d0df;
+    bytes32 internal constant PERMIT_PIN = 0xd915cc914ae9c69618ef09dbdeb9d9626922d546624d48352e3583b5adcc1856;
+    bytes32 internal constant VOUCHER_PIN = 0x8ea3a19053e267d4ef473ea2e9c3c04bd8a381915437467dbc53b20e3b843559;
 }
