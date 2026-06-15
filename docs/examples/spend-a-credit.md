@@ -10,7 +10,7 @@ Settlement   0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83   (SurplusSettlement, Ba
 tsUSD        0x14Ff9231D03Fd9AD75e553004585f13Ff51db630   (test payment token, open mint)
 Venue 1      https://surplus.178.104.232.124.sslip.io      (operator 0x483f…, 12% policy)
 Venue 2      https://surplus2.178.104.232.124.sslip.io     (operator 0x2420…, 9% policy)
-App          https://surplus-market.pages.dev
+App          https://inference-bazaar.blueprint.tangle.tools
 
 REAL-MONEY RAIL (same contract, real Circle USDC — no mint; bring USDC):
 Settlement   0xf6A64921b62E09c9646675BEe6A11Fcd533d6783   (SurplusSettlement, Base Sepolia)

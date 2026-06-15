@@ -24,7 +24,7 @@ const config = createConfig(
       import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '3fcc6bba6f1de962d911bb5b5c3dba68',
     appName: 'Inference Bazaar',
     appDescription: 'Open market for AI inference — prepaid inference-token credits.',
-    appUrl: typeof window !== 'undefined' ? window.location.origin : 'https://surplus-market.pages.dev',
+    appUrl: typeof window !== 'undefined' ? window.location.origin : 'https://inference-bazaar.blueprint.tangle.tools',
     appIcon: '/favicon.svg',
   }),
 )
