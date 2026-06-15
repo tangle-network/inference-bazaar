@@ -30,17 +30,17 @@ jobs:
       # The core crates (kernel + EIP-712 mirror) are the trust surface re-run by
       # peers and the zkVM guest — held to -D warnings.
       - name: clippy (core crates)
-        run: cargo clippy -p surplus-orderbook -p surplus-settlement-core -p surplus-matcher -p surplus-settlement --all-targets -- -D warnings
+        run: cargo clippy -p inference-bazaar-orderbook -p inference-bazaar-settlement-core -p inference-bazaar-matcher -p inference-bazaar-settlement --all-targets -- -D warnings
       - name: test (workspace)
         run: cargo test --workspace
       # Feature surfaces must still compile (chain submit + the PKI mesh transport).
       - name: build (chain)
-        run: cargo build -p surplus-operator --features chain
+        run: cargo build -p inference-bazaar-operator --features chain
       - name: build (mesh)
-        run: cargo build -p surplus-operator --features mesh
+        run: cargo build -p inference-bazaar-operator --features mesh
       # The matching kernel must keep building no_std (it runs in the SP1 guest).
       - name: build (matcher no_std)
-        run: cargo build -p surplus-matcher --no-default-features
+        run: cargo build -p inference-bazaar-matcher --no-default-features
 
   contracts:
     name: contracts (forge)
@@ -85,7 +85,7 @@ jobs:
         working-directory: contracts
         run: forge soldeer install
       - name: rust parity pins
-        run: cargo test -p surplus-settlement --test parity
+        run: cargo test -p inference-bazaar-settlement --test parity
       - name: solidity parity pins
         working-directory: contracts
         run: forge test --match-path "test/Eip712Parity.t.sol" -vvv

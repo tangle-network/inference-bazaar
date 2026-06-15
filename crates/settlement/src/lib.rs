@@ -1,14 +1,14 @@
-//! Host-side settlement for the Surplus market.
+//! Host-side settlement for the InferenceBazaar market.
 //!
 //! The venue matches *signed firm orders* (EIP-712 `Order`s — CLOB orders and
 //! RFQ quotes alike) and joins each book fill back to the two signatures that
 //! authorized it. The result, a [`SignedFill`], is the atomic unit the
-//! `SurplusSettlement` contract clears trustlessly. Batching and attester
-//! quorums compress that path; the digests live in `surplus-settlement-core`
+//! `InferenceBazaarSettlement` contract clears trustlessly. Batching and attester
+//! quorums compress that path; the digests live in `inference-bazaar-settlement-core`
 //! so the SP1 guest proves the very same bytes.
 
-pub use surplus_settlement_core as core;
-pub use surplus_settlement_core::{
+pub use inference_bazaar_settlement_core as core;
+pub use inference_bazaar_settlement_core::{
     batch_digest, batch_public_values, cost_micro, domain, fills_hash, instrument_hash,
     order_digest, orders_commitment, receipt_digest, recover_signer, validate_pair, verify_order,
     work_commitment, BatchFill, Eip712Domain, Order, PairError, SIDE_BUY, SIDE_SELL,

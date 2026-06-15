@@ -3,7 +3,7 @@ pragma solidity ^0.8.26;
 
 import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { SurplusSettlement } from "../../src/SurplusSettlement.sol";
+import { InferenceBazaarSettlement } from "../../src/InferenceBazaarSettlement.sol";
 import { MockUSD } from "../../src/dev/Mocks.sol";
 import { SettlementHandler } from "./SettlementHandler.sol";
 
@@ -18,14 +18,14 @@ import { SettlementHandler } from "./SettlementHandler.sol";
 /// guarantee the whole credit model rests on.
 contract SolvencyInvariant is Test {
     MockUSD usd;
-    SurplusSettlement settlement;
+    InferenceBazaarSettlement settlement;
     SettlementHandler handler;
     address feeRecipient = address(0xFEE);
     bytes32 constant BOOK = keccak256("inv-book");
 
     function setUp() public {
         usd = new MockUSD();
-        settlement = new SurplusSettlement(IERC20(address(usd)), 30 days, 6 hours, 1 hours, 500, 200, feeRecipient);
+        settlement = new InferenceBazaarSettlement(IERC20(address(usd)), 30 days, 6 hours, 1 hours, 500, 200, feeRecipient);
         // A registered book so the attested path exists (the handler uses the
         // trustless fill path, but registration keeps the surface realistic).
         address[] memory atts = new address[](1);

@@ -52,8 +52,8 @@ describe('RouterCreditsRail', () => {
     expect(receipt.operatorBaseUnits).toBe(1_200_000n)
     expect(receipt.platformBaseUnits).toBe(300_000n)
     expect(receipt.ref).toBe('platform-txn-1')
-    expect(port.deduct).toHaveBeenCalledWith('user_42', 1_500_000n, 'surplus:o1')
-    expect(port.credit).toHaveBeenCalledWith('op_alpha', 1_200_000n, 'surplus:o1')
+    expect(port.deduct).toHaveBeenCalledWith('user_42', 1_500_000n, 'inference-bazaar:o1')
+    expect(port.credit).toHaveBeenCalledWith('op_alpha', 1_200_000n, 'inference-bazaar:o1')
   })
 })
 

@@ -6,8 +6,8 @@
 
 use axum::http::StatusCode;
 use serde_json::{json, Value};
-use surplus_settlement::core::alloy_primitives::B256;
-use surplus_settlement::core::{order_digest, recover_signer, BatchFill};
+use inference_bazaar_settlement::core::alloy_primitives::B256;
+use inference_bazaar_settlement::core::{order_digest, recover_signer, BatchFill};
 
 use super::{
     cancel_digest, Clob, FinalityJournal, PoolEntry, WireCancel, WireOrder, CANCEL_TTL_SECS,
@@ -93,7 +93,7 @@ impl Clob {
     /// drop the order from the pool if held. Idempotent. A cancel for an order
     /// not yet seen is remembered so the order is refused on arrival.
     pub(crate) fn admit_cancel(&self, c: WireCancel) -> Result<Value, (StatusCode, String)> {
-        let sig = surplus_settlement::core::hex::decode(c.signature.trim_start_matches("0x"))
+        let sig = inference_bazaar_settlement::core::hex::decode(c.signature.trim_start_matches("0x"))
             .map_err(|_| {
                 (
                     StatusCode::UNPROCESSABLE_ENTITY,
@@ -147,7 +147,7 @@ impl Clob {
     pub(crate) fn is_cancelled(
         &self,
         order_hash: B256,
-        trader: surplus_settlement::core::alloy_primitives::Address,
+        trader: inference_bazaar_settlement::core::alloy_primitives::Address,
     ) -> bool {
         let now = now_unix();
         let mut cancelled = self.cancelled.lock().unwrap();
@@ -240,7 +240,7 @@ impl Clob {
         &self,
         instrument_id: &str,
         epoch: u64,
-    ) -> Vec<surplus_settlement::SignedOrder> {
+    ) -> Vec<inference_bazaar_settlement::SignedOrder> {
         let deadline = self.settlement_deadline(epoch);
         let mut pool = self.pool.lock().unwrap();
         // Hygiene: evict anything already past its own absolute expiry.

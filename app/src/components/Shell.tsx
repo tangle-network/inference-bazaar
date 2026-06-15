@@ -5,7 +5,7 @@ import { toggleTheme, useTheme } from '~/lib/theme'
 import { privacyOn, setPrivacy } from '~/lib/privacy'
 import { WalletButton } from '~/components/WalletButton'
 import { NetworkSwitcher } from '~/components/NetworkSwitcher'
-import { SurplusBrand } from '~/components/TangleLogo'
+import { InferenceBazaarBrand } from '~/components/TangleLogo'
 
 // Outcome-led: the buyer's two verbs first (get cheaper inference, hold it),
 // then the engine room (books, sellers, operators, the on-chain trail).
@@ -100,7 +100,7 @@ function NavItems({ collapsed = false, onNavigate }: { collapsed?: boolean; onNa
   )
 }
 
-const SIDEBAR_KEY = 'surplus:sidebar-collapsed'
+const SIDEBAR_KEY = 'inference-bazaar:sidebar-collapsed'
 
 export function Shell({ children }: { children: ReactNode }) {
   const [mobileNav, setMobileNav] = useState(false)
@@ -137,7 +137,7 @@ export function Shell({ children }: { children: ReactNode }) {
               aria-label="Inference Bazaar home"
               className="flex h-10 w-10 items-center justify-center rounded-[8px] transition-colors hover:bg-[var(--s-panel)]"
             >
-              <SurplusBrand compact />
+              <InferenceBazaarBrand compact />
             </NavLink>
             <button
               onClick={() => setCollapsed(false)}
@@ -151,7 +151,7 @@ export function Shell({ children }: { children: ReactNode }) {
         ) : (
           <div className="flex items-center justify-between gap-2 pl-1.5">
             <NavLink to="/" aria-label="Inference Bazaar home" className="min-w-0">
-              <SurplusBrand />
+              <InferenceBazaarBrand />
             </NavLink>
             <button
               onClick={() => setCollapsed(true)}
@@ -210,7 +210,7 @@ export function Shell({ children }: { children: ReactNode }) {
             >
               <span className="i-ph:list-dashes text-[18px]" />
             </button>
-            <SurplusBrand />
+            <InferenceBazaarBrand />
           </div>
           <div className="flex items-center gap-2">
             <PrivacyButton />

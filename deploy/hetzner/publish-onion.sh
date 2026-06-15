@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Copy Arti's generated onion hostname to a stable path the operator reads via
-# SURPLUS_ONION_FILE. Arti writes the hostname under its state dir once the onion
+# INFERENCE_BAZAAR_ONION_FILE. Arti writes the hostname under its state dir once the onion
 # service bootstraps; the exact subpath varies by version, so locate it. Polls
 # briefly because bootstrap is not instant after Arti starts.
 set -u
-STATE_DIR="${ARTI_STATE_DIR:-/opt/surplus/arti/state}"
-OUT="${SURPLUS_ONION_FILE:-/opt/surplus/onion-hostname}"
+STATE_DIR="${ARTI_STATE_DIR:-/opt/inference-bazaar/arti/state}"
+OUT="${INFERENCE_BAZAAR_ONION_FILE:-/opt/inference-bazaar/onion-hostname}"
 
 for _ in $(seq 1 60); do
   # Arti stores the onion service's hostname in a `hostname` file under its

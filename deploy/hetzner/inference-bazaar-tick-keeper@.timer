@@ -1,5 +1,5 @@
 [Unit]
-Description=Run surplus workflow_tick keeper every 5 minutes (service %i)
+Description=Run inference-bazaar workflow_tick keeper every 5 minutes (service %i)
 
 [Timer]
 OnBootSec=2min

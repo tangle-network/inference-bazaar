@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use surplus_orderbook::{Fill, MatchingEngine, NativeBook, Order, Side};
+use inference_bazaar_orderbook::{Fill, MatchingEngine, NativeBook, Order, Side};
 
 /// The operator's own market-making orders carry this owner so it can
 /// cancel-replace them each tick and attribute fills to its inventory. When a
@@ -24,8 +24,8 @@ pub enum VenueError {
     Rejected(String),
     NoReference,
     Sidecar(String),
-    /// Signed-order / RFQ surface used without SURPLUS_CHAIN_ID +
-    /// SURPLUS_SETTLEMENT_ADDR (and a key, where signing is required).
+    /// Signed-order / RFQ surface used without INFERENCE_BAZAAR_CHAIN_ID +
+    /// INFERENCE_BAZAAR_SETTLEMENT_ADDR (and a key, where signing is required).
     SettlementUnconfigured(&'static str),
     /// On-chain submission failed; the outbox was restored.
     Chain(String),
@@ -77,7 +77,7 @@ pub struct Venue {
     /// Where redemptions get their tokens: managed vLLM, any OpenAI-compat
     /// URL, or the Tangle Router (legacy default). See `inference.rs`.
     pub(crate) inference: crate::inference::InferenceBackend,
-    /// `SURPLUS_ATTESTER_ONLY=1`: this node participates in CLOB quorum (gossip +
+    /// `INFERENCE_BAZAAR_ATTESTER_ONLY=1`: this node participates in CLOB quorum (gossip +
     /// co-sign) but NEVER issues — it signs no maker quotes, so it mints no lots.
     /// An attester that cannot issue cannot resell, so the "issuer must serve its
     /// own model" rule does not apply to it (it serves nothing). This is the
@@ -94,12 +94,12 @@ pub struct Venue {
 #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct RedeemProgress {
     pub served: u64,
-    pub used_auths: HashSet<surplus_settlement::core::alloy_primitives::B256>,
+    pub used_auths: HashSet<inference_bazaar_settlement::core::alloy_primitives::B256>,
     /// The latest work commitment served (the one the holder's receipt covers).
     /// `Some` once anything has been served; the attestation pump needs it to
     /// vouch service when the holder won't sign.
     #[serde(default)]
-    pub work: Option<surplus_settlement::core::alloy_primitives::B256>,
+    pub work: Option<inference_bazaar_settlement::core::alloy_primitives::B256>,
     /// Unix time of the last serve. The attestation pump waits a grace past this
     /// for the holder's receipt before vouching service via the quorum.
     #[serde(default)]
@@ -137,7 +137,7 @@ impl Venue {
         // An attester-only node co-signs the book's batches but issues nothing
         // (see the `attester_only` field + the guards in `signed_mm_quote` /
         // `rfq_quote`), so the own-model requirement does not bind it.
-        let attester_only = std::env::var("SURPLUS_ATTESTER_ONLY")
+        let attester_only = std::env::var("INFERENCE_BAZAAR_ATTESTER_ONLY")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
         let is_bonded_issuer = !attester_only
@@ -145,20 +145,20 @@ impl Venue {
                 .as_ref()
                 .and_then(|s| s.operator_address_hex())
                 .is_some()
-            && std::env::var("SURPLUS_CLOB_OPERATORS")
+            && std::env::var("INFERENCE_BAZAAR_CLOB_OPERATORS")
                 .map(|v| !v.trim().is_empty())
                 .unwrap_or(false);
         if is_bonded_issuer && inference.mode() == "router" {
             panic!(
-                "bonded issuer must serve its own model: set SURPLUS_VLLM_MODEL or \
-                 SURPLUS_INFERENCE_URL (or SURPLUS_ATTESTER_ONLY=1 for a quorum member \
+                "bonded issuer must serve its own model: set INFERENCE_BAZAAR_VLLM_MODEL or \
+                 INFERENCE_BAZAAR_INFERENCE_URL (or INFERENCE_BAZAAR_ATTESTER_ONLY=1 for a quorum member \
                  that does not issue). router-proxy mode is forbidden on an issuing \
                  rail (a lot must be backed by inference this operator runs, not resold)."
             );
         }
         if attester_only {
             tracing::info!(
-                "SURPLUS_ATTESTER_ONLY: this node co-signs CLOB batches but will not \
+                "INFERENCE_BAZAAR_ATTESTER_ONLY: this node co-signs CLOB batches but will not \
                  quote or issue (no maker orders signed)"
             );
         }
@@ -427,11 +427,11 @@ impl Venue {
             }));
         }
 
-        // Quote a ladder: SURPLUS_MM_LEVELS price levels per side stepping away
+        // Quote a ladder: INFERENCE_BAZAAR_MM_LEVELS price levels per side stepping away
         // from the A–S touch, sizes growing with distance — the operator's
         // committed depth, not decoration. Level spacing is ~30bps of the
         // reference (at least one tick).
-        let ladder_levels: i64 = std::env::var("SURPLUS_MM_LEVELS")
+        let ladder_levels: i64 = std::env::var("INFERENCE_BAZAAR_MM_LEVELS")
             .ok()
             .and_then(|v| v.parse().ok())
             .filter(|v| (1..=10).contains(v))
@@ -477,7 +477,7 @@ impl Venue {
                     }
                     q.qty = qty as f64;
                     *budget = budget.saturating_sub(
-                        surplus_settlement::core::cost_micro(price, qty).to::<u128>(),
+                        inference_bazaar_settlement::core::cost_micro(price, qty).to::<u128>(),
                     );
                 }
                 let q = &q;

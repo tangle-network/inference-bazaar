@@ -27,7 +27,7 @@ http
               })}\n\n`,
             )
           chunk({ role: 'assistant', content: '' })
-          for (const w of ['Surplus ', 'spend-rail ', 'stub ', 'reply.']) chunk({ content: w })
+          for (const w of ['InferenceBazaar ', 'spend-rail ', 'stub ', 'reply.']) chunk({ content: w })
           chunk({}, { finish: 'stop' })
           if (parsed.stream_options?.include_usage) {
             res.write(
@@ -53,7 +53,7 @@ http
             choices: [
               {
                 index: 0,
-                message: { role: 'assistant', content: 'Surplus spend-rail stub reply.' },
+                message: { role: 'assistant', content: 'InferenceBazaar spend-rail stub reply.' },
                 finish_reason: 'stop',
               },
             ],

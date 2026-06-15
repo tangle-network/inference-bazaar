@@ -1,4 +1,4 @@
-import type { SessionReport } from '@surplus/mm-loop'
+import type { SessionReport } from '@inference-bazaar/mm-loop'
 
 /**
  * Aggregate metrics for one market-making config evaluated across many seeds.

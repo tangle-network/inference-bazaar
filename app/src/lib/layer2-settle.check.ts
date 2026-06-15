@@ -48,7 +48,7 @@ const wc = (key: `0x${string}`) => createWalletClient({ account: privateKeyToAcc
 const funder = wc(FUNDER_KEY)
 const tx = (hash: `0x${string}`) => pub.waitForTransactionReceipt({ hash })
 
-const domain = { name: 'SurplusSettlement', version: '1', chainId: anvil.id, verifyingContract: SETTLEMENT } as const
+const domain = { name: 'InferenceBazaarSettlement', version: '1', chainId: anvil.id, verifyingContract: SETTLEMENT } as const
 const orderTypes = { Order: [
   { name: 'instrument', type: 'bytes32' }, { name: 'side', type: 'uint8' },
   { name: 'priceMicroPerM', type: 'uint64' }, { name: 'qtyTokens', type: 'uint64' },

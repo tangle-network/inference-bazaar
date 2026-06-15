@@ -6,7 +6,7 @@ import {
   type RiskContext,
   type RiskLimits,
   type RiskVerdict,
-} from '@surplus/market-core'
+} from '@inference-bazaar/market-core'
 import type { MarketTick, MarketVenue, SessionReport } from './types'
 
 export interface SessionOptions {

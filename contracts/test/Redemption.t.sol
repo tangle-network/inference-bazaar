@@ -2,7 +2,7 @@
 pragma solidity ^0.8.26;
 
 import { SettlementTestBase } from "./Base.t.sol";
-import { SurplusSettlement } from "../src/SurplusSettlement.sol";
+import { InferenceBazaarSettlement } from "../src/InferenceBazaarSettlement.sol";
 
 contract RedemptionTest is SettlementTestBase {
     bytes32 internal lotId;
@@ -61,7 +61,7 @@ contract RedemptionTest is SettlementTestBase {
         bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000, WORK));
         settlement.settleRedemptionAttested(BOOK, id, 50_000, WORK, sigs);
         // Not yet final — within the challenge window finalize reverts.
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.ChallengeWindowOpen.selector, id));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.ChallengeWindowOpen.selector, id));
         settlement.finalizeAttested(id);
         // After the window, anyone finalizes the unchallenged attestation.
         uint256 liabBefore = settlement.liability(seller);
@@ -85,7 +85,7 @@ contract RedemptionTest is SettlementTestBase {
 
         // Voided: finalize no longer possible, and after the redemption deadline
         // the holder claims a default (the issuer never proved real service).
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.RedemptionNotContested.selector, id));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.RedemptionNotContested.selector, id));
         settlement.finalizeAttested(id);
         vm.warp(block.timestamp + REDEMPTION_WINDOW + 1);
         uint256 payout = settlement.claimDefault(id);
@@ -100,7 +100,7 @@ contract RedemptionTest is SettlementTestBase {
         settlement.settleRedemptionAttested(BOOK, id, 50_000, WORK, sigs);
         vm.warp(block.timestamp + CHALLENGE_WINDOW + 1);
         vm.prank(buyer);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.ChallengeWindowClosed.selector, id));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.ChallengeWindowClosed.selector, id));
         settlement.challengeAttested(id);
     }
 
@@ -111,7 +111,7 @@ contract RedemptionTest is SettlementTestBase {
         bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000, WORK));
         settlement.settleRedemptionAttested(BOOK, id, 50_000, WORK, sigs);
         vm.prank(seller);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.NotLotHolder.selector, bookLot));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.NotLotHolder.selector, bookLot));
         settlement.challengeAttested(id);
     }
 
@@ -123,7 +123,7 @@ contract RedemptionTest is SettlementTestBase {
         bytes32 id = settlement.requestRedemption(lotId, 50_000); // lotId is a settleFills lot
         bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000, WORK));
         vm.expectRevert(
-            abi.encodeWithSelector(SurplusSettlement.RedemptionBookMismatch.selector, settlement.NO_BOOK(), BOOK)
+            abi.encodeWithSelector(InferenceBazaarSettlement.RedemptionBookMismatch.selector, settlement.NO_BOOK(), BOOK)
         );
         settlement.settleRedemptionAttested(BOOK, id, 50_000, WORK, sigs);
     }
@@ -143,7 +143,7 @@ contract RedemptionTest is SettlementTestBase {
         vm.prank(buyer);
         bytes32 id = settlement.requestRedemption(bookLot, 50_000);
         bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000, WORK));
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.RedemptionBookMismatch.selector, BOOK, OTHER));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.RedemptionBookMismatch.selector, BOOK, OTHER));
         settlement.settleRedemptionAttested(OTHER, id, 50_000, WORK, sigs);
     }
 
@@ -151,14 +151,14 @@ contract RedemptionTest is SettlementTestBase {
         vm.prank(buyer);
         bytes32 id = settlement.requestRedemption(lotId, 50_000);
         bytes memory badSig = signReceipt(sellerKey, id, 50_000);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.BadReceipt.selector, id));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.BadReceipt.selector, id));
         settlement.settleRedemption(id, 50_000, WORK, badSig);
     }
 
     function test_claimDefault_paysHolderFromCollateralPlusPenalty() public {
         vm.prank(buyer);
         bytes32 id = settlement.requestRedemption(lotId, 50_000);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.RedemptionDeadlineNotPassed.selector, id));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.RedemptionDeadlineNotPassed.selector, id));
         settlement.claimDefault(id);
 
         vm.warp(block.timestamp + REDEMPTION_WINDOW + 1);
@@ -185,7 +185,7 @@ contract RedemptionTest is SettlementTestBase {
         bytes32 id = settlement.requestRedemption(lotId, 50_000);
         vm.warp(block.timestamp + REDEMPTION_WINDOW + 1);
         bytes memory sig = signReceipt(buyerKey, id, 50_000);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.RedemptionDeadlinePassed.selector, id));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.RedemptionDeadlinePassed.selector, id));
         settlement.settleRedemption(id, 50_000, WORK, sig);
     }
 
@@ -193,7 +193,7 @@ contract RedemptionTest is SettlementTestBase {
         vm.prank(buyer);
         settlement.requestRedemption(lotId, 10_000);
         vm.prank(buyer);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.RedemptionAlreadyOpen.selector, lotId));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.RedemptionAlreadyOpen.selector, lotId));
         settlement.requestRedemption(lotId, 10_000);
     }
 
@@ -210,7 +210,7 @@ contract RedemptionTest is SettlementTestBase {
         settlement.deposit(10_000_000);
         vm.stopPrank();
 
-        SurplusSettlement.Order memory b2 = SurplusSettlement.Order({
+        InferenceBazaarSettlement.Order memory b2 = InferenceBazaarSettlement.Order({
             instrument: INSTRUMENT,
             side: 0,
             priceMicroPerM: 15_000_000,
@@ -220,7 +220,7 @@ contract RedemptionTest is SettlementTestBase {
             expiry: uint64(block.timestamp + 300),
             salt: keccak256("b2")
         });
-        SurplusSettlement.Order memory s2 = SurplusSettlement.Order({
+        InferenceBazaarSettlement.Order memory s2 = InferenceBazaarSettlement.Order({
             instrument: INSTRUMENT,
             side: 1,
             priceMicroPerM: 15_000_000,
@@ -230,11 +230,11 @@ contract RedemptionTest is SettlementTestBase {
             expiry: uint64(block.timestamp + 300),
             salt: keccak256("s2")
         });
-        SurplusSettlement.FillInput[] memory fills = new SurplusSettlement.FillInput[](1);
+        InferenceBazaarSettlement.FillInput[] memory fills = new InferenceBazaarSettlement.FillInput[](1);
         (uint8 v, bytes32 r, bytes32 sg) = vm.sign(buyer2Key, settlement.orderDigest(b2));
         bytes memory b2sig = abi.encodePacked(r, sg, v);
         (v, r, sg) = vm.sign(buyerKey, settlement.orderDigest(s2));
-        fills[0] = SurplusSettlement.FillInput({
+        fills[0] = InferenceBazaarSettlement.FillInput({
             buy: b2,
             buySig: b2sig,
             sell: s2,
@@ -242,7 +242,7 @@ contract RedemptionTest is SettlementTestBase {
             qtyTokens: 10_000,
             execPriceMicroPerM: 15_000_000
         });
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.LotQtyUnavailable.selector, 5000, 10_000));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.LotQtyUnavailable.selector, 5000, 10_000));
         settlement.settleFills(fills);
     }
 
@@ -250,7 +250,7 @@ contract RedemptionTest is SettlementTestBase {
         vm.prank(buyer);
         settlement.requestRedemption(lotId, 10_000);
         vm.prank(buyer);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.RedemptionAlreadyOpen.selector, lotId));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.RedemptionAlreadyOpen.selector, lotId));
         settlement.transferLot(lotId, address(0xD00D));
     }
 
@@ -265,14 +265,14 @@ contract RedemptionTest is SettlementTestBase {
     }
 
     function test_reclaimBeforeExpiryReverts() public {
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.LotNotExpired.selector, lotId));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.LotNotExpired.selector, lotId));
         settlement.reclaimExpired(lotId);
     }
 
     function test_requestOnExpiredLotReverts() public {
         vm.warp(block.timestamp + CREDIT_TTL + 1);
         vm.prank(buyer);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.LotIsExpired.selector, lotId));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.LotIsExpired.selector, lotId));
         settlement.requestRedemption(lotId, 10_000);
     }
 
@@ -281,7 +281,7 @@ contract RedemptionTest is SettlementTestBase {
     /// Mint a fresh 50k-token lot UNDER `BOOK` via the attested batch path, so
     /// `lotBook[lot] == BOOK`. Fresh salts keep it distinct from the setUp fill.
     function settleBatchMint() internal returns (bytes32 mintedLotId) {
-        SurplusSettlement.Order memory b = SurplusSettlement.Order({
+        InferenceBazaarSettlement.Order memory b = InferenceBazaarSettlement.Order({
             instrument: INSTRUMENT,
             side: 0,
             priceMicroPerM: 15_000_000,
@@ -291,7 +291,7 @@ contract RedemptionTest is SettlementTestBase {
             expiry: uint64(block.timestamp + 300),
             salt: keccak256("batch-buy")
         });
-        SurplusSettlement.Order memory s = SurplusSettlement.Order({
+        InferenceBazaarSettlement.Order memory s = InferenceBazaarSettlement.Order({
             instrument: INSTRUMENT,
             side: 1,
             priceMicroPerM: 14_000_000,
@@ -301,8 +301,8 @@ contract RedemptionTest is SettlementTestBase {
             expiry: uint64(block.timestamp + 300),
             salt: keccak256("batch-sell")
         });
-        SurplusSettlement.BatchFill[] memory fills = new SurplusSettlement.BatchFill[](1);
-        fills[0] = SurplusSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 50_000, execPriceMicroPerM: 15_000_000 });
+        InferenceBazaarSettlement.BatchFill[] memory fills = new InferenceBazaarSettlement.BatchFill[](1);
+        fills[0] = InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 50_000, execPriceMicroPerM: 15_000_000 });
         bytes32 fillsHash = keccak256(abi.encode(fills));
         bytes32 digest = keccak256(
             abi.encodePacked(

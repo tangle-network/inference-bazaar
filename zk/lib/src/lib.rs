@@ -1,8 +1,8 @@
 //! Types crossing the host/guest boundary of the batch-validity program.
 
 use serde::{Deserialize, Serialize};
-use surplus_settlement_core::alloy_primitives::{Address, B256};
-use surplus_settlement_core::Order;
+use inference_bazaar_settlement_core::alloy_primitives::{Address, B256};
+use inference_bazaar_settlement_core::Order;
 
 /// One signed order in the gossiped epoch set the guest matches in-circuit.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -14,7 +14,7 @@ pub struct ProvenOrder {
 /// Program input for the match-in-circuit proven path.
 ///
 /// chain id + contract pin the EIP-712 domain, so a proof can only verify against
-/// the one SurplusSettlement deployment it was made for. `book_id` + `batch_nonce`
+/// the one InferenceBazaarSettlement deployment it was made for. `book_id` + `batch_nonce`
 /// bind it to one book at one nonce. The guest verifies every order's signature,
 /// runs `match_epoch` over the SET (the same kernel peers re-run and the venue
 /// uses), and commits `(domainSeparator, bookId, batchNonce, ordersCommitment,

@@ -14,15 +14,15 @@ use std::time::Duration;
 
 use blueprint_crypto::k256::K256Ecdsa;
 use blueprint_networking::test_utils::{create_whitelisted_nodes, wait_for_all_handshakes};
-use surplus_operator::clob::{Clob, ClobConfig, WireOrder};
-use surplus_operator::config::{
+use inference_bazaar_operator::clob::{Clob, ClobConfig, WireOrder};
+use inference_bazaar_operator::config::{
     Instrument, OperatorConfig, QuoteParams, RiskLimits, SettlementConfig,
 };
-use surplus_operator::mesh::{spawn_mesh_loop, MeshNet};
-use surplus_operator::Venue;
-use surplus_settlement::core::alloy_primitives::{Address, B256};
-use surplus_settlement::core::{instrument_hash, Order};
-use surplus_settlement::{Signer, SIDE_BUY, SIDE_SELL};
+use inference_bazaar_operator::mesh::{spawn_mesh_loop, MeshNet};
+use inference_bazaar_operator::Venue;
+use inference_bazaar_settlement::core::alloy_primitives::{Address, B256};
+use inference_bazaar_settlement::core::{instrument_hash, Order};
+use inference_bazaar_settlement::{Signer, SIDE_BUY, SIDE_SELL};
 
 const INSTRUMENT: &str = "anthropic/claude-opus-4-8:output";
 const CONTRACT: &str = "0x00000000000000000000000000000000000000cc";
@@ -94,14 +94,14 @@ fn signed_wire(side: u8, price: u64, qty: u64, key: &str, salt: u8) -> WireOrder
         expiry: now() + 3600,
         salt: B256::with_last_byte(salt),
     };
-    let dom = surplus_settlement::domain(CHAIN_ID, CONTRACT.parse().unwrap());
+    let dom = inference_bazaar_settlement::domain(CHAIN_ID, CONTRACT.parse().unwrap());
     let signed = signer.sign_order(&order, &dom);
     WireOrder {
         instrument_id: INSTRUMENT.into(),
         order: signed.order,
         signature: format!(
             "0x{}",
-            surplus_settlement::core::hex::encode(signed.signature)
+            inference_bazaar_settlement::core::hex::encode(signed.signature)
         ),
     }
 }
@@ -124,7 +124,7 @@ async fn three_nodes_gossip_cosign_over_pki_mesh() {
     blueprint_networking::test_utils::setup_log();
     // Three whitelisted mesh nodes: every node's handshake is verified against
     // the shared key set — the PKI gate the HTTP transport never had.
-    let mut nodes = create_whitelisted_nodes::<K256Ecdsa>(3, "surplus-clob", "test", false);
+    let mut nodes = create_whitelisted_nodes::<K256Ecdsa>(3, "inference-bazaar-clob", "test", false);
     let mut handles = Vec::new();
     for n in &mut nodes {
         handles.push(n.start().await.expect("mesh node starts"));

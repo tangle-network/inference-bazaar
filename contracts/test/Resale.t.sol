@@ -2,7 +2,7 @@
 pragma solidity ^0.8.26;
 
 import { SettlementTestBase } from "./Base.t.sol";
-import { SurplusSettlement } from "../src/SurplusSettlement.sol";
+import { InferenceBazaarSettlement } from "../src/InferenceBazaarSettlement.sol";
 
 /// The transfer-by-sale (resale) path is the one place total notional is not
 /// conserved across a fill: when the buyer pays LESS than the carved pro-rata,
@@ -20,9 +20,9 @@ contract ResaleTest is SettlementTestBase {
     )
         internal
         view
-        returns (SurplusSettlement.Order memory)
+        returns (InferenceBazaarSettlement.Order memory)
     {
-        return SurplusSettlement.Order({
+        return InferenceBazaarSettlement.Order({
             instrument: INSTRUMENT,
             side: side,
             priceMicroPerM: price,
@@ -54,10 +54,10 @@ contract ResaleTest is SettlementTestBase {
         settlement.deposit(100_000_000);
         vm.stopPrank();
 
-        SurplusSettlement.Order memory b = _order(0, 10_000_000, 20_000, bytes32(0), buyer2, "resale-buy");
-        SurplusSettlement.Order memory s = _order(1, 10_000_000, 20_000, lotId, buyer, "resale-sell");
-        SurplusSettlement.FillInput[] memory fills = new SurplusSettlement.FillInput[](1);
-        fills[0] = SurplusSettlement.FillInput({
+        InferenceBazaarSettlement.Order memory b = _order(0, 10_000_000, 20_000, bytes32(0), buyer2, "resale-buy");
+        InferenceBazaarSettlement.Order memory s = _order(1, 10_000_000, 20_000, lotId, buyer, "resale-sell");
+        InferenceBazaarSettlement.FillInput[] memory fills = new InferenceBazaarSettlement.FillInput[](1);
+        fills[0] = InferenceBazaarSettlement.FillInput({
             buy: b,
             buySig: sign(buyer2Key, b),
             sell: s,

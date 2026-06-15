@@ -1,4 +1,4 @@
-# Critical Audit — Surplus (2026-06-12, HEAD 9ecbbc8)
+# Critical Audit — InferenceBazaar (2026-06-12, HEAD 9ecbbc8)
 
 Reviewers: A (security), B (architecture), C (standards/tests/docs), D (product personas — customer, operator, instance-payer). Full findings in findings.jsonl.
 

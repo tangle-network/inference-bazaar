@@ -11,11 +11,11 @@ const SETTLEMENT = process.env.SETTLEMENT ?? '0x64867eacf2e4581d182c2Be634cfD7fF
 const INSTRUMENT = process.env.INSTRUMENT ?? 'claude-sonnet-4-6:output'
 // op5 (Helsinki) is the entry point; the two Nuremberg venues are the peers.
 const ENTRY = process.env.ENTRY ?? 'http://95.216.8.253:9500'
-const PEERS = (process.env.PEERS ?? 'https://surplus2.178.104.232.124.sslip.io,https://surplus.178.104.232.124.sslip.io').split(',')
+const PEERS = (process.env.PEERS ?? 'https://inference-bazaar2.178.104.232.124.sslip.io,https://inference-bazaar.178.104.232.124.sslip.io').split(',')
 
 // Deterministic throwaway key — never funded; the order can never settle.
 const trader = privateKeyToAccount(keccak256(toHex(`gossip-probe-${Date.now()}`)))
-const domain = { name: 'SurplusSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT }
+const domain = { name: 'InferenceBazaarSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT }
 const types = { Order: [
   { name: 'instrument', type: 'bytes32' }, { name: 'side', type: 'uint8' },
   { name: 'priceMicroPerM', type: 'uint64' }, { name: 'qtyTokens', type: 'uint64' },

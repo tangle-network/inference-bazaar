@@ -1,5 +1,5 @@
 // Multi-lot gateway driver (see gateway-multilot-e2e.sh): mint TWO credit lots,
-// delegate a session key for each, run ONE surplus-gateway over both, then drive
+// delegate a session key for each, run ONE inference-bazaar-gateway over both, then drive
 // a vanilla OpenAI client at the gateway and prove it drains lot 1, fails over to
 // lot 2 seamlessly, and both lots debit on-chain.
 import { spawn } from 'node:child_process'
@@ -12,7 +12,7 @@ const SETTLEMENT = process.env.SETTLEMENT
 const USD = process.env.USD
 const VENUE = process.env.VENUE ?? 'http://127.0.0.1:9210'
 const GW_PORT = Number(process.env.GW_PORT ?? 8088)
-const GATEWAY_BIN = process.env.GATEWAY_BIN ?? './target/debug/surplus-gateway'
+const GATEWAY_BIN = process.env.GATEWAY_BIN ?? './target/debug/inference-bazaar-gateway'
 const GW = `http://127.0.0.1:${GW_PORT}`
 const INSTRUMENT = 'claude-sonnet-4-6:output'
 
@@ -40,7 +40,7 @@ const PRICE = 15_000_000n
 const QTY = 1_000_000n
 const COST = (PRICE * QTY) / 1_000_000n
 
-const domain = { name: 'SurplusSettlement', version: '1', chainId: anvil.id, verifyingContract: SETTLEMENT }
+const domain = { name: 'InferenceBazaarSettlement', version: '1', chainId: anvil.id, verifyingContract: SETTLEMENT }
 const orderTypes = { Order: [
   { name: 'instrument', type: 'bytes32' }, { name: 'side', type: 'uint8' },
   { name: 'priceMicroPerM', type: 'uint64' }, { name: 'qtyTokens', type: 'uint64' },
@@ -124,22 +124,22 @@ const cfg = [
   { lotId: c1.lotId, sessionKey: c1.priv, operatorUrl: VENUE, model: c1.model, maxTokens: Number(CAP1), expiry: Number(expiry) },
   { lotId: c2.lotId, sessionKey: c2.priv, operatorUrl: VENUE, model: c2.model, maxTokens: Number(CAP2), expiry: Number(expiry) },
 ]
-const cfgPath = `/tmp/surplus-gw-${process.pid}.json`
-const statePath = `/tmp/surplus-gw-state-${process.pid}.json`
+const cfgPath = `/tmp/inference-bazaar-gw-${process.pid}.json`
+const statePath = `/tmp/inference-bazaar-gw-state-${process.pid}.json`
 const fs = await import('node:fs')
 fs.writeFileSync(cfgPath, JSON.stringify(cfg))
 
 // The gateway is restartable: it journals each channel's acked cumulative to
-// SURPLUS_GATEWAY_STATE so a restart resumes instead of re-signing cum=0.
+// INFERENCE_BAZAAR_GATEWAY_STATE so a restart resumes instead of re-signing cum=0.
 function startGateway() {
   return spawn(GATEWAY_BIN, [], {
     env: {
       ...process.env,
-      SURPLUS_GATEWAY_CONFIG: cfgPath,
-      SURPLUS_GATEWAY_STATE: statePath,
-      SURPLUS_CHAIN_ID: '31337',
-      SURPLUS_SETTLEMENT_ADDR: SETTLEMENT,
-      SURPLUS_GATEWAY_LISTEN: `127.0.0.1:${GW_PORT}`,
+      INFERENCE_BAZAAR_GATEWAY_CONFIG: cfgPath,
+      INFERENCE_BAZAAR_GATEWAY_STATE: statePath,
+      INFERENCE_BAZAAR_CHAIN_ID: '31337',
+      INFERENCE_BAZAAR_SETTLEMENT_ADDR: SETTLEMENT,
+      INFERENCE_BAZAAR_GATEWAY_LISTEN: `127.0.0.1:${GW_PORT}`,
       RUST_LOG: 'warn',
     },
     stdio: 'inherit',
@@ -161,7 +161,7 @@ async function waitReady() {
 }
 
 // Stream a completion THROUGH the gateway and assert: the client gets real SSE
-// content AND the private `surplus` event was stripped (never leaks downstream).
+// content AND the private `inference-bazaar` event was stripped (never leaks downstream).
 async function streamCall(model, content, maxTokens) {
   const r = await fetch(`${GW}/v1/chat/completions`, {
     method: 'POST',
@@ -171,7 +171,7 @@ async function streamCall(model, content, maxTokens) {
   if (!r.ok) throw new Error(`stream call -> ${r.status}: ${await r.text()}`)
   const ct = r.headers.get('content-type') || ''
   if (!ct.includes('text/event-stream')) throw new Error(`expected SSE, got "${ct}"`)
-  let buf = '', text = '', sawSurplus = false
+  let buf = '', text = '', sawInferenceBazaar = false
   const dec = new TextDecoder()
   for await (const chunk of r.body) {
     buf += dec.decode(chunk, { stream: true })
@@ -182,11 +182,11 @@ async function streamCall(model, content, maxTokens) {
       if (!line) continue
       const data = line.slice(5).trim()
       if (data === '[DONE]') continue
-      if (data.includes('"surplus"')) { sawSurplus = true; continue }
+      if (data.includes('"inference-bazaar"')) { sawInferenceBazaar = true; continue }
       try { const j = JSON.parse(data); const d = j.choices?.[0]?.delta?.content; if (d) text += d } catch {}
     }
   }
-  return { text, sawSurplus }
+  return { text, sawInferenceBazaar }
 }
 
 try {
@@ -219,11 +219,11 @@ try {
   if (settled1 !== Number(CAP1)) throw new Error(`lot1 should be fully drained to ${CAP1}, got ${settled1}`)
   if (settled2a <= 0) throw new Error(`lot2 should have served the failover calls, got ${settled2a}`)
 
-  // ── STREAMING through the gateway: SSE content flows, surplus event stripped ─
+  // ── STREAMING through the gateway: SSE content flows, inference-bazaar event stripped ─
   const s = await streamCall(c2.model, 'stream please', 256)
   if (!s.text) throw new Error('streamed call produced no content')
-  if (s.sawSurplus) throw new Error('gateway leaked the private surplus event to the client')
-  console.log(`streamed ${s.text.length} chars through the gateway (surplus event stripped)`)
+  if (s.sawInferenceBazaar) throw new Error('gateway leaked the private inference-bazaar event to the client')
+  console.log(`streamed ${s.text.length} chars through the gateway (inference-bazaar event stripped)`)
 
   // ── RESTART: prove acked persistence (a reset-to-0 gateway would 409-brick) ──
   gw.kill(); await sleep(300)

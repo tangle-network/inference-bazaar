@@ -1,5 +1,5 @@
 {
-  "name": "@surplus/mm-loop",
+  "name": "@inference-bazaar/mm-loop",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
@@ -13,7 +13,7 @@
     "demo": "tsx src/demo.ts"
   },
   "dependencies": {
-    "@surplus/market-core": "workspace:*",
+    "@inference-bazaar/market-core": "workspace:*",
     "@tangle-network/agent-runtime": "^0.48.0"
   },
   "devDependencies": {

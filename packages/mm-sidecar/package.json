@@ -1,11 +1,11 @@
 {
-  "name": "@surplus/mm-sidecar",
+  "name": "@inference-bazaar/mm-sidecar",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "bin": {
-    "surplus-mm-sidecar": "./src/bin.ts"
+    "inference-bazaar-mm-sidecar": "./src/bin.ts"
   },
   "exports": {
     ".": "./src/index.ts"
@@ -16,7 +16,7 @@
     "start": "tsx src/bin.ts"
   },
   "dependencies": {
-    "@surplus/market-core": "workspace:*"
+    "@inference-bazaar/market-core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",

@@ -1,6 +1,6 @@
 # Owner custody — the timelock (audit C2)
 
-`SurplusSettlement` is `Ownable2Step`. The owner can rotate a book's attesters
+`InferenceBazaarSettlement` is `Ownable2Step`. The owner can rotate a book's attesters
 and set the SP1 verifier — both trust-critical. If the owner is a single EOA,
 one key compromise rewrites the quorum and drains custody. The fix: the owner is
 a `TimelockController`, so every privileged call must be **publicly scheduled and

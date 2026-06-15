@@ -1,4 +1,4 @@
-//! Submission client for the `SurplusSettlement` contract (feature `chain`).
+//! Submission client for the `InferenceBazaarSettlement` contract (feature `chain`).
 //!
 //! Mirrors the inference blueprints' BillingClient shape: an alloy HTTP
 //! provider with a local wallet, typed `sol!` bindings, and small async
@@ -13,7 +13,7 @@ use alloy_primitives::{Address, B256, U256};
 
 sol! {
     #[sol(rpc)]
-    contract ISurplusSettlement {
+    contract IInferenceBazaarSettlement {
         struct Order {
             bytes32 instrument;
             uint8 side;
@@ -115,8 +115,8 @@ sol! {
     }
 }
 
-fn to_abi_order(o: &crate::Order) -> ISurplusSettlement::Order {
-    ISurplusSettlement::Order {
+fn to_abi_order(o: &crate::Order) -> IInferenceBazaarSettlement::Order {
+    IInferenceBazaarSettlement::Order {
         instrument: o.instrument,
         side: o.side,
         priceMicroPerM: o.priceMicroPerM,
@@ -128,8 +128,8 @@ fn to_abi_order(o: &crate::Order) -> ISurplusSettlement::Order {
     }
 }
 
-fn to_fill_input(f: &SignedFill) -> ISurplusSettlement::FillInput {
-    ISurplusSettlement::FillInput {
+fn to_fill_input(f: &SignedFill) -> IInferenceBazaarSettlement::FillInput {
+    IInferenceBazaarSettlement::FillInput {
         buy: to_abi_order(&f.buy.order),
         buySig: f.buy.signature.clone().into(),
         sell: to_abi_order(&f.sell.order),
@@ -139,8 +139,8 @@ fn to_fill_input(f: &SignedFill) -> ISurplusSettlement::FillInput {
     }
 }
 
-fn to_batch_fill(f: &crate::BatchFill) -> ISurplusSettlement::BatchFill {
-    ISurplusSettlement::BatchFill {
+fn to_batch_fill(f: &crate::BatchFill) -> IInferenceBazaarSettlement::BatchFill {
+    IInferenceBazaarSettlement::BatchFill {
         buy: to_abi_order(&f.buy),
         sell: to_abi_order(&f.sell),
         qtyTokens: f.qtyTokens,
@@ -149,7 +149,7 @@ fn to_batch_fill(f: &crate::BatchFill) -> ISurplusSettlement::BatchFill {
 }
 
 pub struct SettlementClient {
-    contract: ISurplusSettlement::ISurplusSettlementInstance<DynProvider>,
+    contract: IInferenceBazaarSettlement::IInferenceBazaarSettlementInstance<DynProvider>,
     chain_id: u64,
     address: Address,
 }
@@ -168,7 +168,7 @@ impl SettlementClient {
             .erased();
         let chain_id = provider.get_chain_id().await?;
         Ok(SettlementClient {
-            contract: ISurplusSettlement::new(contract_address, provider),
+            contract: IInferenceBazaarSettlement::new(contract_address, provider),
             chain_id,
             address: contract_address,
         })
@@ -213,7 +213,7 @@ impl SettlementClient {
             .logs()
             .iter()
             .filter_map(|log| {
-                log.log_decode::<ISurplusSettlement::FillSettled>()
+                log.log_decode::<IInferenceBazaarSettlement::FillSettled>()
                     .ok()
                     .map(|l| l.inner.lotId)
             })
@@ -260,7 +260,7 @@ impl SettlementClient {
         served_cumulative: u64,
         voucher_sig: Vec<u8>,
     ) -> anyhow::Result<B256> {
-        let permit = ISurplusSettlement::SpendPermit {
+        let permit = IInferenceBazaarSettlement::SpendPermit {
             lotId: lot_id,
             sessionKey: session_key,
             maxTokens: max_tokens,
@@ -304,7 +304,7 @@ impl SettlementClient {
             .logs()
             .iter()
             .find_map(|log| {
-                log.log_decode::<ISurplusSettlement::RedemptionRequested>()
+                log.log_decode::<IInferenceBazaarSettlement::RedemptionRequested>()
                     .ok()
                     .map(|l| l.inner.redemptionId)
             })
@@ -315,11 +315,11 @@ impl SettlementClient {
     pub async fn get_redemption(
         &self,
         redemption_id: B256,
-    ) -> anyhow::Result<ISurplusSettlement::redemptionsReturn> {
+    ) -> anyhow::Result<IInferenceBazaarSettlement::redemptionsReturn> {
         Ok(self.contract.redemptions(redemption_id).call().await?)
     }
 
-    pub async fn get_lot(&self, lot_id: B256) -> anyhow::Result<ISurplusSettlement::lotsReturn> {
+    pub async fn get_lot(&self, lot_id: B256) -> anyhow::Result<IInferenceBazaarSettlement::lotsReturn> {
         Ok(self.contract.lots(lot_id).call().await?)
     }
 
@@ -410,7 +410,7 @@ impl SettlementClient {
             .logs()
             .iter()
             .find_map(|log| {
-                log.log_decode::<ISurplusSettlement::RedemptionDefaulted>()
+                log.log_decode::<IInferenceBazaarSettlement::RedemptionDefaulted>()
                     .ok()
                     .map(|l| l.inner.payoutMicro)
             })
@@ -548,7 +548,7 @@ impl SettlementClient {
             .logs()
             .iter()
             .filter_map(|log| {
-                log.log_decode::<ISurplusSettlement::FillSettled>()
+                log.log_decode::<IInferenceBazaarSettlement::FillSettled>()
                     .ok()
                     .map(|l| l.inner.lotId)
             })

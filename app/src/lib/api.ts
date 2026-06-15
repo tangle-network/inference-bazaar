@@ -1,7 +1,7 @@
 /**
  * Real data layer. Two live sources, no mocks, no fallbacks:
  *
- * - The Surplus operator venue (Hetzner blueprint-operators box, Base Sepolia
+ * - The InferenceBazaar operator venue (Hetzner blueprint-operators box, Base Sepolia
  *   blueprint 17 / service 4): instruments listed via on-chain jobs, the live
  *   order book the MM quotes two-sided, order placement, settlement outbox.
  * - The Tangle Router catalog: every model's real list price — the reference
@@ -15,7 +15,7 @@ import { useQuery } from '@tanstack/react-query'
 // node/tsx (the SOR/NBBO checks run outside Vite, where import.meta.env is
 // undefined); in the Vite build it resolves exactly as before.
 export const VENUE_URL =
-  import.meta.env?.VITE_SURPLUS_VENUE_URL || 'https://surplus.178.104.232.124.sslip.io'
+  import.meta.env?.VITE_INFERENCE_BAZAAR_VENUE_URL || 'https://inference-bazaar.178.104.232.124.sslip.io'
 export const ROUTER_URL = import.meta.env?.VITE_TANGLE_ROUTER_URL || 'https://router.tangle.tools'
 
 /** Base Sepolia coordinates of the live deployment. */

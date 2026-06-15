@@ -1,43 +1,43 @@
-# Surplus operator.
+# InferenceBazaar operator.
 #
 # One library (the venue: open orderbook + sidecar quoting + settlement intents)
 # driven by two binaries:
-#   - `surplus-operator-lite`: HTTP-only venue, no Tangle substrate. Local e2e +
+#   - `inference-bazaar-operator-lite`: HTTP-only venue, no Tangle substrate. Local e2e +
 #     first testnet smoke; stable deps only, builds fast.
-#   - `surplus-operator` (feature `blueprint`): the full BlueprintRunner that
+#   - `inference-bazaar-operator` (feature `blueprint`): the full BlueprintRunner that
 #     registers on-chain via blueprint-sdk and drives the SAME venue from job
 #     handlers (workflow_tick, list_instrument, status). The alpha SDK is pulled
 #     ONLY when the `blueprint` feature is on, so the lite path stays light.
 [package]
-name = "surplus-operator"
+name = "inference-bazaar-operator"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [lib]
-name = "surplus_operator"
+name = "inference_bazaar_operator"
 path = "src/lib.rs"
 
 [[bin]]
-name = "surplus-operator-lite"
+name = "inference-bazaar-operator-lite"
 path = "src/main.rs"
 
 [[bin]]
-name = "surplus-operator"
+name = "inference-bazaar-operator"
 path = "src/bin/blueprint.rs"
 required-features = ["blueprint"]
 
 # The consumer-side spend gateway: an OpenAI-compatible proxy that holds the
 # session key and signs spend-channel vouchers invisibly. Run locally for zero
-# trust in Surplus, or hosted for convenience.
+# trust in InferenceBazaar, or hosted for convenience.
 [[bin]]
-name = "surplus-gateway"
+name = "inference-bazaar-gateway"
 path = "src/bin/gateway.rs"
 
 [dependencies]
-surplus-orderbook = { path = "../crates/orderbook" }
-surplus-settlement = { path = "../crates/settlement" }
-surplus-matcher = { path = "../crates/matcher" }
+inference-bazaar-orderbook = { path = "../crates/orderbook" }
+inference-bazaar-settlement = { path = "../crates/settlement" }
+inference-bazaar-matcher = { path = "../crates/matcher" }
 axum = { version = "0.7", features = ["json", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "process"] }
 serde = { version = "1", features = ["derive"] }
@@ -69,7 +69,7 @@ bincode = { version = "1.3", optional = true }
 default = []
 blueprint = ["dep:blueprint-sdk", "dep:alloy-sol-types"]
 # Direct on-chain settlement submission (settleFills) from /settlement/flush.
-chain = ["surplus-settlement/chain"]
+chain = ["inference-bazaar-settlement/chain"]
 # blueprint-networking transport for the shared CLOB: PKI-gated gossip where
 # only the whitelisted bonded operator set can even handshake.
 mesh = [

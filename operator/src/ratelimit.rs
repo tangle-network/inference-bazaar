@@ -28,12 +28,12 @@ struct Bucket {
 
 impl RateLimiter {
     pub fn from_env() -> Self {
-        let capacity = std::env::var("SURPLUS_RL_CAPACITY")
+        let capacity = std::env::var("INFERENCE_BAZAAR_RL_CAPACITY")
             .ok()
             .and_then(|v| v.parse().ok())
             .filter(|v: &f64| *v > 0.0)
             .unwrap_or(60.0);
-        let refill_per_sec = std::env::var("SURPLUS_RL_REFILL")
+        let refill_per_sec = std::env::var("INFERENCE_BAZAAR_RL_REFILL")
             .ok()
             .and_then(|v| v.parse().ok())
             .filter(|v: &f64| *v > 0.0)

@@ -8,27 +8,27 @@
 
 use std::sync::Arc;
 
-use surplus_operator::clob::{
+use inference_bazaar_operator::clob::{
     cancel_digest, Clob, ClobConfig, WireCancel, WireOrder, WireProposal,
 };
-use surplus_operator::config::{
+use inference_bazaar_operator::config::{
     Instrument, OperatorConfig, QuoteParams, RiskLimits, SettlementConfig,
 };
-use surplus_operator::Venue;
-use surplus_settlement::core::alloy_primitives::{Address, B256, U256};
-use surplus_settlement::core::{batch_digest, instrument_hash, order_digest, Order};
-use surplus_settlement::{Signer, SIDE_BUY, SIDE_SELL};
+use inference_bazaar_operator::Venue;
+use inference_bazaar_settlement::core::alloy_primitives::{Address, B256, U256};
+use inference_bazaar_settlement::core::{batch_digest, instrument_hash, order_digest, Order};
+use inference_bazaar_settlement::{Signer, SIDE_BUY, SIDE_SELL};
 
 /// The proposer's transport-auth signature over the claimed batch digest.
 fn proposer_sig(key: &str, batch_nonce: u64, fills_hash: B256) -> String {
-    let dom = surplus_settlement::domain(CHAIN_ID, CONTRACT.parse().unwrap());
+    let dom = inference_bazaar_settlement::domain(CHAIN_ID, CONTRACT.parse().unwrap());
     let sig = Signer::from_hex(key).unwrap().sign_digest(batch_digest(
         B256::ZERO,
         batch_nonce,
         fills_hash,
         &dom,
     ));
-    format!("0x{}", surplus_settlement::core::hex::encode(sig))
+    format!("0x{}", inference_bazaar_settlement::core::hex::encode(sig))
 }
 
 const INSTRUMENT: &str = "anthropic/claude-opus-4-8:output";
@@ -100,14 +100,14 @@ fn signed_wire(side: u8, price: u64, qty: u64, key: &str, salt: u8) -> WireOrder
         expiry: now() + 3600,
         salt: B256::with_last_byte(salt),
     };
-    let dom = surplus_settlement::domain(CHAIN_ID, CONTRACT.parse().unwrap());
+    let dom = inference_bazaar_settlement::domain(CHAIN_ID, CONTRACT.parse().unwrap());
     let signed = signer.sign_order(&order, &dom);
     WireOrder {
         instrument_id: INSTRUMENT.into(),
         order: signed.order,
         signature: format!(
             "0x{}",
-            surplus_settlement::core::hex::encode(signed.signature)
+            inference_bazaar_settlement::core::hex::encode(signed.signature)
         ),
     }
 }
@@ -117,7 +117,7 @@ fn signed_wire(side: u8, price: u64, qty: u64, key: &str, salt: u8) -> WireOrder
 fn signed_cancel(w: &WireOrder, key: &str) -> WireCancel {
     let signer = Signer::from_hex(key).unwrap();
     let contract: Address = CONTRACT.parse().unwrap();
-    let dom = surplus_settlement::domain(CHAIN_ID, contract);
+    let dom = inference_bazaar_settlement::domain(CHAIN_ID, contract);
     let order_hash = order_digest(&w.order, &dom);
     let digest = cancel_digest(U256::from(CHAIN_ID), contract, order_hash);
     WireCancel {
@@ -125,7 +125,7 @@ fn signed_cancel(w: &WireOrder, key: &str) -> WireCancel {
         trader: signer.address(),
         signature: format!(
             "0x{}",
-            surplus_settlement::core::hex::encode(signer.sign_digest(digest))
+            inference_bazaar_settlement::core::hex::encode(signer.sign_digest(digest))
         ),
     }
 }
@@ -179,7 +179,7 @@ async fn spawn_pair() -> (Vec<(Address, String)>, Vec<Arc<Clob>>) {
     for (key, listener) in OP_KEYS.iter().zip(listeners) {
         let venue = Arc::new(venue_with(key));
         let clob = Arc::new(Clob::new(venue, cfg.clone()).unwrap());
-        let app = surplus_operator::clob::router(clob.clone());
+        let app = inference_bazaar_operator::clob::router(clob.clone());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         clobs.push(clob);
     }
@@ -284,7 +284,7 @@ async fn two_nodes_gossip_cosign_and_prune() {
 async fn forged_and_impersonated_proposals_rejected() {
     let (operators, _clobs) = spawn_pair().await;
     let http = reqwest::Client::new();
-    let dom = surplus_settlement::domain(CHAIN_ID, CONTRACT.parse().unwrap());
+    let dom = inference_bazaar_settlement::domain(CHAIN_ID, CONTRACT.parse().unwrap());
     let epoch = now() / 3600;
     let leader = elected_index(&operators, epoch);
     let peer_url = &operators[1 - leader].1;
@@ -295,14 +295,14 @@ async fn forged_and_impersonated_proposals_rejected() {
     let mut forged_buy = signed_wire(SIDE_BUY, 15_000_000, 10_000, SELLER_KEY, 2);
     forged_buy.order.trader = Signer::from_hex(BUYER_KEY).unwrap().address();
 
-    let to_signed = |w: &WireOrder| surplus_settlement::SignedOrder {
+    let to_signed = |w: &WireOrder| inference_bazaar_settlement::SignedOrder {
         order: w.order.clone(),
-        signature: surplus_settlement::core::hex::decode(w.signature.trim_start_matches("0x"))
+        signature: inference_bazaar_settlement::core::hex::decode(w.signature.trim_start_matches("0x"))
             .unwrap(),
     };
     let orders = vec![to_signed(&honest_sell), to_signed(&forged_buy)];
     let inner: Vec<Order> = orders.iter().map(|s| s.order.clone()).collect();
-    let batch = surplus_matcher::match_epoch(INSTRUMENT, 1000, 1000, &dom, &inner);
+    let batch = inference_bazaar_matcher::match_epoch(INSTRUMENT, 1000, 1000, &dom, &inner);
     assert!(
         !batch.fills.is_empty(),
         "the forged pair must cross for the test to bite"
@@ -331,7 +331,7 @@ async fn forged_and_impersonated_proposals_rejected() {
     // Impersonation: correct content, wrong proposer for the epoch → refused
     // even with that party's own valid signature.
     let solo_hash =
-        surplus_matcher::match_epoch(INSTRUMENT, 1000, 1000, &dom, &[honest_sell.order.clone()])
+        inference_bazaar_matcher::match_epoch(INSTRUMENT, 1000, 1000, &dom, &[honest_sell.order.clone()])
             .fills_hash;
     let impostor = WireProposal {
         epoch,
@@ -385,9 +385,9 @@ async fn tampered_fills_hash_rejected() {
 
     let sell = signed_wire(SIDE_SELL, 15_000_000, 10_000, SELLER_KEY, 1);
     let buy = signed_wire(SIDE_BUY, 15_000_000, 10_000, BUYER_KEY, 2);
-    let to_signed = |w: &WireOrder| surplus_settlement::SignedOrder {
+    let to_signed = |w: &WireOrder| inference_bazaar_settlement::SignedOrder {
         order: w.order.clone(),
-        signature: surplus_settlement::core::hex::decode(w.signature.trim_start_matches("0x"))
+        signature: inference_bazaar_settlement::core::hex::decode(w.signature.trim_start_matches("0x"))
             .unwrap(),
     };
 

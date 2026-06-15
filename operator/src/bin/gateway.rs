@@ -1,4 +1,4 @@
-//! `surplus-gateway` — the consumer-side spend gateway, now **multi-lot**.
+//! `inference-bazaar-gateway` — the consumer-side spend gateway, now **multi-lot**.
 //!
 //! An OpenAI-compatible proxy that turns a *wallet of credit lots* into one plain
 //! API key. The developer points a vanilla OpenAI client at it; the gateway holds
@@ -8,19 +8,19 @@
 //! drained or its operator is down. So a long agentic run drains all your lots
 //! seamlessly:
 //!
-//!     client = OpenAI(base_url="http://127.0.0.1:8088/v1", api_key="sk-surplus")
+//!     client = OpenAI(base_url="http://127.0.0.1:8088/v1", api_key="sk-inference-bazaar")
 //!
 //! Over-billing stays impossible: each operator can only settle a cumulative the
 //! lot's session key signed, and those keys live here. Per-request billing is also
 //! bounded to the request's own max_tokens (`capped_next`).
 //!
 //! Config — EITHER a multi-lot file OR single-lot env (back-compat):
-//!   SURPLUS_GATEWAY_CONFIG   path to a JSON array of channels:
+//!   INFERENCE_BAZAAR_GATEWAY_CONFIG   path to a JSON array of channels:
 //!        [{ "lotId":"0x..","sessionKey":"0x..","operatorUrl":"http..",
 //!           "model":"anthropic/…:output"?, "maxTokens":N?, "expiry":unixSecs? }]
-//!   SURPLUS_OPERATOR_URL / SURPLUS_SESSION_KEY / SURPLUS_LOT_ID   one channel
-//!   SURPLUS_CHAIN_ID / SURPLUS_SETTLEMENT_ADDR   the voucher EIP-712 domain
-//!   SURPLUS_GATEWAY_LISTEN   default 127.0.0.1:8088
+//!   INFERENCE_BAZAAR_OPERATOR_URL / INFERENCE_BAZAAR_SESSION_KEY / INFERENCE_BAZAAR_LOT_ID   one channel
+//!   INFERENCE_BAZAAR_CHAIN_ID / INFERENCE_BAZAAR_SETTLEMENT_ADDR   the voucher EIP-712 domain
+//!   INFERENCE_BAZAAR_GATEWAY_LISTEN   default 127.0.0.1:8088
 
 use std::sync::{Arc, Mutex};
 
@@ -33,10 +33,10 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use surplus_operator::spend::spend_voucher_digest;
-use surplus_settlement::core::alloy_primitives::{Address, B256, U256};
-use surplus_settlement::core::hex;
-use surplus_settlement::Signer;
+use inference_bazaar_operator::spend::spend_voucher_digest;
+use inference_bazaar_settlement::core::alloy_primitives::{Address, B256, U256};
+use inference_bazaar_settlement::core::hex;
+use inference_bazaar_settlement::Signer;
 
 /// Never route to a lot within this margin of its expiry — settlement must still
 /// land before the lot expires.
@@ -110,7 +110,7 @@ impl Gateway {
     }
 
     /// Buffered completion on one channel: advance + ack the voucher, strip the
-    /// private surplus field, return the clean JSON.
+    /// private inference-bazaar field, return the clean JSON.
     async fn buffered(
         self: &Shared,
         ch: &Arc<Channel>,
@@ -129,7 +129,7 @@ impl Gateway {
             }
         };
         if let Some(next) = completion
-            .get("surplus")
+            .get("inference-bazaar")
             .and_then(|s| s.get("nextCumulative"))
             .and_then(Value::as_u64)
         {
@@ -149,13 +149,13 @@ impl Gateway {
             }
         }
         if let Some(obj) = completion.as_object_mut() {
-            obj.remove("surplus");
+            obj.remove("inference-bazaar");
         }
         Json(completion).into_response()
     }
 
     /// Pass an SSE stream from the operator through to the client token-by-token,
-    /// stripping the private `surplus` event and, at stream end, advancing this
+    /// stripping the private `inference-bazaar` event and, at stream end, advancing this
     /// channel's voucher + sending a trailing ack so the request settles.
     fn stream_through(
         self: &Shared,
@@ -183,12 +183,12 @@ impl Gateway {
                     if let Some(json_str) = data {
                         if json_str != "[DONE]" {
                             if let Ok(v) = serde_json::from_str::<Value>(json_str) {
-                                if let Some(s) = v.get("surplus") {
+                                if let Some(s) = v.get("inference-bazaar") {
                                     if let Some(n) = s.get("nextCumulative").and_then(Value::as_u64)
                                     {
                                         next_cum = Some(n);
                                     }
-                                    continue; // strip — the client never sees the surplus event
+                                    continue; // strip — the client never sees the inference-bazaar event
                                 }
                             }
                         }
@@ -227,9 +227,9 @@ impl Gateway {
         let r = self
             .client
             .post(format!("{}/v1/spend/ack", ch.operator_url))
-            .header("x-surplus-session", format!("{:#x}", ch.session))
-            .header("x-surplus-voucher-cum", cumulative.to_string())
-            .header("x-surplus-voucher-sig", sig)
+            .header("x-inference-bazaar-session", format!("{:#x}", ch.session))
+            .header("x-inference-bazaar-voucher-cum", cumulative.to_string())
+            .header("x-inference-bazaar-voucher-sig", sig)
             .send()
             .await;
         if let Err(e) = r {
@@ -288,9 +288,9 @@ async fn chat(State(g): State<Shared>, Json(body): Json<Value>) -> impl IntoResp
         let resp = g
             .client
             .post(format!("{}/v1/chat/completions", ch.operator_url))
-            .header("x-surplus-session", format!("{:#x}", ch.session))
-            .header("x-surplus-voucher-cum", acked.to_string())
-            .header("x-surplus-voucher-sig", sig)
+            .header("x-inference-bazaar-session", format!("{:#x}", ch.session))
+            .header("x-inference-bazaar-voucher-cum", acked.to_string())
+            .header("x-inference-bazaar-voucher-sig", sig)
             .json(&body)
             .send()
             .await;
@@ -432,9 +432,9 @@ impl ChannelConfig {
 }
 
 fn load_channels() -> anyhow::Result<Vec<Channel>> {
-    if let Ok(path) = std::env::var("SURPLUS_GATEWAY_CONFIG") {
+    if let Ok(path) = std::env::var("INFERENCE_BAZAAR_GATEWAY_CONFIG") {
         let raw = std::fs::read_to_string(&path)
-            .map_err(|e| anyhow::anyhow!("reading SURPLUS_GATEWAY_CONFIG {path}: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("reading INFERENCE_BAZAAR_GATEWAY_CONFIG {path}: {e}"))?;
         let cfgs: Vec<ChannelConfig> =
             serde_json::from_str(&raw).map_err(|e| anyhow::anyhow!("parsing {path}: {e}"))?;
         anyhow::ensure!(!cfgs.is_empty(), "gateway config lists no channels");
@@ -442,9 +442,9 @@ fn load_channels() -> anyhow::Result<Vec<Channel>> {
     }
     // Back-compat: a single channel from env.
     let cfg = ChannelConfig {
-        lot_id: env("SURPLUS_LOT_ID")?,
-        session_key: env("SURPLUS_SESSION_KEY")?,
-        operator_url: env("SURPLUS_OPERATOR_URL")?,
+        lot_id: env("INFERENCE_BAZAAR_LOT_ID")?,
+        session_key: env("INFERENCE_BAZAAR_SESSION_KEY")?,
+        operator_url: env("INFERENCE_BAZAAR_OPERATOR_URL")?,
         model: None,
         max_tokens: 0,
         expiry: 0,
@@ -460,7 +460,7 @@ fn env(key: &str) -> anyhow::Result<String> {
 /// = no persistence (a restart resets acked → risks a stale-voucher brick), so a
 /// production gateway should always set it.
 fn state_path() -> Option<std::path::PathBuf> {
-    std::env::var_os("SURPLUS_GATEWAY_STATE").map(std::path::PathBuf::from)
+    std::env::var_os("INFERENCE_BAZAAR_GATEWAY_STATE").map(std::path::PathBuf::from)
 }
 
 /// Restore per-channel acked cumulatives saved by `persist_acked`, keyed by lotId.
@@ -481,7 +481,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let listen =
-        std::env::var("SURPLUS_GATEWAY_LISTEN").unwrap_or_else(|_| "127.0.0.1:8088".into());
+        std::env::var("INFERENCE_BAZAAR_GATEWAY_LISTEN").unwrap_or_else(|_| "127.0.0.1:8088".into());
     // Seed each channel's acked from the journal so a restart resumes where it
     // left off (an un-seeded restart would re-sign cum=0 and brick the channel on
     // the operator's stale-voucher check).
@@ -494,10 +494,10 @@ async fn main() -> anyhow::Result<()> {
     }
     let channels: Vec<Arc<Channel>> = loaded.into_iter().map(Arc::new).collect();
     let gateway = Arc::new(Gateway {
-        chain_id: U256::from(env("SURPLUS_CHAIN_ID")?.parse::<u64>()?),
-        settlement: env("SURPLUS_SETTLEMENT_ADDR")?
+        chain_id: U256::from(env("INFERENCE_BAZAAR_CHAIN_ID")?.parse::<u64>()?),
+        settlement: env("INFERENCE_BAZAAR_SETTLEMENT_ADDR")?
             .parse()
-            .map_err(|_| anyhow::anyhow!("bad SURPLUS_SETTLEMENT_ADDR"))?,
+            .map_err(|_| anyhow::anyhow!("bad INFERENCE_BAZAAR_SETTLEMENT_ADDR"))?,
         client: reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()?,
@@ -505,7 +505,7 @@ async fn main() -> anyhow::Result<()> {
     });
     tracing::info!(
         %listen, lots = gateway.channels.len(),
-        "surplus-gateway up — point any OpenAI client at http://{listen}/v1"
+        "inference-bazaar-gateway up — point any OpenAI client at http://{listen}/v1"
     );
 
     let app = Router::new()

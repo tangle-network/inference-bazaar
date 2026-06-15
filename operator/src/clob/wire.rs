@@ -3,9 +3,9 @@
 //! peers unchanged.
 
 use serde::{Deserialize, Serialize};
-use surplus_settlement::core::alloy_primitives::{Address, B256};
-use surplus_settlement::core::Order;
-use surplus_settlement::SignedOrder;
+use inference_bazaar_settlement::core::alloy_primitives::{Address, B256};
+use inference_bazaar_settlement::core::Order;
+use inference_bazaar_settlement::SignedOrder;
 
 use crate::market::SignedOrderBody;
 
@@ -30,7 +30,7 @@ impl From<WireOrder> for SignedOrderBody {
     }
 }
 
-/// A signed order cancel. `signature` is the trader's EIP-712 `SurplusCancel`
+/// A signed order cancel. `signature` is the trader's EIP-712 `InferenceBazaarCancel`
 /// signature over `orderHash` (`cancel_digest`), the off-chain analogue of the
 /// contract's `cancelOrder` (msg.sender == trader).
 #[derive(Clone, Serialize, Deserialize)]

@@ -1,21 +1,23 @@
 # Spend a credit — the full loop with curl + cast
 
-This is the live deployment, end to end: buy discounted inference on the open
-market, then spend it on a real completion through the Tangle Router, with
-every step settling on Base Sepolia. Run it as written; every address below
-is live.
+This is the end-to-end loop: buy discounted inference on the open market, then
+spend it on a real completion through the Tangle Router, with every step
+settling on Base Sepolia. The contract addresses below are the live deployment;
+the EIP-712 signing domain and venue hostnames shown are the renamed protocol's
+names, which go live at the pending Inference Bazaar cutover (fresh contract
+deploy under the new domain + fleet redeploy).
 
 ```
-Settlement   0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83   (SurplusSettlement, Base Sepolia — tsUSD rail)
+Settlement   0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83   (InferenceBazaarSettlement, Base Sepolia — tsUSD rail)
 tsUSD        0x14Ff9231D03Fd9AD75e553004585f13Ff51db630   (test payment token, open mint)
-Venue 1      https://surplus.178.104.232.124.sslip.io      (operator 0x483f…, 12% policy)
-Venue 2      https://surplus2.178.104.232.124.sslip.io     (operator 0x2420…, 9% policy)
+Venue 1      https://inference-bazaar.178.104.232.124.sslip.io      (operator 0x483f…, 12% policy)
+Venue 2      https://inference-bazaar2.178.104.232.124.sslip.io     (operator 0x2420…, 9% policy)
 App          https://inference-bazaar.blueprint.tangle.tools
 
 REAL-MONEY RAIL (same contract, real Circle USDC — no mint; bring USDC):
-Settlement   0xf6A64921b62E09c9646675BEe6A11Fcd533d6783   (SurplusSettlement, Base Sepolia)
+Settlement   0xf6A64921b62E09c9646675BEe6A11Fcd533d6783   (InferenceBazaarSettlement, Base Sepolia)
 USDC         0x036CbD53842c5426634e7929541eC2318f3dCF7e   (canonical Circle testnet USDC)
-Venue        https://surplus-usdc.178.104.232.124.sslip.io
+Venue        https://inference-bazaar-usdc.178.104.232.124.sslip.io
 Live proof   fill 0x5faa5019… (20k tokens = 0.27092 USDC) → redemption
              0xbbf7c74e… (32 metered tokens debited at the locked strike)
 ```
@@ -39,7 +41,7 @@ cast send $SET "deposit(uint256)" 20000000               --rpc-url $RPC --privat
 ## 2. Get a firm quote (RFQ — the operator signs it)
 
 ```bash
-curl -s https://surplus.178.104.232.124.sslip.io/rfq \
+curl -s https://inference-bazaar.178.104.232.124.sslip.io/rfq \
   -H 'content-type: application/json' \
   -d '{"instrumentId":"claude-sonnet-4-6:output","side":"buy","qtyTokens":1000000}'
 ```
@@ -52,7 +54,7 @@ whole market in two curls.
 ## 3. Sign the matching order and settle
 
 Sign an `Order` (same fields, `side: 0`, your address as `trader`, fresh
-`salt`) against the domain `SurplusSettlement / 1 / 84532 / 0x3fa62248…`,
+`salt`) against the domain `InferenceBazaarSettlement / 1 / 84532 / 0x3fa62248…`,
 POST both orders to `/rfq/fill`, then `/settlement/flush`. The easiest path
 is the runnable script (uses viem):
 
@@ -78,7 +80,7 @@ RID=$(cast call $SET "openRedemptionOf(bytes32)(bytes32)" $LOT --rpc-url $RPC)
 
 Now ask the issuing operator to serve — this is a **real completion through
 the Tangle Router**, metered against your quota at the locked price. Serving
-is holder-gated: you sign an EIP-712 `ServeRequest` (domain `SurplusServe/1`,
+is holder-gated: you sign an EIP-712 `ServeRequest` (domain `InferenceBazaarServe/1`,
 bound to the settlement contract) over the redemption id, the exact messages
 bytes, the token cap, and an expiry — so nobody who merely *sees* your
 redemptionId on-chain can burn your quota or read your completions:
@@ -88,7 +90,7 @@ MSGS='[{"role":"user","content":"Say hello"}]'
 MAX=100
 EXP=$(($(date +%s) + 300))
 SIG=$(cast wallet sign --private-key $KEY --data "{
-  \"domain\": {\"name\":\"SurplusServe\",\"version\":\"1\",\"chainId\":84532,\"verifyingContract\":\"$SET\"},
+  \"domain\": {\"name\":\"InferenceBazaarServe\",\"version\":\"1\",\"chainId\":84532,\"verifyingContract\":\"$SET\"},
   \"types\": {\"ServeRequest\":[
     {\"name\":\"redemptionId\",\"type\":\"bytes32\"},
     {\"name\":\"messagesHash\",\"type\":\"bytes32\"},
@@ -102,7 +104,7 @@ SIG=$(cast wallet sign --private-key $KEY --data "{
     \"expiry\": $EXP }
 }")
 
-curl -s https://surplus.178.104.232.124.sslip.io/redeem \
+curl -s https://inference-bazaar.178.104.232.124.sslip.io/redeem \
   -H 'content-type: application/json' \
   -d "{\"redemptionId\":\"$RID\",\"messages\":$MSGS,\"maxTokens\":$MAX,\"auth\":{\"expiry\":$EXP,\"signature\":\"$SIG\"}}"
 ```
@@ -117,14 +119,14 @@ digest and let the operator settle:
 
 ```bash
 RSIG=$(cast wallet sign --private-key $KEY --data "{
-  \"domain\": {\"name\":\"SurplusSettlement\",\"version\":\"1\",\"chainId\":84532,\"verifyingContract\":\"$SET\"},
+  \"domain\": {\"name\":\"InferenceBazaarSettlement\",\"version\":\"1\",\"chainId\":84532,\"verifyingContract\":\"$SET\"},
   \"types\": {\"RedemptionReceipt\":[
     {\"name\":\"redemptionId\",\"type\":\"bytes32\"},
     {\"name\":\"servedTokens\",\"type\":\"uint64\"}]},
   \"primaryType\": \"RedemptionReceipt\",
   \"message\": {\"redemptionId\": \"$RID\", \"servedTokens\": $SERVED}
 }")
-curl -s https://surplus.178.104.232.124.sslip.io/redeem/receipt \
+curl -s https://inference-bazaar.178.104.232.124.sslip.io/redeem/receipt \
   -H 'content-type: application/json' \
   -d "{\"redemptionId\":\"$RID\",\"servedTokens\":$SERVED,\"signature\":\"$RSIG\"}"
 ```

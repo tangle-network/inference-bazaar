@@ -8,7 +8,7 @@
  *
  * Pure and venue-agnostic: each leg names the operator whose liquidity it lifts,
  * and the caller executes each leg as a portable signed order that clears on the
- * one global SurplusSettlement contract. Type-only imports keep this runnable in
+ * one global InferenceBazaarSettlement contract. Type-only imports keep this runnable in
  * isolation (no React/wallet graph), so it is directly unit-checkable.
  */
 import type { Address } from 'viem'

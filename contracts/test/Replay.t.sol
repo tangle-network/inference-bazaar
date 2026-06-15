@@ -2,7 +2,7 @@
 pragma solidity ^0.8.26;
 
 import { SettlementTestBase } from "./Base.t.sol";
-import { SurplusSettlement } from "../src/SurplusSettlement.sol";
+import { InferenceBazaarSettlement } from "../src/InferenceBazaarSettlement.sol";
 
 /// Double-spend / replay protection and batch atomicity. The contract has no
 /// per-fill nonce: the cumulative `filled` map IS the replay guard for fills,
@@ -16,15 +16,15 @@ contract ReplayTest is SettlementTestBase {
     }
 
     function mintLot(bytes32 saltSeed) internal returns (bytes32 lotId) {
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
         b.salt = keccak256(abi.encode("buy", saltSeed));
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
         s.salt = keccak256(abi.encode("sell", saltSeed));
         settlement.settleFills(fillInput(b, s, 50_000, 15_000_000));
         lotId = keccak256(abi.encode(settlement.hashOrder(b), settlement.hashOrder(s), uint64(0)));
     }
 
-    function attest(SurplusSettlement.BatchFill[] memory fills) internal view returns (bytes[] memory) {
+    function attest(InferenceBazaarSettlement.BatchFill[] memory fills) internal view returns (bytes[] memory) {
         bytes32 digest = keccak256(
             abi.encodePacked(
                 "\x19\x01",
@@ -42,25 +42,25 @@ contract ReplayTest is SettlementTestBase {
     // ── Fill replay: `filled` map is the guard ───────────────────────────────
 
     function test_exactFillReplayReverts() public {
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 50_000);
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 50_000);
-        SurplusSettlement.FillInput[] memory fills = fillInput(b, s, 50_000, 15_000_000);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.FillInput[] memory fills = fillInput(b, s, 50_000, 15_000_000);
         settlement.settleFills(fills);
 
         bytes32 buyHash = settlement.hashOrder(b);
         assertEq(settlement.filled(buyHash), 50_000);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.Overfill.selector, buyHash, 0, 50_000));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.Overfill.selector, buyHash, 0, 50_000));
         settlement.settleFills(fills);
     }
 
     function test_partialFillReplayCapped() public {
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 100_000);
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 100_000);
-        SurplusSettlement.FillInput[] memory fills = fillInput(b, s, 60_000, 15_000_000);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 100_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 100_000);
+        InferenceBazaarSettlement.FillInput[] memory fills = fillInput(b, s, 60_000, 15_000_000);
         settlement.settleFills(fills);
 
         bytes32 buyHash = settlement.hashOrder(b);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.Overfill.selector, buyHash, 40_000, 60_000));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.Overfill.selector, buyHash, 40_000, 60_000));
         settlement.settleFills(fills);
     }
 
@@ -75,18 +75,18 @@ contract ReplayTest is SettlementTestBase {
         settlement.deposit(1000); // fill #2 costs 750_000 => guaranteed failure
         vm.stopPrank();
 
-        SurplusSettlement.Order memory b1 = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory b1 = buyOrder(15_000_000, 50_000);
         b1.salt = keccak256("r3-b1");
-        SurplusSettlement.Order memory s1 = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s1 = sellOrder(14_000_000, 50_000);
         s1.salt = keccak256("r3-s1");
-        SurplusSettlement.Order memory b2 = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory b2 = buyOrder(15_000_000, 50_000);
         b2.trader = buyer2;
         b2.salt = keccak256("r3-b2");
-        SurplusSettlement.Order memory s2 = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s2 = sellOrder(14_000_000, 50_000);
         s2.salt = keccak256("r3-s2");
 
-        SurplusSettlement.FillInput[] memory fills = new SurplusSettlement.FillInput[](2);
-        fills[0] = SurplusSettlement.FillInput({
+        InferenceBazaarSettlement.FillInput[] memory fills = new InferenceBazaarSettlement.FillInput[](2);
+        fills[0] = InferenceBazaarSettlement.FillInput({
             buy: b1,
             buySig: sign(buyerKey, b1),
             sell: s1,
@@ -94,7 +94,7 @@ contract ReplayTest is SettlementTestBase {
             qtyTokens: 50_000,
             execPriceMicroPerM: 15_000_000
         });
-        fills[1] = SurplusSettlement.FillInput({
+        fills[1] = InferenceBazaarSettlement.FillInput({
             buy: b2,
             buySig: sign(buyer2Key, b2),
             sell: s2,
@@ -116,7 +116,7 @@ contract ReplayTest is SettlementTestBase {
         uint256 sellerColl = settlement.collateral(seller);
         uint256 sellerLiab = settlement.liability(seller);
 
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.InsufficientBalance.selector, 1000, 750_000));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.InsufficientBalance.selector, 1000, 750_000));
         settlement.settleFills(fills);
 
         // Fill #1 must not have applied even though it was valid on its own.
@@ -143,7 +143,7 @@ contract ReplayTest is SettlementTestBase {
         bytes memory sig = signReceipt(buyerKey, id, 50_000);
         settlement.settleRedemption(id, 50_000, WORK, sig);
 
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.RedemptionNotOpen.selector, id));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.RedemptionNotOpen.selector, id));
         settlement.settleRedemption(id, 50_000, WORK, sig);
     }
 
@@ -157,7 +157,7 @@ contract ReplayTest is SettlementTestBase {
 
         // Receipt digest binds redemptionId: A's receipt cannot settle B.
         bytes memory sigA = signReceipt(buyerKey, idA, 50_000);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.BadReceipt.selector, idB));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.BadReceipt.selector, idB));
         settlement.settleRedemption(idB, 50_000, WORK, sigA);
 
         // Same signature is valid where it belongs.
@@ -171,7 +171,7 @@ contract ReplayTest is SettlementTestBase {
         vm.warp(block.timestamp + REDEMPTION_WINDOW + 1);
         settlement.claimDefault(id);
 
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.RedemptionNotOpen.selector, id));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.RedemptionNotOpen.selector, id));
         settlement.claimDefault(id);
     }
 
@@ -180,28 +180,28 @@ contract ReplayTest is SettlementTestBase {
         vm.warp(block.timestamp + CREDIT_TTL + 1);
         settlement.reclaimExpired(lotId);
 
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.LotNotFound.selector, lotId));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.LotNotFound.selector, lotId));
         settlement.reclaimExpired(lotId);
     }
 
     // ── Cancellation: a cancelled order poisons any batch containing it ──────
 
     function test_cancelThenSettleReverts() public {
-        SurplusSettlement.Order memory b1 = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory b1 = buyOrder(15_000_000, 50_000);
         b1.salt = keccak256("r8-b1");
-        SurplusSettlement.Order memory s1 = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s1 = sellOrder(14_000_000, 50_000);
         s1.salt = keccak256("r8-s1");
-        SurplusSettlement.Order memory b2 = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory b2 = buyOrder(15_000_000, 50_000);
         b2.salt = keccak256("r8-b2");
-        SurplusSettlement.Order memory s2 = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s2 = sellOrder(14_000_000, 50_000);
         s2.salt = keccak256("r8-s2");
 
         vm.prank(seller);
         settlement.cancelOrder(s2);
         bytes32 sellHash2 = settlement.hashOrder(s2);
 
-        SurplusSettlement.FillInput[] memory lone = new SurplusSettlement.FillInput[](1);
-        lone[0] = SurplusSettlement.FillInput({
+        InferenceBazaarSettlement.FillInput[] memory lone = new InferenceBazaarSettlement.FillInput[](1);
+        lone[0] = InferenceBazaarSettlement.FillInput({
             buy: b2,
             buySig: sign(buyerKey, b2),
             sell: s2,
@@ -209,13 +209,13 @@ contract ReplayTest is SettlementTestBase {
             qtyTokens: 50_000,
             execPriceMicroPerM: 15_000_000
         });
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.OrderIsCancelled.selector, sellHash2));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.OrderIsCancelled.selector, sellHash2));
         settlement.settleFills(lone);
 
         // Batch [valid fill, cancelled fill] reverts entirely; the valid fill's
         // parties see no state change.
-        SurplusSettlement.FillInput[] memory fills = new SurplusSettlement.FillInput[](2);
-        fills[0] = SurplusSettlement.FillInput({
+        InferenceBazaarSettlement.FillInput[] memory fills = new InferenceBazaarSettlement.FillInput[](2);
+        fills[0] = InferenceBazaarSettlement.FillInput({
             buy: b1,
             buySig: sign(buyerKey, b1),
             sell: s1,
@@ -231,7 +231,7 @@ contract ReplayTest is SettlementTestBase {
         uint256 sellerColl = settlement.collateral(seller);
         uint256 sellerLiab = settlement.liability(seller);
 
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.OrderIsCancelled.selector, sellHash2));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.OrderIsCancelled.selector, sellHash2));
         settlement.settleFills(fills);
 
         assertEq(settlement.balances(buyer), buyerBal, "buyer balance unchanged");
@@ -246,10 +246,10 @@ contract ReplayTest is SettlementTestBase {
     // ── Attested path: fill caps, not the nonce, are the double-spend guard ──
 
     function test_attestedFillReplayAcrossBatches() public {
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 50_000);
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 50_000);
-        SurplusSettlement.BatchFill[] memory fills = new SurplusSettlement.BatchFill[](1);
-        fills[0] = SurplusSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 50_000, execPriceMicroPerM: 15_000_000 });
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.BatchFill[] memory fills = new InferenceBazaarSettlement.BatchFill[](1);
+        fills[0] = InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 50_000, execPriceMicroPerM: 15_000_000 });
 
         settlement.settleBatchAttested(BOOK, fills, attest(fills));
         assertEq(settlement.bookNonce(BOOK), 1);
@@ -258,7 +258,7 @@ contract ReplayTest is SettlementTestBase {
         // valid, but the orders are exhausted — the fill cap blocks the replay.
         bytes[] memory freshSigs = attest(fills);
         bytes32 buyHash = settlement.hashOrder(b);
-        vm.expectRevert(abi.encodeWithSelector(SurplusSettlement.Overfill.selector, buyHash, 0, 50_000));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.Overfill.selector, buyHash, 0, 50_000));
         settlement.settleBatchAttested(BOOK, fills, freshSigs);
     }
 }

@@ -7,16 +7,16 @@
 # blueprint on a devnet — see scripts/devnet-up.sh + deploy/base-sepolia.sh.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="${BIN:-$ROOT/.cargo-op-target/debug/surplus-operator}"
+BIN="${BIN:-$ROOT/.cargo-op-target/debug/inference-bazaar-operator}"
 
-[ -x "$BIN" ] || { echo "build first: cargo build -p surplus-operator --bin surplus-operator --features blueprint"; exit 1; }
+[ -x "$BIN" ] || { echo "build first: cargo build -p inference-bazaar-operator --bin inference-bazaar-operator --features blueprint"; exit 1; }
 
 OUT="$(mktemp -d)/registration.bin"
-echo "==> Running surplus-operator in registration mode"
+echo "==> Running inference-bazaar-operator in registration mode"
 # BlueprintEnvironment reads these; registration mode just writes the payload.
 REGISTRATION_MODE=true \
 REGISTRATION_OUTPUT_PATH="$OUT" \
-SURPLUS_OPERATOR_ADDR="127.0.0.1:9100" \
+INFERENCE_BAZAAR_OPERATOR_ADDR="127.0.0.1:9100" \
   "$BIN" || true
 
 if [ -f "$OUT" ]; then

@@ -131,7 +131,7 @@ export default function OperatorRegisterPage() {
   --keystore-path ./keystore</Cmd>
             <Cmd>BLUEPRINT_ID={CHAIN.blueprintId} SERVICE_ID={CHAIN.serviceId} \
 TANGLE_CONTRACT={CHAIN.tangle} \
-surplus-operator run</Cmd>
+inference-bazaar-operator run</Cmd>
             <p className="mt-3 font-body text-[15px] leading-relaxed text-[var(--s-text-muted)]">
               The live reference deployment serves{' '}
               <a className="text-[var(--s-accent)] hover:underline" href={VENUE_URL} target="_blank" rel="noreferrer">

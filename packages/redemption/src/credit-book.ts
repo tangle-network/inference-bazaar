@@ -1,4 +1,4 @@
-import { tokenLotCostBaseUnits } from '@surplus/router-bridge'
+import { tokenLotCostBaseUnits } from '@inference-bazaar/router-bridge'
 import type { Credit, DebitError, DebitResult, MeteredCall, RefundIntent } from './types'
 
 /** Cost of `qty` tokens at the locked strike, micro-tsUSD (number-safe range). */

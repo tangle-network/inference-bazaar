@@ -1,4 +1,4 @@
-import type { BookSnapshot, Fill, Instrument, QuoteSet, SimulatedMarket } from '@surplus/market-core'
+import type { BookSnapshot, Fill, Instrument, QuoteSet, SimulatedMarket } from '@inference-bazaar/market-core'
 import type { MarketVenue } from './types'
 
 /** Adapt the deterministic simulator to the venue port the session trades. */

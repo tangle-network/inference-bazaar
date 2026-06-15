@@ -1,4 +1,4 @@
-# Surplus — Launch Roadmap
+# Inference Bazaar — Launch Roadmap
 
 The single source of truth for what ships, in what order, and what "done" means.
 No aspirational checkmarks: a box is checked **only** when its completion
@@ -6,14 +6,14 @@ criterion is demonstrable (a passing test, a live trace, an on-chain tx). "Built
 but unverified" is not done.
 
 Status legend: `[x]` done + verified · `[~]` in progress · `[ ]` not started.
-Owner: `surplus` = this repo's main thread · `settlement-agent` = the parallel
+Owner: `inference-bazaar` = this repo's main thread · `settlement-agent` = the parallel
 Fable agent on the RFQ/settlement spine.
 
 ---
 
 ## Definition of Done for LIVE (the hard gates)
 
-All of these must be simultaneously true to call Surplus production. Each links
+All of these must be simultaneously true to call Inference Bazaar production. Each links
 to the phase that delivers it.
 
 - [x] **G1 — A credit is spendable.** A bought credit redeems into real metered
@@ -40,7 +40,7 @@ to the phase that delivers it.
 - [x] **G4 — The venue runs on-chain.** `workflow_tick` is triggered by a real
   on-chain job on a deployed blueprint, not an HTTP poke — autonomously.
   *(Phase 3 devnet + Base Sepolia proofs, now driven by a production keeper:
-  `surplus-tick-keeper@{3,4}.timer` on the Hetzner box submits the job
+  `inference-bazaar-tick-keeper@{3,4}.timer` on the Hetzner box submits the job
   on-chain every 5 min per service with flock'd nonce safety and a loud
   fail-closed low-balance refusal (proven end-to-end on both services:
   service 3 job `0x78f546be…` → result `0x2666698f…`, service 4 job
@@ -53,9 +53,9 @@ to the phase that delivers it.
   NoReference.)*
 - [x] **G5 — Money is real.** Settlement clears on at least one rail against a
   real chain / the live router, not a stub. *(Done on REAL money: the canonical
-  `SurplusSettlement` is deployed as a real-USDC rail `0xf6A64921…` on Base
+  `InferenceBazaarSettlement` is deployed as a real-USDC rail `0xf6A64921…` on Base
   Sepolia bound to canonical Circle USDC `0x036CbD53…`. The dedicated USDC venue (Hetzner, port 9600,
-  surplus-usdc.…sslip.io) quoted a signed firm order; e2e ran
+  inference-bazaar-usdc.…sslip.io) quoted a signed firm order; e2e ran
   RFQ→sign→fill→settleFills in real USDC — tx `0x5faa5019…`, 20,000 Sonnet
   output tokens at $13.546/M = 0.27092 USDC, collateral-backed lot
   `0xa9c85825…` minted — then spent it on a real router completion: 32 metered
@@ -81,16 +81,16 @@ to the phase that delivers it.
 
 ## Phase 0 — Engine (TypeScript) ✅
 
-- [x] `@surplus/market-core`: orderbook, A–S quoting, risk gate + kill switch,
+- [x] `@inference-bazaar/market-core`: orderbook, A–S quoting, risk gate + kill switch,
   ledger, seeded simulator. **Done:** 17 tests green.
-- [x] `@surplus/mm-loop`: market-making as one `runLoop` on agent-runtime loops;
+- [x] `@inference-bazaar/mm-loop`: market-making as one `runLoop` on agent-runtime loops;
   algorithmic + agentic modes through one kernel. **Done:** 7 tests green.
-- [x] `@surplus/mm-sidecar`: stateless HTTP quote server (the operator's brain).
+- [x] `@inference-bazaar/mm-sidecar`: stateless HTTP quote server (the operator's brain).
   **Done:** 5 tests green + live `curl` smoke.
-- [x] `@surplus/router-bridge`: RouterClient, SpendAuth (EIP-712 mirror),
+- [x] `@inference-bazaar/router-bridge`: RouterClient, SpendAuth (EIP-712 mirror),
   settlement (both rails), Tor transport, anti-sticky operator selection.
   **Done:** 17 tests green.
-- [x] `@surplus/mm-eval`: deterministic param sweep + scorecard; disqualifies
+- [x] `@inference-bazaar/mm-eval`: deterministic param sweep + scorecard; disqualifies
   kill-switch and non-trading configs. **Done:** 5 tests green; finding logged
   (pure spread-capture ≈ breakeven-minus; edge is discount-to-list).
 
@@ -110,10 +110,10 @@ to the phase that delivers it.
   `workflow_tick` (30), `list_instrument` (0), `status` (4) wired via
   `Router::route(JOB, handler.layer(TangleLayer))`; `BlueprintRunner::builder`.
   **Done:** compiles against the full alpha SDK (rustc 1.91, `core2` patched);
-  binary boots the real blueprint CLI (`surplus-operator run --data-dir
+  binary boots the real blueprint CLI (`inference-bazaar-operator run --data-dir
   --http-rpc-url`).
 
-## Phase 3 — On-chain devnet bring-up + trigger ✅ `surplus`
+## Phase 3 — On-chain devnet bring-up + trigger ✅ `inference-bazaar`
 
 - [x] **Local devnet up.** `cargo tangle harness up` runs Anvil + Tangle. **Done:**
   harness.toml committed; chain answers (snapshot chain id 31337), blueprint
@@ -121,9 +121,9 @@ to the phase that delivers it.
 - [x] **Deploy ShieldedCredits to the devnet.** **Done:** ShieldedCredits
   `0x56D13Eb2…`, ShieldedGateway `0xE8addD62…`; a commitment funded with
   1_490_000 micro-tsUSD (a 100k-token credit's backing at $14.90/M) and
-  `getAccount` returns it. Bonus: the firm rail too — MockUSD, SurplusSettlement
-  `0x071586BA…`, SurplusBSM, SP1MockVerifierStrict.
-- [x] **Deploy the Surplus blueprint.** **Done:** `blueprint deploy tangle
+  `getAccount` returns it. Bonus: the firm rail too — MockUSD, InferenceBazaarSettlement
+  `0x071586BA…`, InferenceBazaarBSM, SP1MockVerifierStrict.
+- [x] **Deploy the Inference Bazaar blueprint.** **Done:** `blueprint deploy tangle
   --definition deploy/blueprint-definition.toml` → blueprintId 1 (tx
   `0x932a580a…`), 31-entry positional job table with `workflow_tick` at 30.
 - [x] **Register + request + approve the service.** **Done:** operator
@@ -175,7 +175,7 @@ to the phase that delivers it.
   proof of the matching circuit. **Done when:** the settlement contract verifies
   a real proof and rejects a forged one. *(toolchain present: `~/.sp1`.)*
 
-## Phase 5 — Redemption: credits are spendable (G1) 🔜 `surplus`
+## Phase 5 — Redemption: credits are spendable (G1) 🔜 `inference-bazaar`
 
 > Spec: `docs/specs/redemption-debit.md`. This is the gap that makes a bought
 > credit usable. Non-colliding with the settlement spine (this is the
@@ -184,10 +184,10 @@ to the phase that delivers it.
 - [x] **Credit model + debit accounting.** A `Credit { model, tokenKind,
   qtyRemaining, strikePrice, backing }` and a pure debit that closes the unit
   (tokens bought = tokens metered = tokens spent). **Done:**
-  `@surplus/redemption` `CreditBook`; `closure.test.ts` proves quota + money
+  `@inference-bazaar/redemption` `CreditBook`; `closure.test.ts` proves quota + money
   conservation after every debit and refund-on-exhaustion/expiry.
 - [x] **Router metering adapter interface.** The typed seam the Tangle Router
-  implements to recognize a Surplus credit and debit its quota per inference
+  implements to recognize an Inference Bazaar credit and debit its quota per inference
   call at the strike price. **Done:** `RedemptionAdapter` +
   `DefaultRedemptionAdapter` (soonest-expiry-first); `SimulatedRouter` pays the
   operator from backing in `redemption.test.ts`.
@@ -202,7 +202,7 @@ to the phase that delivers it.
   Router-native debit (tcloud#41 wire contract) remains the v2 ergonomics
   path; the credit is spendable today.
 
-## Phase 6 — Redemption guarantees + abuse bounds (G3, G7) `settlement-agent` + `surplus`
+## Phase 6 — Redemption guarantees + abuse bounds (G3, G7) `settlement-agent` + `inference-bazaar`
 
 - [ ] **Slashing-backed redemption (G3).** Credit → bonded operator; refusal of a
   valid credit slashes (`MultiAssetDelegation`); unfulfillable → refund. **Done
@@ -218,7 +218,7 @@ to the phase that delivers it.
   deterministic, fail-open to balance billing; `guard.test.ts` proves over-cap
   refusal, window-slide recovery, per-owner isolation, no quota/backing leaks.
 
-## Phase 7 — Profit engine: MM tuning + arbitrage `surplus`
+## Phase 7 — Profit engine: MM tuning + arbitrage `inference-bazaar`
 
 - [x] **Param sweep harness.** `mm-eval`. **Done.**
 - [x] **Discount-capture / cross-operator arbitrage eval.** Seller lists below
@@ -235,12 +235,12 @@ to the phase that delivers it.
   as the operator default. **Done when (post-launch):** a promotion gate beats
   the pinned baseline on real session PnL.
 
-## Phase 8 — Productionization `surplus`
+## Phase 8 — Productionization `inference-bazaar`
 
 - [x] **Operator on the Hetzner box.** **Done:** three venues serve from
   blueprint-operators (178.104.232.124): services 3 + 4 (blueprint runtimes,
-  on-chain registered, TLS via Caddy at surplus./surplus2.…sslip.io) and the
-  USDC venue (surplus-usdc.…sslip.io), plus the mm-sidecar, the quoter timer,
+  on-chain registered, TLS via Caddy at inference-bazaar./inference-bazaar2.…sslip.io) and the
+  USDC venue (inference-bazaar-usdc.…sslip.io), plus the mm-sidecar, the quoter timer,
   and the tick keepers — all systemd-managed (deploy/hetzner/).
 - [ ] **Contracts audited (G6).** Review every value-path contract. **Done when:**
   a sign-off exists per contract.
@@ -253,8 +253,8 @@ to the phase that delivers it.
 - [x] **tcloud PR: market/limit price + credits in the agent harness.** Let a
   user pick market vs limit price and spend credits directly from pi / agents.
   **Done:** tangle-network/tcloud#41 — `ChatOptions.pricing` (market/limit +
-  credits), `ChatCompletion.surplus` redemption blocks, harness/pi/CLI wiring;
-  harness test spends a credit into `AgentRunResult.surplus`. Router-side
+  credits), `ChatCompletion.inferenceBazaar` redemption blocks, harness/pi/CLI wiring;
+  harness test spends a credit into `AgentRunResult.inferenceBazaar`. Router-side
   debit (the live `/v1/chat/completions` wiring) is the remaining Phase 5 box.
 - [ ] **Legal/custody review.** Selling inference credits for money may be a
   stored-value instrument. **Done when:** counsel has reviewed pre-mainnet.
@@ -275,7 +275,7 @@ to the phase that delivers it.
 | 7 Profit engine | ◕ sweep + discount-capture done; bandit deferred post-launch | — |
 | 8 Productionization | ◑ Hetzner fleet live, tcloud PR open (#41); audit/oracle/legal left | G6 |
 
-**Settlement contract:** `SurplusSettlement` is the one canonical contract, with
+**Settlement contract:** `InferenceBazaarSettlement` is the one canonical contract, with
 per-book matching domains (each instance gets its own attester quorum, nonce, and
 fee). Live tsUSD rail `0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83` (+ real-USDC
 `0xf6A64921…`). Redemption attestation is bound to a lot's issuing book (no

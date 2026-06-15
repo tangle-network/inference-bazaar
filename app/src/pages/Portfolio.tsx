@@ -44,7 +44,7 @@ const REDEEM_ABI = [
 /**
  * The headline consumption path (spend channel — see docs/specs/spend-rail.md).
  * ONE wallet signature delegates a fresh **session key** to draw down this lot.
- * The session key drives the surplus gateway, which signs per-request vouchers
+ * The session key drives the inference-bazaar gateway, which signs per-request vouchers
  * invisibly — so it's a vanilla OpenAI client (base_url + api_key), no wallet in
  * the request path, and the operator can NEVER bill more than the gateway signs.
  * The session key is shown once; run the gateway with it (locally for zero trust).
@@ -95,13 +95,13 @@ function ApiKeyMint({ lot, venueUrl }: { lot: CreditLot; venueUrl: string }) {
 
   if (minted) {
     const run = [
-      `SURPLUS_SESSION_KEY=${minted.sessionPriv} \\`,
-      `SURPLUS_OPERATOR_URL=${venueUrl} \\`,
-      `SURPLUS_LOT_ID=${lot.lotId} \\`,
-      `SURPLUS_CHAIN_ID=${CHAIN.id} SURPLUS_SETTLEMENT_ADDR=${SETTLEMENT.address} \\`,
-      `surplus-gateway`,
+      `INFERENCE_BAZAAR_SESSION_KEY=${minted.sessionPriv} \\`,
+      `INFERENCE_BAZAAR_OPERATOR_URL=${venueUrl} \\`,
+      `INFERENCE_BAZAAR_LOT_ID=${lot.lotId} \\`,
+      `INFERENCE_BAZAAR_CHAIN_ID=${CHAIN.id} INFERENCE_BAZAAR_SETTLEMENT_ADDR=${SETTLEMENT.address} \\`,
+      `inference-bazaar-gateway`,
     ].join('\n')
-    const snippet = `client = OpenAI(base_url="http://127.0.0.1:8088/v1", api_key="sk-surplus")`
+    const snippet = `client = OpenAI(base_url="http://127.0.0.1:8088/v1", api_key="sk-inference-bazaar")`
     const copyAll = `${run}\n\n# then:\n${snippet}`
     return (
       <div className="w-full rounded-[10px] border border-[var(--s-accent)]/30 bg-[var(--s-accent-soft)] px-4 py-3">

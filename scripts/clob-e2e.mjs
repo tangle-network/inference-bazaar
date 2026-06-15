@@ -48,7 +48,7 @@ await tx(await sw.writeContract({ address: USD, abi: usdAbi, functionName: 'appr
 await tx(await sw.writeContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'depositCollateral', args: [COLLATERAL] }))
 console.log(`funded: buyer deposit ${COST} micro, seller collateral ${COLLATERAL} micro`)
 
-const domain = { name: 'SurplusSettlement', version: '1', chainId: anvil.id, verifyingContract: SETTLEMENT }
+const domain = { name: 'InferenceBazaarSettlement', version: '1', chainId: anvil.id, verifyingContract: SETTLEMENT }
 const types = { Order: [
   { name: 'instrument', type: 'bytes32' }, { name: 'side', type: 'uint8' },
   { name: 'priceMicroPerM', type: 'uint64' }, { name: 'qtyTokens', type: 'uint64' },

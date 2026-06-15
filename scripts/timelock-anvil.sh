@@ -18,7 +18,7 @@ trap 'kill $APID 2>/dev/null || true' EXIT
 for _ in $(seq 1 50); do cast chain-id --rpc-url "$RPC" >/dev/null 2>&1 && break; sleep 0.1; done
 
 OUT=$(cd contracts && PRIVATE_KEY="$K" forge script script/Deploy.s.sol --rpc-url "$RPC" --broadcast 2>&1)
-S=$(grep -oP 'SurplusSettlement: \K0x\w+' <<<"$OUT")
+S=$(grep -oP 'InferenceBazaarSettlement: \K0x\w+' <<<"$OUT")
 echo "settlement=$S owner=$(cast call $S 'owner()(address)' --rpc-url $RPC)"
 B32_0=0x0000000000000000000000000000000000000000000000000000000000000000
 cast send "$S" "registerBook(bytes32,address[],uint16,uint16,address)" $B32_0 "[$DEPLOYER]" 1 0 $ZERO --private-key "$K" --rpc-url "$RPC" >/dev/null

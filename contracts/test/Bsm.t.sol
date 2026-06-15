@@ -2,8 +2,8 @@
 pragma solidity ^0.8.26;
 
 import { SettlementTestBase } from "./Base.t.sol";
-import { SurplusSettlement } from "../src/SurplusSettlement.sol";
-import { SurplusBSM } from "../src/SurplusBSM.sol";
+import { InferenceBazaarSettlement } from "../src/InferenceBazaarSettlement.sol";
+import { InferenceBazaarBSM } from "../src/InferenceBazaarBSM.sol";
 
 contract MockTangleCore {
     uint64 public nextSlashId = 1;
@@ -36,14 +36,14 @@ contract MockTangleCore {
 }
 
 contract BsmTest is SettlementTestBase {
-    SurplusBSM internal bsm;
+    InferenceBazaarBSM internal bsm;
     MockTangleCore internal tangle;
     address internal blueprintOwner = address(0x0117);
     uint64 internal constant SVC = 7;
 
     function setUp() public override {
         super.setUp();
-        bsm = new SurplusBSM();
+        bsm = new InferenceBazaarBSM();
         tangle = new MockTangleCore();
         bsm.onBlueprintCreated(7, blueprintOwner, address(tangle));
         vm.prank(blueprintOwner);
@@ -90,7 +90,7 @@ contract BsmTest is SettlementTestBase {
     function test_doubleChallengeReverts() public {
         uint256 defaultId = recordDefault();
         bsm.challengeDefault(7, defaultId);
-        vm.expectRevert(abi.encodeWithSelector(SurplusBSM.AlreadyChallenged.selector, defaultId));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarBSM.AlreadyChallenged.selector, defaultId));
         bsm.challengeDefault(7, defaultId);
     }
 
@@ -100,14 +100,14 @@ contract BsmTest is SettlementTestBase {
     }
 
     function test_settlementSetOnce_byBlueprintOwnerOnly() public {
-        SurplusBSM fresh = new SurplusBSM();
+        InferenceBazaarBSM fresh = new InferenceBazaarBSM();
         fresh.onBlueprintCreated(7, blueprintOwner, address(tangle));
         vm.expectRevert();
         fresh.setSettlement(settlement); // not the blueprint owner
         vm.prank(blueprintOwner);
         fresh.setSettlement(settlement);
         vm.prank(blueprintOwner);
-        vm.expectRevert(SurplusBSM.SettlementAlreadySet.selector);
+        vm.expectRevert(InferenceBazaarBSM.SettlementAlreadySet.selector);
         fresh.setSettlement(settlement);
     }
 
@@ -174,7 +174,7 @@ contract BsmTest is SettlementTestBase {
         uint256 defaultId = recordDefault();
         // Service 9 exists but `seller` (the defaulter) is not in it.
         initServiceWith(9, address(0xD00D));
-        vm.expectRevert(abi.encodeWithSelector(SurplusBSM.NotServiceOperator.selector, uint64(9), seller));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarBSM.NotServiceOperator.selector, uint64(9), seller));
         bsm.challengeDefault(9, defaultId);
     }
 
@@ -195,7 +195,7 @@ contract BsmTest is SettlementTestBase {
         vm.prank(address(tangle));
         bsm.onOperatorLeft(SVC, seller);
         vm.warp(block.timestamp + bsm.SLASH_GRACE_WINDOW() + 1);
-        vm.expectRevert(abi.encodeWithSelector(SurplusBSM.NotServiceOperator.selector, SVC, seller));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarBSM.NotServiceOperator.selector, SVC, seller));
         bsm.challengeDefault(SVC, defaultId);
     }
 
@@ -213,7 +213,7 @@ contract BsmTest is SettlementTestBase {
         uint256 defaultId = recordDefault();
         bsm.challengeDefault(SVC, defaultId);
         // A second challenge is blocked until governance clears the consumed one-shot.
-        vm.expectRevert(abi.encodeWithSelector(SurplusBSM.AlreadyChallenged.selector, defaultId));
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarBSM.AlreadyChallenged.selector, defaultId));
         bsm.challengeDefault(SVC, defaultId);
         vm.expectRevert(); // not the blueprint owner
         bsm.resetChallenge(defaultId);
@@ -226,18 +226,18 @@ contract BsmTest is SettlementTestBase {
     function test_slashLifecycleHooksEmit() public {
         bytes memory offender = abi.encode(seller);
         vm.expectEmit(true, false, false, true, address(bsm));
-        emit SurplusBSM.SlashWindowOpened(SVC, offender, 5);
+        emit InferenceBazaarBSM.SlashWindowOpened(SVC, offender, 5);
         vm.prank(address(tangle));
         bsm.onUnappliedSlash(SVC, offender, 5);
         vm.expectEmit(true, false, false, true, address(bsm));
-        emit SurplusBSM.SlashApplied(SVC, offender, 5);
+        emit InferenceBazaarBSM.SlashApplied(SVC, offender, 5);
         vm.prank(address(tangle));
         bsm.onSlash(SVC, offender, 5);
     }
 
     function test_onJobResult_emitsAttribution() public {
         vm.expectEmit(true, true, false, true, address(bsm));
-        emit SurplusBSM.JobResulted(SVC, 30, 1, seller);
+        emit InferenceBazaarBSM.JobResulted(SVC, 30, 1, seller);
         vm.prank(address(tangle));
         bsm.onJobResult(SVC, 30, 1, seller, "", "");
     }

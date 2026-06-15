@@ -1,7 +1,7 @@
-# Surplus payment & routing architecture — validated against code
+# Inference Bazaar payment & routing architecture — validated against code
 
 > Status: validated 2026-06-11 against tangle-router, tangle-inference-core,
-> llm-inference-blueprint, shielded-payment-gateway, and surplus, by reading the
+> llm-inference-blueprint, shielded-payment-gateway, and inference-bazaar, by reading the
 > actual source (every claim below carries a `file:line`). Read this before
 > touching the router or pitching the payment model — it corrects several
 > intuitions that turn out to be wrong in the code.
@@ -14,7 +14,7 @@ The market structure is settled. Two independent axes — don't conflate them:
   order book per instrument** via a rotating epoch-matcher over that instance's
   bonded operators, using `blueprint-networking`'s PKI-gated gossip mesh exactly as
   designed (per-instance scoped). *Across* instances, the single market is the
-  **global `SurplusSettlement` contract** + blueprint-wide **NBBO aggregation** +
+  **global `InferenceBazaarSettlement` contract** + blueprint-wide **NBBO aggregation** +
   **portable signed orders** executed by a smart-order-router. There is **no**
   global matching mesh and **no** privileged venue — cross-instance convergence is
   settlement + aggregation, not one giant matcher. (Why: the matcher's trust /
@@ -28,17 +28,17 @@ The market structure is settled. Two independent axes — don't conflate them:
   singular role is *matcher-for-the-epoch*, which rotates.
 
 This shipped via the build order (1) `BookClient` seam in `crates/orderbook` →
-(2) inference-as-library in `surplus/operator` (operators serve + back their own
+(2) inference-as-library in `inference-bazaar/operator` (operators serve + back their own
 lots) → (3) per-instance epoch matcher + gossip + Attested/Proven batch
 settlement → (4) cross-instance NBBO aggregation + SOR. The two-layer market is
 the live shape; there is no per-operator-island interim anymore.
 
 ## How the pieces connect
 
-The surplus credit market is the firm spine and it is wired end to end:
+The Inference Bazaar credit market is the firm spine and it is wired end to end:
 
-1. **The surplus credit market** (`surplus`) — prepaid, collateral-backed credit
-   *lots* on `SurplusSettlement` (live tsUSD rail `0x3fa62248…`, real-USDC rail
+1. **The Inference Bazaar credit market** (`inference-bazaar`) — prepaid, collateral-backed credit
+   *lots* on `InferenceBazaarSettlement` (live tsUSD rail `0x3fa62248…`, real-USDC rail
    `0xf6A64921…`). Settlement is atomic; batches settle either **attested**
    (issuing-book quorum re-runs the match and co-signs) or **proven** (an SP1
    proof that runs `match_epoch` in-circuit and commits the input-set
@@ -61,9 +61,9 @@ the muddle.
             SOURCING  (who serves, at what price)          ×   SETTLEMENT  (how the buyer pays)
             ────────────────────────────────────              ──────────────────────────────────
    list     centralized provider at list price                  A. platform balance (fiat / Stripe)
-   market   a surplus operator at a discount  ← the product     B. plain USDC per-call (x402 / direct)   ← MISSING
+   market   a discounted operator             ← the product     B. plain USDC per-call (x402 / direct)   ← MISSING
                                                                  C. shielded credit (SpendAuth)            ← only crypto rail today
-                                                                 D. prepaid surplus credit LOT (redeem)    ← market product
+                                                                 D. prepaid discounted credit LOT (redeem) ← market product
 ```
 
 **Sourcing is the market. Settlement is the wallet.** They are orthogonal: any
@@ -123,8 +123,8 @@ Funded by Stripe/on-ramp. This is how most buyers pay today. Not crypto.
   live path. This is the rail you want and it's the cleanest "normal crypto" UX
   (sign one EIP-3009 / direct-transfer per call, no pool to pre-fund).
 
-### Settlement D — prepaid surplus credit LOT. LIVE, redeemable for real inference.
-- `SurplusSettlement` (Base Sepolia tsUSD rail `0x3fa622488fD970ECdE23b8384a98de6fFa5A1763`;
+### Settlement D — prepaid discounted credit LOT. LIVE, redeemable for real inference.
+- `InferenceBazaarSettlement` (Base Sepolia tsUSD rail `0x3fa622488fD970ECdE23b8384a98de6fFa5A1763`;
   real-USDC rail `0xf6A64921…`) clears firm EIP-712 orders and mints
   collateral-backed credit *lots* (`app/src/lib/settlement.ts:16`). This is the
   firm spine — both the primary market (a sell mints a lot against the seller's
@@ -150,7 +150,7 @@ The distinction, in code:
   stakes/bonds, verifies payment itself (SpendAuth today, Direct possible), serves,
   and claims payment to its own address. Trust = stake + slashing, not a SaaS.
 
-**Surplus makes the operator's spare capacity a tradeable, discounted instrument.**
+**Inference Bazaar makes the operator's spare capacity a tradeable, discounted instrument.**
 That's the special part: the credit a buyer holds is a claim on a *bonded* operator,
 and "route me to the cheapest operator for this model" becomes a market outcome.
 Two things to hold precisely:
@@ -201,7 +201,7 @@ shielded pool first. That is the single biggest product-experience gap.
 - **Corrected intuitions:** "x402" here is Tangle-custom, not Coinbase/USDC. The
   settlement token is tsUSD, not USDC/tntUSDC. The credit hook is a chat-route
   short-circuit (like SpendAuth), **not** a step inside `checkCredits` (which
-  returns a USD balance, not a per-(model,kind) claim). The surplus operator ≠ the
+  returns a USD balance, not a per-(model,kind) claim). The market operator ≠ the
   inference operator. Anti-sticky selection ≠ cheapest routing.
 - **The work to close it is real and mostly cross-repo** — see
   [ROUTER-INTEGRATION-SCOPE.md](./ROUTER-INTEGRATION-SCOPE.md).

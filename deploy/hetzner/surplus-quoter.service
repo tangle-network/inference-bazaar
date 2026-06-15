@@ -1,5 +1,0 @@
-[Unit]
-Description=Surplus quoting tick (real router refs + MM tick)
-[Service]
-Type=oneshot
-ExecStart=/opt/surplus/seed.sh

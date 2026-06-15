@@ -1,4 +1,4 @@
-import type { Instrument, RiskLimits } from '@surplus/market-core'
+import type { Instrument, RiskLimits } from '@inference-bazaar/market-core'
 import { describe, expect, it } from 'vitest'
 import { aggregate, score } from '../src/metrics'
 import { runSweep, type SweepConfig } from '../src/sweep'
@@ -119,7 +119,7 @@ describe('aggregate', () => {
   })
 })
 
-function report(over: Partial<import('@surplus/mm-loop').SessionReport>) {
+function report(over: Partial<import('@inference-bazaar/mm-loop').SessionReport>) {
   return {
     owner: 'mm',
     instrumentId: 'x',

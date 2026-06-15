@@ -42,12 +42,12 @@ pub struct RiskLimits {
 }
 
 /// On-chain settlement binding. Present when the venue trades signed firm
-/// orders (RFQ + signed CLOB) that clear on the SurplusSettlement contract.
+/// orders (RFQ + signed CLOB) that clear on the InferenceBazaarSettlement contract.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SettlementConfig {
     /// EIP-712 domain chain id (Tangle testnet 3799, mainnet 5845, anvil 31337).
     pub chain_id: u64,
-    /// SurplusSettlement contract address, 0x-hex.
+    /// InferenceBazaarSettlement contract address, 0x-hex.
     pub contract: String,
     /// EVM key the operator signs RFQ quotes / MM quotes / batch co-signatures
     /// with, 0x-hex. This is the ATTESTER identity (its address is what
@@ -82,30 +82,30 @@ impl OperatorConfig {
     /// Read config from env with dev defaults so the lite operator boots with
     /// zero setup against a local sidecar.
     pub fn from_env() -> Self {
-        let sidecar_url = std::env::var("SURPLUS_SIDECAR_URL")
+        let sidecar_url = std::env::var("INFERENCE_BAZAAR_SIDECAR_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:9110".to_string());
         // The operator's quoted size per touch level, tokens. Risk bounds scale
         // with it so a larger commitment stays inside the gate.
-        let mm_size = std::env::var("SURPLUS_MM_SIZE")
+        let mm_size = std::env::var("INFERENCE_BAZAAR_MM_SIZE")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .filter(|v| *v >= 1_000.0)
             .unwrap_or(50_000.0);
-        let router_url = std::env::var("SURPLUS_ROUTER_URL")
+        let router_url = std::env::var("INFERENCE_BAZAAR_ROUTER_URL")
             .unwrap_or_else(|_| "https://router.tangle.tools".to_string());
         let settlement = match (
-            std::env::var("SURPLUS_CHAIN_ID")
+            std::env::var("INFERENCE_BAZAAR_CHAIN_ID")
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok()),
-            std::env::var("SURPLUS_SETTLEMENT_ADDR").ok(),
+            std::env::var("INFERENCE_BAZAAR_SETTLEMENT_ADDR").ok(),
         ) {
             (Some(chain_id), Some(contract)) => Some(SettlementConfig {
                 chain_id,
                 contract,
-                operator_key: std::env::var("SURPLUS_OPERATOR_KEY").ok(),
-                submitter_key: std::env::var("SURPLUS_SUBMITTER_KEY").ok(),
-                rpc_url: std::env::var("SURPLUS_RPC_URL").ok(),
-                rfq_ttl_secs: std::env::var("SURPLUS_RFQ_TTL_SECS")
+                operator_key: std::env::var("INFERENCE_BAZAAR_OPERATOR_KEY").ok(),
+                submitter_key: std::env::var("INFERENCE_BAZAAR_SUBMITTER_KEY").ok(),
+                rpc_url: std::env::var("INFERENCE_BAZAAR_RPC_URL").ok(),
+                rfq_ttl_secs: std::env::var("INFERENCE_BAZAAR_RFQ_TTL_SECS")
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(120),
@@ -114,7 +114,7 @@ impl OperatorConfig {
         };
         // Boot instrument: `<model>:<kind>` (more arrive via list_instrument
         // jobs on blueprint venues). A standalone venue picks its market here.
-        let boot_instrument = std::env::var("SURPLUS_INSTRUMENT")
+        let boot_instrument = std::env::var("INFERENCE_BAZAAR_INSTRUMENT")
             .unwrap_or_else(|_| "anthropic/claude-opus-4-8:output".to_string());
         let (model_id, token_kind) = match boot_instrument.rsplit_once(':') {
             Some((m, k)) if k == "input" || k == "output" => (m.to_string(), k.to_string()),

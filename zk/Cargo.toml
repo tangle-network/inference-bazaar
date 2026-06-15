@@ -4,7 +4,7 @@
 #
 # Build:
 #   cd zk/program && cargo prove build          # guest ELF (succinct toolchain)
-#   cd zk && cargo build --release -p surplus-batch-prover
+#   cd zk && cargo build --release -p inference-bazaar-batch-prover
 # Prove:
 #   SP1_PROVER=cpu ./target/release/prove --fills outbox.json --chain-id 3799 \
 #       --contract 0x... --mode groth16 --out proof.json
@@ -14,5 +14,5 @@ members = ["lib", "prover"]
 exclude = ["program"]
 
 [workspace.dependencies]
-surplus-settlement-core = { path = "../crates/settlement-core" }
+inference-bazaar-settlement-core = { path = "../crates/settlement-core" }
 serde = { version = "1", features = ["derive"] }

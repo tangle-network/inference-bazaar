@@ -44,11 +44,11 @@ slashing** layer we already built for *correctness disputes* (the Atoma/PoSP
 model), and put **TEE attestation** on the roadmap for *authenticity* (proving
 the operator served the model it claimed — the one thing payment vouchers cannot
 prove). This is layered so each layer removes a distinct trust, and the consumer
-never depends on Surplus's own servers for either funds or access.
+never depends on Inference Bazaar's own servers for either funds or access.
 
 ## The mechanism: a one-way payment channel per lot
 
-Two EIP-712 structs under the `SurplusSettlement` domain:
+Two EIP-712 structs under the `InferenceBazaarSettlement` domain:
 
 ```
 SpendPermit  { bytes32 lotId, address sessionKey, uint64 maxTokens, uint64 expiry }
@@ -95,8 +95,8 @@ Settlement can be permissionless because a higher amount is unforgeable.
   operator's risk, by design.
 - **Operator down:** the lot is still the consumer's; unspent value returns as
   cash via `reclaimExpired` / `claimDefault` — **permissionless on-chain calls,
-  no dependency on Surplus.**
-- **Surplus down:** see the gateway — a self-hostable local gateway means the
+  no dependency on Inference Bazaar.**
+- **Inference Bazaar down:** see the gateway — a self-hostable local gateway means the
   consumer needs only the chain + the operator, never us.
 
 ## The gateway — where the seamless UX lives
@@ -113,13 +113,13 @@ your OpenAI code ──► gateway /v1/chat/completions ──► operator /v1/c
 The developer experience is exactly a hosted API key:
 
 ```python
-client = OpenAI(base_url="http://localhost:8088/v1", api_key="sk-surplus-…")
+client = OpenAI(base_url="http://localhost:8088/v1", api_key="sk-inference-bazaar-…")
 client.chat.completions.create(model="anthropic/claude-opus-4-8", messages=[…])
 ```
 
 Two deployment modes, same UX:
-- **Local gateway** (`surplus-gateway`): the consumer runs it; it holds the
-  session key; **zero trust in Surplus** — they depend only on the chain + the
+- **Local gateway** (`inference-bazaar-gateway`): the consumer runs it; it holds the
+  session key; **zero trust in Inference Bazaar** — they depend only on the chain + the
   operator.
 - **Hosted gateway** (ours): we hold the session key for convenience. Blast
   radius is one lot, capped and revocable — never the consumer's wallet.

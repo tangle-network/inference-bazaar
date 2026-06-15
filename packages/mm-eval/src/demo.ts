@@ -1,8 +1,8 @@
 /**
  * Aggressively sweep the market-maker's params against the deterministic
- * simulator and print a scorecard. `pnpm --filter @surplus/mm-eval sweep`.
+ * simulator and print a scorecard. `pnpm --filter @inference-bazaar/mm-eval sweep`.
  */
-import type { Instrument, RiskLimits } from '@surplus/market-core'
+import type { Instrument, RiskLimits } from '@inference-bazaar/market-core'
 import { runSweep } from './sweep'
 import { scorecard } from './report'
 

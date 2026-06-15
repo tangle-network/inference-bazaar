@@ -3,7 +3,7 @@ pragma solidity ^0.8.26;
 
 import { Test } from "forge-std/Test.sol";
 import { TimelockController } from "@openzeppelin/contracts/governance/TimelockController.sol";
-import { SurplusSettlement } from "../src/SurplusSettlement.sol";
+import { InferenceBazaarSettlement } from "../src/InferenceBazaarSettlement.sol";
 import { MockUSD } from "../src/dev/Mocks.sol";
 
 /// Audit C2: no single EOA can rotate attesters or set the SP1 verifier
@@ -12,7 +12,7 @@ import { MockUSD } from "../src/dev/Mocks.sol";
 /// This pins the bootstrap the deploy script performs and the resulting
 /// security properties, so a regression fails CI rather than mainnet.
 contract TimelockTest is Test {
-    SurplusSettlement settlement;
+    InferenceBazaarSettlement settlement;
     TimelockController timelock;
     address admin = address(0x5AFE); // a Gnosis Safe in production
     address deployer = address(this);
@@ -21,7 +21,7 @@ contract TimelockTest is Test {
 
     function setUp() public {
         vm.warp(1_000_000); // forge default block.timestamp is 1 == OZ _DONE_TIMESTAMP
-        settlement = new SurplusSettlement(new MockUSD(), 30 days, 6 hours, 1 hours, 500, 200, deployer);
+        settlement = new InferenceBazaarSettlement(new MockUSD(), 30 days, 6 hours, 1 hours, 500, 200, deployer);
         // A book must exist before ownership moves (registerBook is owner-only).
         address[] memory atts = new address[](1);
         atts[0] = address(0xA11CE);

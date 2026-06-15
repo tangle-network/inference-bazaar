@@ -1,16 +1,16 @@
 # Host-side settlement: signing firm orders, joining book fills to their signed
 # orders, batching, quorum attestation, and (behind `chain`) submitting to the
-# SurplusSettlement contract over alloy. The digest/recovery core lives in
-# surplus-settlement-core so the SP1 guest shares it.
+# InferenceBazaarSettlement contract over alloy. The digest/recovery core lives in
+# inference-bazaar-settlement-core so the SP1 guest shares it.
 [package]
-name = "surplus-settlement"
+name = "inference-bazaar-settlement"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-surplus-settlement-core = { path = "../settlement-core" }
-surplus-orderbook = { path = "../orderbook" }
+inference-bazaar-settlement-core = { path = "../settlement-core" }
+inference-bazaar-orderbook = { path = "../orderbook" }
 alloy-primitives = { version = "1", features = ["k256", "serde"] }
 alloy-sol-types = "1"
 k256 = { version = "0.13", features = ["ecdsa"] }

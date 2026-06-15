@@ -1,0 +1,5 @@
+[Unit]
+Description=InferenceBazaar quoting tick (real router refs + MM tick)
+[Service]
+Type=oneshot
+ExecStart=/opt/inference-bazaar/seed.sh

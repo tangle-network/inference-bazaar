@@ -14,52 +14,52 @@
 #   scripts/prove-batch.sh execute              # validate the guest (no proof)
 #   scripts/prove-batch.sh groth16              # produce a real proof (heavy; docker)
 #   scripts/prove-batch.sh submit               # produce a proof AND settle it on-chain
-#                                               #   (needs SURPLUS_RPC_URL + SURPLUS_SUBMITTER_KEY)
+#                                               #   (needs INFERENCE_BAZAAR_RPC_URL + INFERENCE_BAZAAR_SUBMITTER_KEY)
 #   scripts/prove-batch.sh vkey                 # print the program verification key
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 MODE="${1:-execute}"
-CHAIN_ID="${SURPLUS_CHAIN_ID:-84532}"
-CONTRACT="${SURPLUS_SETTLEMENT_ADDR:-0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83}"
+CHAIN_ID="${INFERENCE_BAZAAR_CHAIN_ID:-84532}"
+CONTRACT="${INFERENCE_BAZAAR_SETTLEMENT_ADDR:-0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83}"
 # Canonical SP1 Groth16 verifier gateway, live on Base Sepolia.
 GATEWAY="${SP1_VERIFIER_GATEWAY:-0x397A5f7f3dBd538f23DE225B51f532c34448dA9B}"
 export PATH="$HOME/.sp1/bin:$PATH"
 
 echo "→ building prover (compiles the guest ELF via the succinct toolchain)…"
-( cd zk && cargo build --release -p surplus-batch-prover )
+( cd zk && cargo build --release -p inference-bazaar-batch-prover )
 PROVE=zk/target/release/prove
 
 case "$MODE" in
   vkey)
-    ( cd zk && cargo run -q --release -p surplus-batch-prover --bin vkey )
+    ( cd zk && cargo run -q --release -p inference-bazaar-batch-prover --bin vkey )
     exit 0
     ;;
   execute|groth16|submit)
-    BOOK_ID="${SURPLUS_CLOB_BOOK:-0x0000000000000000000000000000000000000000000000000000000000000000}"
-    INSTRUMENT="${SURPLUS_INSTRUMENT:-anthropic/claude-opus-4-8:output}"
+    BOOK_ID="${INFERENCE_BAZAAR_CLOB_BOOK:-0x0000000000000000000000000000000000000000000000000000000000000000}"
+    INSTRUMENT="${INFERENCE_BAZAAR_INSTRUMENT:-anthropic/claude-opus-4-8:output}"
     PROVE_MODE="$MODE"
     SUBMIT_ARGS=()
     if [[ "$MODE" == "submit" ]]; then
       PROVE_MODE="groth16"
-      : "${SURPLUS_RPC_URL:?submit needs SURPLUS_RPC_URL}"
-      : "${SURPLUS_SUBMITTER_KEY:?submit needs SURPLUS_SUBMITTER_KEY}"
-      SUBMIT_ARGS=(--submit --rpc "$SURPLUS_RPC_URL" --key "$SURPLUS_SUBMITTER_KEY")
+      : "${INFERENCE_BAZAAR_RPC_URL:?submit needs INFERENCE_BAZAAR_RPC_URL}"
+      : "${INFERENCE_BAZAAR_SUBMITTER_KEY:?submit needs INFERENCE_BAZAAR_SUBMITTER_KEY}"
+      SUBMIT_ARGS=(--submit --rpc "$INFERENCE_BAZAAR_RPC_URL" --key "$INFERENCE_BAZAAR_SUBMITTER_KEY")
     fi
     echo "→ generating a real mutually-signed crossing order set…"
-    cargo run -q -p surplus-settlement --example sign_fixture -- \
-      --chain-id "$CHAIN_ID" --contract "$CONTRACT" > /tmp/surplus-orders.json
+    cargo run -q -p inference-bazaar-settlement --example sign_fixture -- \
+      --chain-id "$CHAIN_ID" --contract "$CONTRACT" > /tmp/inference-bazaar-orders.json
     echo "→ $MODE (guest matches the set in-circuit)…"
-    SP1_PROVER=cpu "$PROVE" --orders /tmp/surplus-orders.json \
+    SP1_PROVER=cpu "$PROVE" --orders /tmp/inference-bazaar-orders.json \
       --instrument "$INSTRUMENT" --tick 1 --min-qty 1 \
       --chain-id "$CHAIN_ID" --contract "$CONTRACT" --book-id "$BOOK_ID" \
-      --mode "$PROVE_MODE" --out /tmp/surplus-proof.json "${SUBMIT_ARGS[@]}"
+      --mode "$PROVE_MODE" --out /tmp/inference-bazaar-proof.json "${SUBMIT_ARGS[@]}"
     [[ "$MODE" == "submit" ]] && { echo "submitted ✓"; exit 0; }
     ;;
   *) echo "unknown mode: $MODE (execute|groth16|submit|vkey)"; exit 1 ;;
 esac
 
-VKEY="$( cd zk && cargo run -q --release -p surplus-batch-prover --bin vkey )"
+VKEY="$( cd zk && cargo run -q --release -p inference-bazaar-batch-prover --bin vkey )"
 cat <<EOF
 
 ────────────────────────────────────────────────────────────────────────────
@@ -67,9 +67,9 @@ Validated locally. Remaining FUNDED on-chain steps (owner key for $CONTRACT):
 
   # 1. Wire the REAL SP1 gateway + this program's vkey (enables the proven path):
   cast send $CONTRACT 'setSp1Verifier(address,bytes32)' \\
-      $GATEWAY $VKEY --rpc-url \$SURPLUS_RPC_URL --private-key \$OWNER_KEY
+      $GATEWAY $VKEY --rpc-url \$INFERENCE_BAZAAR_RPC_URL --private-key \$OWNER_KEY
 
-  # 2. Produce a real proof (this script, mode groth16) → /tmp/surplus-proof.json,
+  # 2. Produce a real proof (this script, mode groth16) → /tmp/inference-bazaar-proof.json,
   #    then submit its proofBytes with the matching BatchFill[] via
   #    SettlementClient::settle_batch_proven (crates/settlement/src/chain.rs).
 

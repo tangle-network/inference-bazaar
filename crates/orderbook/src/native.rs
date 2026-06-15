@@ -6,7 +6,7 @@ use crate::types::{BookLevel, BookSnapshot, Fill, MatchError, Order, PlaceOutcom
 
 /// Native price-time-priority orderbook for a single instrument.
 ///
-/// A faithful port of the tested `@surplus/market-core` `OrderBook`: bids kept
+/// A faithful port of the tested `@inference-bazaar/market-core` `OrderBook`: bids kept
 /// descending, asks ascending, FIFO within a price level; match on insert at the
 /// maker's price; self-match prevention cancels the resting maker rather than
 /// printing a wash trade. Depth in this market is operator quotes, not HFT flow,

@@ -26,7 +26,7 @@ export interface RedemptionResult {
 }
 
 /**
- * Redeem surplus inference privately: pick a fulfilling operator weighted away
+ * Redeem inference-bazaar inference privately: pick a fulfilling operator weighted away
  * from this seller's recent operators, then reach it through Tor. Anonymity is
  * Tor's; operator spread is `selectOperators`'; the two compose so no operator
  * sees the seller's IP and no operator sees the seller's flow concentrate.

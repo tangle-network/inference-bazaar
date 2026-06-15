@@ -1,0 +1,12 @@
+[Unit]
+Description=InferenceBazaar MM sidecar (quoting brain)
+After=network.target
+
+[Service]
+Environment=INFERENCE_BAZAAR_MM_SIDECAR_PORT=9310
+ExecStart=/usr/bin/node /opt/inference-bazaar/sidecar.mjs
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

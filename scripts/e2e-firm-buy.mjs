@@ -5,7 +5,7 @@ import { ephemeralKey } from './_keys.mjs'
 import { baseSepolia } from 'viem/chains'
 
 const RPC = process.env.RPC ?? 'https://sepolia.base.org'
-const VENUE = process.env.VENUE ?? 'https://surplus.178.104.232.124.sslip.io'
+const VENUE = process.env.VENUE ?? 'https://inference-bazaar.178.104.232.124.sslip.io'
 const SETTLEMENT = process.env.SETTLEMENT ?? '0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83'
 const USD = process.env.USD ?? '0x14Ff9231D03Fd9AD75e553004585f13Ff51db630'
 // 'mint' (test tsUSD, open mint) or 'transfer' (real USDC: the funder pays).
@@ -80,7 +80,7 @@ const taker = {
   salt: keccak256(toHex('e2e-proof-' + Date.now())),
 }
 const signature = await wallet.signTypedData({
-  domain: { name: 'SurplusSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT },
+  domain: { name: 'InferenceBazaarSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT },
   types: { Order: [
     { name: 'instrument', type: 'bytes32' }, { name: 'side', type: 'uint8' },
     { name: 'priceMicroPerM', type: 'uint64' }, { name: 'qtyTokens', type: 'uint64' },

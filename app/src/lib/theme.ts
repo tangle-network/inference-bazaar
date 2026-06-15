@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 
 type Theme = 'light' | 'dark'
-const KEY = 'surplus_theme'
+const KEY = 'inference_bazaar_theme'
 const listeners = new Set<() => void>()
 
 function current(): Theme {

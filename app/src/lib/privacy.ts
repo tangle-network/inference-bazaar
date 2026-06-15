@@ -16,12 +16,12 @@
  *    it. `pickAntiSticky` weights acquisition away from recently-used operators,
  *    persisting the recent list per identity in localStorage.
  *
- * Ported from `@surplus/router-bridge` (selectOperators + OperatorMemory); the
+ * Ported from `@inference-bazaar/router-bridge` (selectOperators + OperatorMemory); the
  * app is a separate workspace and cannot import it directly. Keep in sync.
  */
 
-const PRIVACY_KEY = 'surplus.privacy'
-const RECENT_KEY = 'surplus.recentOperators'
+const PRIVACY_KEY = 'inference-bazaar.privacy'
+const RECENT_KEY = 'inference-bazaar.recentOperators'
 const MAX_RECENT = 12
 const STICKINESS_PENALTY = 0.8
 

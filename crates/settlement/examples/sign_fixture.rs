@@ -1,19 +1,19 @@
 //! Generate a signed ORDER-SET fixture for the SP1 batch prover (match-in-circuit).
 //!
-//!   cargo run -p surplus-settlement --example sign_fixture -- \
+//!   cargo run -p inference-bazaar-settlement --example sign_fixture -- \
 //!       --chain-id 84532 --contract 0x… > orders.json
-//!   cd zk && cargo build --release -p surplus-batch-prover
+//!   cd zk && cargo build --release -p inference-bazaar-batch-prover
 //!   ./target/release/prove --orders ../orders.json \
 //!       --instrument anthropic/claude-opus-4-8:output --tick 1 --min-qty 1 \
 //!       --chain-id 84532 --contract 0x… --book-id 0x00…00 --mode execute
 //!
-//! A real mutually-signed crossing pair under the SurplusSettlement EIP-712
+//! A real mutually-signed crossing pair under the InferenceBazaarSettlement EIP-712
 //! domain — the guest re-verifies every signature AND runs match_epoch, so the
 //! fixture must be a real, crossable order set.
 
-use surplus_settlement::core::alloy_primitives::{Address, B256};
-use surplus_settlement::core::{instrument_hash, Order};
-use surplus_settlement::{domain, Signer, SIDE_BUY, SIDE_SELL};
+use inference_bazaar_settlement::core::alloy_primitives::{Address, B256};
+use inference_bazaar_settlement::core::{instrument_hash, Order};
+use inference_bazaar_settlement::{domain, Signer, SIDE_BUY, SIDE_SELL};
 
 // Well-known Anvil keys — fixture material only.
 const SELLER_KEY: &str = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";

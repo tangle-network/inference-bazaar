@@ -1,6 +1,6 @@
 /**
- * SurplusSettlement firm orders — the buyer-side mirror of
- * `crates/settlement-core` and `contracts/src/SurplusSettlement.sol`.
+ * InferenceBazaarSettlement firm orders — the buyer-side mirror of
+ * `crates/settlement-core` and `contracts/src/InferenceBazaarSettlement.sol`.
  *
  * A CLOB order and an RFQ quote are the same EIP-712 `Order`. This module
  * builds the typed data a wallet signs (viem `signTypedData` / EIP-1193
@@ -11,8 +11,8 @@
  * Drift here is a fund-loss bug: change only in lockstep with the contract.
  */
 
-export const SURPLUS_SETTLEMENT_DOMAIN = {
-  name: 'SurplusSettlement',
+export const INFERENCE_BAZAAR_SETTLEMENT_DOMAIN = {
+  name: 'InferenceBazaarSettlement',
   version: '1',
 } as const
 
@@ -49,9 +49,9 @@ export const BATCH_TYPES = {
 } as const
 
 /** Off-chain holder gate the operator verifies (`operator/src/redeem.rs`). Its
- * own domain (`SurplusServe`/1), NOT a settlement-contract struct. */
-export const SURPLUS_SERVE_DOMAIN = {
-  name: 'SurplusServe',
+ * own domain (`InferenceBazaarServe`/1), NOT a settlement-contract struct. */
+export const INFERENCE_BAZAAR_SERVE_DOMAIN = {
+  name: 'InferenceBazaarServe',
   version: '1',
 } as const
 
@@ -95,7 +95,7 @@ export const ZERO_LOT = `0x${'00'.repeat(32)}`
 export function buildOrderMessage(order: FirmOrder, chainId: number, contractAddress: string) {
   return {
     domain: {
-      ...SURPLUS_SETTLEMENT_DOMAIN,
+      ...INFERENCE_BAZAAR_SETTLEMENT_DOMAIN,
       chainId,
       verifyingContract: contractAddress as `0x${string}`,
     },
@@ -123,7 +123,7 @@ export function buildReceiptMessage(
 ) {
   return {
     domain: {
-      ...SURPLUS_SETTLEMENT_DOMAIN,
+      ...INFERENCE_BAZAAR_SETTLEMENT_DOMAIN,
       chainId,
       verifyingContract: contractAddress as `0x${string}`,
     },
@@ -146,7 +146,7 @@ export function buildBatchMessage(
 ) {
   return {
     domain: {
-      ...SURPLUS_SETTLEMENT_DOMAIN,
+      ...INFERENCE_BAZAAR_SETTLEMENT_DOMAIN,
       chainId,
       verifyingContract: contractAddress as `0x${string}`,
     },
@@ -160,7 +160,7 @@ export function buildBatchMessage(
   }
 }
 
-/** Build the holder's ServeRequest auth (off-chain `SurplusServe` domain). */
+/** Build the holder's ServeRequest auth (off-chain `InferenceBazaarServe` domain). */
 export function buildServeMessage(
   redemptionId: string,
   messagesHash: string,
@@ -171,7 +171,7 @@ export function buildServeMessage(
 ) {
   return {
     domain: {
-      ...SURPLUS_SERVE_DOMAIN,
+      ...INFERENCE_BAZAAR_SERVE_DOMAIN,
       chainId,
       verifyingContract: contractAddress as `0x${string}`,
     },

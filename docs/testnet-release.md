@@ -1,6 +1,6 @@
-# Surplus testnet release
+# Inference Bazaar testnet release
 
-A repeatable checklist to bring up a Surplus testnet with confidence in both the
+A repeatable checklist to bring up an Inference Bazaar testnet with confidence in both the
 **trader** and **developer** experience. Launch on **1-of-1 books** first (one
 issuing operator per book); multi-operator (M-of-N) books are a scale-up step
 (see "Scale-up" below).
@@ -22,7 +22,7 @@ Run these before/after a deploy — they are the end-to-end proof:
 
 ## 1. Contracts (governance-owned)
 
-`deploy/deploy-surplus.sh` (wraps `Deploy.s.sol`, captures addresses into `deploy/.env.deployed` + the manifest). Env:
+`deploy/deploy-inference-bazaar.sh` (wraps `Deploy.s.sol`, captures addresses into `deploy/.env.deployed` + the manifest). Env:
 
 - `PAYMENT_TOKEN` = the real testnet USDC (a standard ERC20 — **not** fee-on-
   transfer/rebasing; the solvency model assumes `transferFrom` moves exactly
@@ -39,32 +39,32 @@ Run these before/after a deploy — they are the end-to-end proof:
   the proven path stays disabled and settlement uses the attested-quorum path.
 
 Record the deployed addresses into `blueprint.toml`
-(`[blueprint.manager].address`, `surplus_settlement_address`) and the app env.
+(`[blueprint.manager].address`, `inference_bazaar_settlement_address`) and the app env.
 
 ## 2. Blueprint + operator fleet
 
-- Deploy the blueprint manager (SurplusBSM) + register the blueprint via
+- Deploy the blueprint manager (InferenceBazaarBSM) + register the blueprint via
   `cargo tangle blueprint deploy`; the runtime calls `onBlueprintCreated`, then the
   owner calls `bsm.setSettlement(settlement)`.
-- Each operator runs `surplus-operator` (feature `blueprint`) with:
-  - a REAL inference backend — `SURPLUS_VLLM_MODEL` (managed vLLM) **or**
-    `SURPLUS_INFERENCE_URL` (+ `SURPLUS_INFERENCE_API_KEY`). Router-proxy mode is
+- Each operator runs `inference-bazaar-operator` (feature `blueprint`) with:
+  - a REAL inference backend — `INFERENCE_BAZAAR_VLLM_MODEL` (managed vLLM) **or**
+    `INFERENCE_BAZAAR_INFERENCE_URL` (+ `INFERENCE_BAZAAR_INFERENCE_API_KEY`). Router-proxy mode is
     refused for a bonded issuer (a lot must be backed by inference it runs).
-  - settlement: `SURPLUS_CHAIN_ID`, `SURPLUS_SETTLEMENT_ADDR`, `SURPLUS_RPC_URL`,
-    `SURPLUS_OPERATOR_KEY` (attester/issuer), `SURPLUS_SUBMITTER_KEY` (separate
+  - settlement: `INFERENCE_BAZAAR_CHAIN_ID`, `INFERENCE_BAZAAR_SETTLEMENT_ADDR`, `INFERENCE_BAZAAR_RPC_URL`,
+    `INFERENCE_BAZAAR_OPERATOR_KEY` (attester/issuer), `INFERENCE_BAZAAR_SUBMITTER_KEY` (separate
     tx/nonce key).
-  - CLOB (if sharing a book): `SURPLUS_CLOB_OPERATORS`, `SURPLUS_CLOB_BOOK`,
-    `SURPLUS_CLOB_THRESHOLD`. An independent-DC quorum member that never issues:
-    `SURPLUS_ATTESTER_ONLY=1`.
-  - privacy (optional): run `surplus-arti.service`; the operator publishes its
-    `.onion` via `SURPLUS_ONION_FILE` and tunnels outbound inference with
+  - CLOB (if sharing a book): `INFERENCE_BAZAAR_CLOB_OPERATORS`, `INFERENCE_BAZAAR_CLOB_BOOK`,
+    `INFERENCE_BAZAAR_CLOB_THRESHOLD`. An independent-DC quorum member that never issues:
+    `INFERENCE_BAZAAR_ATTESTER_ONLY=1`.
+  - privacy (optional): run `inference-bazaar-arti.service`; the operator publishes its
+    `.onion` via `INFERENCE_BAZAAR_ONION_FILE` and tunnels outbound inference with
     `PRIVACY_MODE=tor`.
 - Keepers: the operator auto-flushes settlement, spend, and redemption
   attestation on timers; the `tick-keeper` drives `workflow_tick`.
 
 ## 3. App
 
-- Set `VITE_SURPLUS_VENUE_URL`, `VITE_TANGLE_ROUTER_URL`, and your own
+- Set `VITE_INFERENCE_BAZAAR_VENUE_URL`, `VITE_TANGLE_ROUTER_URL`, and your own
   `VITE_WALLETCONNECT_PROJECT_ID` (don't ship the shared fallback). See
   `app/.env.example`.
 

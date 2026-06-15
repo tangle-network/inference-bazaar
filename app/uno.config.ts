@@ -3,7 +3,7 @@ import { defineConfig, presetIcons, transformerDirectives } from 'unocss'
 import { presetWind4 } from 'unocss/preset-wind4'
 
 /*
- * VIOLET TERMINAL — Surplus
+ * VIOLET TERMINAL — InferenceBazaar
  * A purple-native take on the arena's terminal system: a dark aubergine base
  * (clearly purple, not near-black), light-violet primary actions, periwinkle
  * brand (the Tangle mark's violet→blue), emerald gains / crimson losses / amber

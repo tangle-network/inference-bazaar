@@ -1,7 +1,7 @@
-# Surplus marketplace UI — design rationale
+# Inference Bazaar marketplace UI — design rationale
 
 The product is a market for **prepaid inference-token credits**. Sellers list
-surplus inference (idle operators, over-bought prepaid packs from OpenRouter /
+spare inference (idle operators, over-bought prepaid packs from OpenRouter /
 Venice / Anthropic / OpenAI / …); buyers buy it below list; operators make
 markets. The tradeable instrument is `(model, tokenKind)` — output/input/cache
 tokens of a specific model — priced as a discount to the model's router list
@@ -18,7 +18,7 @@ The whole app reads `--s-*` tokens, so light/dark is one attribute flip.
 Shared components, not look-alikes: `Identicon` (blo) from
 `@tangle-network/blueprint-ui/components` for sellers/operators/wallet; the
 wallet is REAL — wagmi + ConnectKit via blueprint-ui's `Web3Shell` +
-`defaultConnectKitOptions`, chains Base Sepolia (where the Surplus blueprint
+`defaultConnectKitOptions`, chains Base Sepolia (where the Inference Bazaar blueprint
 and settlement contracts live) + Tangle testnet/mainnet, with balance, chain
 state, switch, copy, explorer, disconnect. Charts are chart.js
 (react-chartjs-2) with gradient area fills — the instrument chart plots the
@@ -179,6 +179,6 @@ the market's pulse, and proof it's alive.
 ## Data seam
 
 Everything renders from `src/lib/mock.ts`, a deterministic seeded dataset shaped
-exactly like a real `@surplus/router-bridge` response. Each `getX()` is the swap
+exactly like a real `@inference-bazaar/router-bridge` response. Each `getX()` is the swap
 point: replace the body with a fetch to the operator venue API (`/book`, `/rfq`,
 `/settlement/outbox`, …) and the UI is unchanged.

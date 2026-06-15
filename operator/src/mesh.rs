@@ -3,7 +3,7 @@
 //! Replaces the HTTP peer list with the PKI-gated gossip mesh: the whitelist is
 //! the bonded attester set itself (`AllowedKeys::EvmAddresses`), every handshake
 //! is signed with the peer's operator key and verified by address recovery, and
-//! the topic is scoped per deployment (`/surplus-clob/{chain}-{contract}`) — so
+//! the topic is scoped per deployment (`/inference-bazaar-clob/{chain}-{contract}`) — so
 //! only the configured operator set can join, speak, or even complete a
 //! connection. Consensus safety still rides on signatures end to end (trader
 //! sigs on orders, attester sigs over the batch digest); the mesh upgrades who
@@ -27,9 +27,9 @@ use blueprint_networking::service_handle::NetworkServiceHandle;
 use blueprint_networking::types::MessageRouting;
 use blueprint_networking::{AllowedKeys, NetworkConfig, NetworkService};
 use serde::{Deserialize, Serialize};
-use surplus_matcher::Attestation;
-use surplus_settlement::core::alloy_primitives::{Address, B256};
-use surplus_settlement::core::batch_digest;
+use inference_bazaar_matcher::Attestation;
+use inference_bazaar_settlement::core::alloy_primitives::{Address, B256};
+use inference_bazaar_settlement::core::batch_digest;
 use tokio::sync::mpsc;
 
 use crate::clob::{
@@ -181,7 +181,7 @@ pub fn spawn_mesh_loop(clob: SharedClob, net: Arc<MeshNet>, mut reader: MeshHand
                 }
                 MeshWire::Attestation(a) => {
                     let Ok(signature) =
-                        surplus_settlement::core::hex::decode(a.signature.trim_start_matches("0x"))
+                        inference_bazaar_settlement::core::hex::decode(a.signature.trim_start_matches("0x"))
                     else {
                         continue;
                     };
@@ -200,8 +200,8 @@ pub fn spawn_mesh_loop(clob: SharedClob, net: Arc<MeshNet>, mut reader: MeshHand
 }
 
 /// Boot the epoch service on the PKI mesh from env:
-///   - `SURPLUS_MESH_ADDR`      listen multiaddr (e.g. `/ip4/0.0.0.0/tcp/9530`)
-///   - `SURPLUS_MESH_BOOTNODES` comma-separated peer multiaddrs (optional; mDNS
+///   - `INFERENCE_BAZAAR_MESH_ADDR`      listen multiaddr (e.g. `/ip4/0.0.0.0/tcp/9530`)
+///   - `INFERENCE_BAZAAR_MESH_BOOTNODES` comma-separated peer multiaddrs (optional; mDNS
 ///     covers single-host fleets)
 /// The handshake whitelist is the configured bonded set itself — no extra key
 /// distribution: peers prove their operator address by signature recovery.
@@ -213,15 +213,15 @@ pub fn start(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<(SharedClob, 
     let operator_key = ctx
         .operator_key
         .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("mesh CLOB requires SURPLUS_OPERATOR_KEY"))?;
+        .ok_or_else(|| anyhow::anyhow!("mesh CLOB requires INFERENCE_BAZAAR_OPERATOR_KEY"))?;
     let chain_id = ctx.domain.chain_id.unwrap_or_default();
     let contract = ctx.contract;
 
-    let listen: libp2p::Multiaddr = std::env::var("SURPLUS_MESH_ADDR")
+    let listen: libp2p::Multiaddr = std::env::var("INFERENCE_BAZAAR_MESH_ADDR")
         .unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/9530".into())
         .parse()
-        .map_err(|e| anyhow::anyhow!("SURPLUS_MESH_ADDR: {e}"))?;
-    let bootstrap_peers: Vec<libp2p::Multiaddr> = std::env::var("SURPLUS_MESH_BOOTNODES")
+        .map_err(|e| anyhow::anyhow!("INFERENCE_BAZAAR_MESH_ADDR: {e}"))?;
+    let bootstrap_peers: Vec<libp2p::Multiaddr> = std::env::var("INFERENCE_BAZAAR_MESH_BOOTNODES")
         .unwrap_or_default()
         .split(',')
         .map(str::trim)
@@ -229,7 +229,7 @@ pub fn start(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<(SharedClob, 
         .map(|s| s.parse().map_err(|e| anyhow::anyhow!("bootnode {s}: {e}")))
         .collect::<anyhow::Result<_>>()?;
 
-    let key_bytes = surplus_settlement::core::hex::decode(operator_key.trim_start_matches("0x"))?;
+    let key_bytes = inference_bazaar_settlement::core::hex::decode(operator_key.trim_start_matches("0x"))?;
     let instance_key_pair = blueprint_crypto::k256::K256SigningKey::from_bytes(&key_bytes)
         .map_err(|e| anyhow::anyhow!("operator key as K256 secret: {e}"))?;
 
@@ -239,8 +239,8 @@ pub fn start(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<(SharedClob, 
     // each boot would change the PeerId on every restart, breaking the
     // bootnode multiaddrs (`/ip4/…/tcp/…/p2p/<PeerId>`) cross-DC peers dial. This
     // way the PeerId is stable across restarts AND computable offline.
-    let mut libp2p_seed = surplus_settlement::core::alloy_primitives::keccak256(
-        [key_bytes.as_slice(), b"surplus-mesh-libp2p-v1"].concat(),
+    let mut libp2p_seed = inference_bazaar_settlement::core::alloy_primitives::keccak256(
+        [key_bytes.as_slice(), b"inference-bazaar-mesh-libp2p-v1"].concat(),
     )
     .0;
     let local_key = libp2p::identity::Keypair::ed25519_from_bytes(&mut libp2p_seed)
@@ -248,7 +248,7 @@ pub fn start(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<(SharedClob, 
 
     let allowed: HashSet<Address> = cfg.operators.iter().map(|(a, _)| *a).collect();
     let network_config = NetworkConfig::<K256Ecdsa> {
-        network_name: "surplus-clob".into(),
+        network_name: "inference-bazaar-clob".into(),
         // Per-deployment topic scoping: one mesh per (chain, settlement contract).
         instance_id: format!("{chain_id}-{contract:#x}"),
         instance_key_pair,
@@ -256,7 +256,7 @@ pub fn start(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<(SharedClob, 
         listen_addr: listen.clone(),
         target_peer_count: cfg.operators.len() as u32,
         bootstrap_peers,
-        enable_mdns: std::env::var("SURPLUS_MESH_MDNS").as_deref() == Ok("1"),
+        enable_mdns: std::env::var("INFERENCE_BAZAAR_MESH_MDNS").as_deref() == Ok("1"),
         enable_kademlia: true,
         using_evm_address_for_handshake_verification: true,
     };
@@ -282,7 +282,7 @@ pub fn start(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<(SharedClob, 
         instance = %format!("{chain_id}-{contract:#x}"),
         peer_id = %local_peer_id,
         %listen,
-        "shared CLOB on PKI mesh — peers dial /ip4/<this-host>/tcp/<port>/p2p/<peer_id> via SURPLUS_MESH_BOOTNODES"
+        "shared CLOB on PKI mesh — peers dial /ip4/<this-host>/tcp/<port>/p2p/<peer_id> via INFERENCE_BAZAAR_MESH_BOOTNODES"
     );
     Ok((clob, router))
 }

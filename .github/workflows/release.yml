@@ -1,7 +1,7 @@
 name: release
 
 # Cut the operator-binary release the blueprint definitions point at. The Tangle
-# blueprint deploy fetches `surplus-operator` (linux/amd64) from the GitHub release
+# blueprint deploy fetches `inference-bazaar-operator` (linux/amd64) from the GitHub release
 # at the pinned tag and verifies its sha256 — so this must run (and the sha synced
 # into deploy/blueprint-definition*.toml) before `cargo tangle blueprint deploy`.
 on:
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   operator-binary:
-    name: build + publish surplus-operator
+    name: build + publish inference-bazaar-operator
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,16 +26,16 @@ jobs:
       - name: install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: build operator (blueprint, release)
-        run: cargo build --release -p surplus-operator --bin surplus-operator --features blueprint
+        run: cargo build --release -p inference-bazaar-operator --bin inference-bazaar-operator --features blueprint
       - name: sha256
         id: sha
         run: |
-          BIN=target/release/surplus-operator
+          BIN=target/release/inference-bazaar-operator
           test -f "$BIN"
           SHA=$(sha256sum "$BIN" | cut -d' ' -f1)
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
           {
-            echo "### surplus-operator (linux/amd64)"
+            echo "### inference-bazaar-operator (linux/amd64)"
             echo ""
             echo "\`\`\`"
             echo "sha256: $SHA"
@@ -48,10 +48,10 @@ jobs:
       - name: publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: target/release/surplus-operator
+          files: target/release/inference-bazaar-operator
           generate_release_notes: true
           body: |
-            Operator binary `surplus-operator` (linux/amd64) for the Surplus blueprint.
+            Operator binary `inference-bazaar-operator` (linux/amd64) for the InferenceBazaar blueprint.
 
             **sha256:** `${{ steps.sha.outputs.sha256 }}`
 

@@ -45,7 +45,7 @@ pub fn metrics() -> &'static Metrics {
     })
 }
 
-/// `metrics::inc("surplus_clob_quorum_reached_total")`.
+/// `metrics::inc("inference_bazaar_clob_quorum_reached_total")`.
 pub fn inc(name: &'static str) {
     inc_by(name, 1);
 }
@@ -58,7 +58,7 @@ pub fn inc_by(name: &'static str, n: u64) {
         .fetch_add(n, Ordering::Relaxed);
 }
 
-/// `metrics::inc_labeled("surplus_clob_attestations_refused_total", "forged")`.
+/// `metrics::inc_labeled("inference_bazaar_clob_attestations_refused_total", "forged")`.
 pub fn inc_labeled(name: &'static str, label: &str) {
     let m = metrics();
     let mut map = m.counters.lock().unwrap();
@@ -130,11 +130,11 @@ impl Metrics {
     /// self-reported).
     pub fn reputation_pairs(&self) -> Vec<(String, u64)> {
         const REPUTABLE: &[&str] = &[
-            "surplus_clob_batches_submitted_total",
-            "surplus_clob_attestations_signed_total",
-            "surplus_settlement_fills_total",
-            "surplus_spend_served_tokens_total",
-            "surplus_redeem_served_tokens_total",
+            "inference_bazaar_clob_batches_submitted_total",
+            "inference_bazaar_clob_attestations_signed_total",
+            "inference_bazaar_settlement_fills_total",
+            "inference_bazaar_spend_served_tokens_total",
+            "inference_bazaar_redeem_served_tokens_total",
         ];
         let map = self.counters.lock().unwrap();
         REPUTABLE
@@ -153,21 +153,21 @@ impl Metrics {
 
 pub mod names {
     // Shared CLOB consensus.
-    pub const EPOCHS_RUN: &str = "surplus_clob_epochs_run_total";
-    pub const QUORUM_REACHED: &str = "surplus_clob_quorum_reached_total";
-    pub const QUORUM_FAILED: &str = "surplus_clob_quorum_failed_total";
-    pub const ATTEST_SIGNED: &str = "surplus_clob_attestations_signed_total";
-    pub const ATTEST_REFUSED: &str = "surplus_clob_attestations_refused_total";
-    pub const BATCHES_SUBMITTED: &str = "surplus_clob_batches_submitted_total";
-    pub const SUBMIT_REVERTS: &str = "surplus_clob_submit_reverts_total";
-    pub const GOSSIP_SEND_FAILURES: &str = "surplus_clob_gossip_send_failures_total";
-    pub const POOL_SIZE: &str = "surplus_clob_pool_size";
+    pub const EPOCHS_RUN: &str = "inference_bazaar_clob_epochs_run_total";
+    pub const QUORUM_REACHED: &str = "inference_bazaar_clob_quorum_reached_total";
+    pub const QUORUM_FAILED: &str = "inference_bazaar_clob_quorum_failed_total";
+    pub const ATTEST_SIGNED: &str = "inference_bazaar_clob_attestations_signed_total";
+    pub const ATTEST_REFUSED: &str = "inference_bazaar_clob_attestations_refused_total";
+    pub const BATCHES_SUBMITTED: &str = "inference_bazaar_clob_batches_submitted_total";
+    pub const SUBMIT_REVERTS: &str = "inference_bazaar_clob_submit_reverts_total";
+    pub const GOSSIP_SEND_FAILURES: &str = "inference_bazaar_clob_gossip_send_failures_total";
+    pub const POOL_SIZE: &str = "inference_bazaar_clob_pool_size";
     // Settlement + consumption.
-    pub const FILLS: &str = "surplus_settlement_fills_total";
-    pub const SPEND_KEYS: &str = "surplus_spend_keys_total";
-    pub const SPEND_SERVED_TOKENS: &str = "surplus_spend_served_tokens_total";
-    pub const SPEND_SETTLED_TOKENS: &str = "surplus_spend_settled_tokens_total";
-    pub const REDEEM_SERVED_TOKENS: &str = "surplus_redeem_served_tokens_total";
+    pub const FILLS: &str = "inference_bazaar_settlement_fills_total";
+    pub const SPEND_KEYS: &str = "inference_bazaar_spend_keys_total";
+    pub const SPEND_SERVED_TOKENS: &str = "inference_bazaar_spend_served_tokens_total";
+    pub const SPEND_SETTLED_TOKENS: &str = "inference_bazaar_spend_settled_tokens_total";
+    pub const REDEEM_SERVED_TOKENS: &str = "inference_bazaar_redeem_served_tokens_total";
 }
 
 // ─────────────────────── On-chain reputation (QoS) ───────────────────────────
@@ -187,9 +187,9 @@ mod qos {
     use std::future::Future;
     use std::pin::Pin;
 
-    pub struct SurplusMetricsSource;
+    pub struct InferenceBazaarMetricsSource;
 
-    impl blueprint_sdk::qos::heartbeat::MetricsSource for SurplusMetricsSource {
+    impl blueprint_sdk::qos::heartbeat::MetricsSource for InferenceBazaarMetricsSource {
         fn get_custom_metrics(
             &self,
         ) -> Pin<Box<dyn Future<Output = Vec<(String, u64)>> + Send + '_>> {
@@ -203,7 +203,7 @@ mod qos {
 }
 
 #[cfg(feature = "blueprint")]
-pub use qos::SurplusMetricsSource;
+pub use qos::InferenceBazaarMetricsSource;
 
 #[cfg(test)]
 mod tests {
@@ -217,9 +217,9 @@ mod tests {
         inc_labeled(names::ATTEST_REFUSED, "censored");
         set_gauge(names::POOL_SIZE, 7);
         let text = metrics().render_prometheus();
-        assert!(text.contains("surplus_clob_batches_submitted_total 2"));
-        assert!(text.contains("surplus_clob_attestations_refused_total{verdict=\"forged\"} 1"));
-        assert!(text.contains("surplus_clob_pool_size 7"));
+        assert!(text.contains("inference_bazaar_clob_batches_submitted_total 2"));
+        assert!(text.contains("inference_bazaar_clob_attestations_refused_total{verdict=\"forged\"} 1"));
+        assert!(text.contains("inference_bazaar_clob_pool_size 7"));
     }
 
     #[test]

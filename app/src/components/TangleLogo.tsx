@@ -1,7 +1,7 @@
 /**
  * The authentic Tangle knot mark (from tangle-website/public/brand/
  * tangle-icon-filled.svg) — the interlocking woven glyph in the brand's
- * violet→blue gradient. Surplus is built on Tangle, so the product wordmark
+ * violet→blue gradient. InferenceBazaar is built on Tangle, so the product wordmark
  * sits beside the real Tangle mark rather than a placeholder.
  */
 export function TangleMark({ size = 32, idSuffix = 'a' }: { size?: number; idSuffix?: string }) {
@@ -32,10 +32,10 @@ export function TangleMark({ size = 32, idSuffix = 'a' }: { size?: number; idSuf
   )
 }
 
-/** Brand lockup: Tangle mark + Surplus wordmark + subtitle. The mark stands on
+/** Brand lockup: Tangle mark + InferenceBazaar wordmark + subtitle. The mark stands on
  * its own at full scale (no boxed chip) — like the Tangle arena shell. `compact`
  * is the collapsed-sidebar form: the bare mark, sized to a 40px nav slot. */
-export function SurplusBrand({ compact = false }: { compact?: boolean }) {
+export function InferenceBazaarBrand({ compact = false }: { compact?: boolean }) {
   if (compact) {
     return <TangleMark size={30} />
   }

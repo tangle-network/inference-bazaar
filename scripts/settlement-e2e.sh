@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Live settlement-spine e2e against anvil: deploy SurplusSettlement + dev
+# Live settlement-spine e2e against anvil: deploy InferenceBazaarSettlement + dev
 # mocks, then run the full guarantee loop (atomic fill -> receipt redemption ->
 # collateral default -> attested batch -> proven batch) through the Rust chain
 # client. Requires foundry; builds with --features chain.
@@ -19,10 +19,10 @@ done
 
 OUT=$(cd contracts && PRIVATE_KEY="$DEPLOYER_KEY" DEPLOY_DEV_VERIFIER=1 \
   forge script script/Deploy.s.sol --rpc-url "http://127.0.0.1:$ANVIL_PORT" --broadcast 2>&1)
-SETTLEMENT=$(grep -oP 'SurplusSettlement: \K0x\w+' <<<"$OUT")
+SETTLEMENT=$(grep -oP 'InferenceBazaarSettlement: \K0x\w+' <<<"$OUT")
 USD=$(grep -oP 'MockUSD: \K0x\w+' <<<"$OUT")
 VERIFIER=$(grep -oP 'SP1MockVerifierStrict: \K0x\w+' <<<"$OUT")
 echo "deployed: settlement=$SETTLEMENT usd=$USD verifier=$VERIFIER"
 
-cargo run -q -p surplus-settlement --features chain --example e2e_anvil -- \
+cargo run -q -p inference-bazaar-settlement --features chain --example e2e_anvil -- \
   "$SETTLEMENT" "$USD" "$VERIFIER"

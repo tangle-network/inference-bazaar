@@ -1,4 +1,4 @@
-import type { QuoteSet } from '@surplus/market-core'
+import type { QuoteSet } from '@inference-bazaar/market-core'
 import type { Driver, Iteration } from '@tangle-network/agent-runtime/loops'
 import type { MarketMakingSession } from './session'
 import type { MarketTick, MMDecision } from './types'
@@ -25,7 +25,7 @@ export interface MarketMakerDriverOptions {
 export function marketMakerDriver(opts: MarketMakerDriverOptions): Driver<MarketTick, QuoteSet, MMDecision> {
   const { session, horizonTicks } = opts
   return {
-    name: 'surplus-market-maker',
+    name: 'inference-bazaar-market-maker',
 
     async plan(_task: MarketTick, history: ReadonlyArray<Iteration<MarketTick, QuoteSet>>) {
       if (session.killed()) return []

@@ -18,7 +18,7 @@ OP_B_ADDR="0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 PORT_A="${PORT_A:-9210}"
 PORT_B="${PORT_B:-9211}"
 
-cargo build -q -p surplus-operator --bin surplus-operator-lite --features chain
+cargo build -q -p inference-bazaar-operator --bin inference-bazaar-operator-lite --features chain
 
 anvil --port "$ANVIL_PORT" --silent &
 ANVIL_PID=$!
@@ -35,7 +35,7 @@ done
 
 OUT=$(cd contracts && PRIVATE_KEY="$DEPLOYER_KEY" forge script script/Deploy.s.sol \
   --rpc-url "$RPC" --broadcast 2>&1)
-SETTLEMENT=$(grep -oP 'SurplusSettlement: \K0x\w+' <<<"$OUT")
+SETTLEMENT=$(grep -oP 'InferenceBazaarSettlement: \K0x\w+' <<<"$OUT")
 USD=$(grep -oP 'MockUSD: \K0x\w+' <<<"$OUT")
 echo "deployed: settlement=$SETTLEMENT usd=$USD"
 
@@ -48,19 +48,19 @@ echo "book $BOOK registered: 2-of-2 [$OP_A_ADDR, $OP_B_ADDR]"
 
 CLOB_OPERATORS="$OP_A_ADDR=http://127.0.0.1:$PORT_A,$OP_B_ADDR=http://127.0.0.1:$PORT_B"
 start_operator() { # port key
-  SURPLUS_OPERATOR_ADDR="127.0.0.1:$1" \
-  SURPLUS_OPERATOR_KEY="$2" \
-  SURPLUS_CHAIN_ID=31337 \
-  SURPLUS_SETTLEMENT_ADDR="$SETTLEMENT" \
-  SURPLUS_RPC_URL="$RPC" \
-  SURPLUS_INSTRUMENT="claude-sonnet-4-6:output" \
-  SURPLUS_CLOB_OPERATORS="$CLOB_OPERATORS" \
-  SURPLUS_CLOB_THRESHOLD=2 \
-  SURPLUS_CLOB_EPOCH_SECS=5 \
-  SURPLUS_RL_CAPACITY=100000 SURPLUS_RL_REFILL=10000 \
-  SURPLUS_INFERENCE_URL="http://127.0.0.1:1" \
-  SURPLUS_SIDECAR_URL="http://127.0.0.1:1" \
-  ./target/debug/surplus-operator-lite &
+  INFERENCE_BAZAAR_OPERATOR_ADDR="127.0.0.1:$1" \
+  INFERENCE_BAZAAR_OPERATOR_KEY="$2" \
+  INFERENCE_BAZAAR_CHAIN_ID=31337 \
+  INFERENCE_BAZAAR_SETTLEMENT_ADDR="$SETTLEMENT" \
+  INFERENCE_BAZAAR_RPC_URL="$RPC" \
+  INFERENCE_BAZAAR_INSTRUMENT="claude-sonnet-4-6:output" \
+  INFERENCE_BAZAAR_CLOB_OPERATORS="$CLOB_OPERATORS" \
+  INFERENCE_BAZAAR_CLOB_THRESHOLD=2 \
+  INFERENCE_BAZAAR_CLOB_EPOCH_SECS=5 \
+  INFERENCE_BAZAAR_RL_CAPACITY=100000 INFERENCE_BAZAAR_RL_REFILL=10000 \
+  INFERENCE_BAZAAR_INFERENCE_URL="http://127.0.0.1:1" \
+  INFERENCE_BAZAAR_SIDECAR_URL="http://127.0.0.1:1" \
+  ./target/debug/inference-bazaar-operator-lite &
   OP_PIDS+=($!)
 }
 start_operator "$PORT_A" "$DEPLOYER_KEY"

@@ -2,7 +2,7 @@
 //! outbox. An RFQ response and a signed book order are the SAME EIP-712 `Order`
 //! — the only difference is whether it rests in the book or is returned
 //! directly to the requester. Every cross of two signed orders becomes a
-//! [`SignedFill`] queued for on-chain settlement, where the SurplusSettlement
+//! [`SignedFill`] queued for on-chain settlement, where the InferenceBazaarSettlement
 //! contract re-verifies everything; the venue is a relayer, not an authority.
 
 use crate::config::SettlementConfig;
@@ -11,9 +11,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use surplus_orderbook::{Fill, MatchingEngine, Order as BookOrder, Side};
-use surplus_settlement::core::alloy_primitives::{keccak256, Address, B256};
-use surplus_settlement::{
+use inference_bazaar_orderbook::{Fill, MatchingEngine, Order as BookOrder, Side};
+use inference_bazaar_settlement::core::alloy_primitives::{keccak256, Address, B256};
+use inference_bazaar_settlement::{
     domain, instrument_hash, Batch, Eip712Domain, Order, SignedFill, SignedOrder, Signer, SIDE_BUY,
     SIDE_SELL,
 };
@@ -59,7 +59,7 @@ impl SettleCtx {
             .and_then(|k| Signer::from_hex(k).ok());
         if cfg.submitter_key.is_none() && cfg.operator_key.is_some() {
             tracing::warn!(
-                "SURPLUS_SUBMITTER_KEY unset: the attester key will also send txs. \
+                "INFERENCE_BAZAAR_SUBMITTER_KEY unset: the attester key will also send txs. \
                  Set a separate submitter key in production so the co-sign key never \
                  touches the RPC/nonce path."
             );
@@ -169,7 +169,7 @@ impl SignedOrderBody {
             )));
         }
         let signature =
-            surplus_settlement::core::hex::decode(self.signature.trim_start_matches("0x"))
+            inference_bazaar_settlement::core::hex::decode(self.signature.trim_start_matches("0x"))
                 .map_err(|_| VenueError::Rejected("signature is not hex".into()))?;
         Ok((
             self.instrument_id,
@@ -209,7 +209,7 @@ impl Venue {
         self.settle
             .as_ref()
             .ok_or(VenueError::SettlementUnconfigured(
-                "set SURPLUS_CHAIN_ID and SURPLUS_SETTLEMENT_ADDR",
+                "set INFERENCE_BAZAAR_CHAIN_ID and INFERENCE_BAZAAR_SETTLEMENT_ADDR",
             ))
     }
 
@@ -348,7 +348,7 @@ impl Venue {
             .signer
             .as_ref()
             .ok_or(VenueError::SettlementUnconfigured(
-                "set SURPLUS_OPERATOR_KEY to quote",
+                "set INFERENCE_BAZAAR_OPERATOR_KEY to quote",
             ))?;
 
         let (ref_mid, inventory, drawdown, tick, min_qty) = {
@@ -478,7 +478,7 @@ impl Venue {
             "quoting": true,
             "instrumentId": instrument_id,
             "order": signed.order,
-            "signature": surplus_settlement::core::hex::encode_prefixed(&signed.signature),
+            "signature": inference_bazaar_settlement::core::hex::encode_prefixed(&signed.signature),
             "digest": format!("{:#x}", signed.digest(&ctx.domain)),
             "validUntil": order.expiry,
             "rationale": quote.rationale,
@@ -590,7 +590,7 @@ impl Venue {
         #[cfg(feature = "chain")]
         if let (Some(rpc), Some(key)) = (_ctx.rpc_url.as_deref(), _ctx.submitter_key()) {
             let client =
-                match surplus_settlement::chain::SettlementClient::connect(rpc, key, _ctx.contract)
+                match inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, _ctx.contract)
                     .await
                 {
                     Ok(c) => c,
@@ -644,7 +644,7 @@ impl Venue {
             "wouldSubmit": fills.len(),
             "droppedExpired": expired.len(),
             "fillsHash": format!("{:#x}", Batch { fills: fills.clone() }.fills_hash()),
-            "hint": "build with --features chain and set SURPLUS_RPC_URL + SURPLUS_OPERATOR_KEY to submit",
+            "hint": "build with --features chain and set INFERENCE_BAZAAR_RPC_URL + INFERENCE_BAZAAR_OPERATOR_KEY to submit",
         });
         self.requeue(fills);
         Ok(report)
@@ -703,7 +703,7 @@ impl Venue {
             };
             let op = signer.address();
             let client =
-                surplus_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
+                inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
                     .await
                     .map_err(|e| VenueError::Chain(e.to_string()))?;
             let free = client
@@ -753,7 +753,7 @@ impl Venue {
                 continue;
             }
             let cost =
-                surplus_settlement::core::cost_micro(o.priceMicroPerM, remaining).to::<u128>();
+                inference_bazaar_settlement::core::cost_micro(o.priceMicroPerM, remaining).to::<u128>();
             if o.side == SIDE_SELL {
                 sell += cost;
             } else {

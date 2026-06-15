@@ -4,8 +4,8 @@ import {
   type RiskLimits,
   type SimConfig,
   SimulatedMarket,
-} from '@surplus/market-core'
-import { runMarketMakingLoop, SimVenue } from '@surplus/mm-loop'
+} from '@inference-bazaar/market-core'
+import { runMarketMakingLoop, SimVenue } from '@inference-bazaar/mm-loop'
 import { aggregate, type ConfigMetrics, score, type ScoreWeights } from './metrics'
 
 /**

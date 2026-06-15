@@ -10,7 +10,7 @@ EIP-712 `SpendKeyAuth { lotId, keyHash, maxTokens, expiry }`; the key is
 generated in your browser and shown once — only its hash reaches the operator.
 
 Or by hand: generate a secret, build
-`sk-surplus-<base64url(lotId ‖ issuerAddress ‖ secret)>`, sign the auth over
+`sk-inference-bazaar-<base64url(lotId ‖ issuerAddress ‖ secret)>`, sign the auth over
 `keccak256(keyBytes)` under the settlement contract's domain, and
 `POST {operatorUrl}/v1/spend-keys { lotId, keyHash, maxTokens, expiry, signature }`.
 
@@ -18,7 +18,7 @@ Or by hand: generate a secret, build
 
 ```python
 from openai import OpenAI
-client = OpenAI(base_url="https://<issuer-venue>/v1", api_key="sk-surplus-…")
+client = OpenAI(base_url="https://<issuer-venue>/v1", api_key="sk-inference-bazaar-…")
 r = client.chat.completions.create(model="claude-sonnet-4-6",
                                    messages=[{"role": "user", "content": "hi"}])
 ```

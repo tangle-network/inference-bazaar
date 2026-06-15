@@ -7,7 +7,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { generatePrivateKey } from 'viem/accounts'
 
-const DIR = process.env.SURPLUS_KEYS_DIR || path.join(process.cwd(), '.keys')
+const DIR = process.env.INFERENCE_BAZAAR_KEYS_DIR || path.join(process.cwd(), '.keys')
 
 export function ephemeralKey(name) {
   fs.mkdirSync(DIR, { recursive: true, mode: 0o700 })

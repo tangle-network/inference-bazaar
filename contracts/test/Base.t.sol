@@ -3,7 +3,7 @@ pragma solidity ^0.8.26;
 
 import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { SurplusSettlement } from "../src/SurplusSettlement.sol";
+import { InferenceBazaarSettlement } from "../src/InferenceBazaarSettlement.sol";
 import { MockUSD, SP1MockVerifierAccept, SP1MockVerifierStrict } from "../src/dev/Mocks.sol";
 
 contract SettlementTestBase is Test {
@@ -17,7 +17,7 @@ contract SettlementTestBase is Test {
     uint16 internal constant FEE_BPS = 200; // 2%
 
     MockUSD internal usd;
-    SurplusSettlement internal settlement;
+    InferenceBazaarSettlement internal settlement;
 
     uint256 internal buyerKey = 0xB001;
     uint256 internal sellerKey = 0x5E11;
@@ -33,7 +33,7 @@ contract SettlementTestBase is Test {
 
     function setUp() public virtual {
         usd = new MockUSD();
-        settlement = new SurplusSettlement(
+        settlement = new InferenceBazaarSettlement(
             IERC20(address(usd)), CREDIT_TTL, REDEMPTION_WINDOW, CHALLENGE_WINDOW, PENALTY_BPS, FEE_BPS, feeRecipient
         );
         buyer = vm.addr(buyerKey);
@@ -60,8 +60,8 @@ contract SettlementTestBase is Test {
 
     // ── Order helpers ─────────────────────────────────────────────────────────
 
-    function buyOrder(uint64 price, uint64 qty) internal view returns (SurplusSettlement.Order memory) {
-        return SurplusSettlement.Order({
+    function buyOrder(uint64 price, uint64 qty) internal view returns (InferenceBazaarSettlement.Order memory) {
+        return InferenceBazaarSettlement.Order({
             instrument: INSTRUMENT,
             side: 0,
             priceMicroPerM: price,
@@ -73,7 +73,7 @@ contract SettlementTestBase is Test {
         });
     }
 
-    function sellOrder(uint64 price, uint64 qty) internal view returns (SurplusSettlement.Order memory) {
+    function sellOrder(uint64 price, uint64 qty) internal view returns (InferenceBazaarSettlement.Order memory) {
         return sellFromLot(price, qty, bytes32(0));
     }
 
@@ -84,9 +84,9 @@ contract SettlementTestBase is Test {
     )
         internal
         view
-        returns (SurplusSettlement.Order memory)
+        returns (InferenceBazaarSettlement.Order memory)
     {
-        return SurplusSettlement.Order({
+        return InferenceBazaarSettlement.Order({
             instrument: INSTRUMENT,
             side: 1,
             priceMicroPerM: price,
@@ -98,23 +98,23 @@ contract SettlementTestBase is Test {
         });
     }
 
-    function sign(uint256 key, SurplusSettlement.Order memory o) internal view returns (bytes memory) {
+    function sign(uint256 key, InferenceBazaarSettlement.Order memory o) internal view returns (bytes memory) {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, settlement.orderDigest(o));
         return abi.encodePacked(r, s, v);
     }
 
     function fillInput(
-        SurplusSettlement.Order memory b,
-        SurplusSettlement.Order memory s,
+        InferenceBazaarSettlement.Order memory b,
+        InferenceBazaarSettlement.Order memory s,
         uint64 qty,
         uint64 px
     )
         internal
         view
-        returns (SurplusSettlement.FillInput[] memory fills)
+        returns (InferenceBazaarSettlement.FillInput[] memory fills)
     {
-        fills = new SurplusSettlement.FillInput[](1);
-        fills[0] = SurplusSettlement.FillInput({
+        fills = new InferenceBazaarSettlement.FillInput[](1);
+        fills[0] = InferenceBazaarSettlement.FillInput({
             buy: b,
             buySig: sign(buyerKey, b),
             sell: s,
@@ -126,8 +126,8 @@ contract SettlementTestBase is Test {
 
     /// One standard mint: 50k tokens at $15/M => cost 750_000 micro ($0.75).
     function settleStandardFill() internal returns (bytes32 lotId) {
-        SurplusSettlement.Order memory b = buyOrder(15_000_000, 50_000);
-        SurplusSettlement.Order memory s = sellOrder(14_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
+        InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
         vm.recordLogs();
         settlement.settleFills(fillInput(b, s, 50_000, 15_000_000));
         lotId = keccak256(abi.encode(settlement.hashOrder(b), settlement.hashOrder(s), uint64(0)));

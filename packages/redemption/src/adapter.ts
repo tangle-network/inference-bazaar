@@ -11,7 +11,7 @@ export interface RedeemOutcome {
 }
 
 /**
- * The contract the Tangle Router implements (or calls) so a Surplus credit is
+ * The contract the Tangle Router implements (or calls) so a InferenceBazaar credit is
  * spendable. The router still does the actual inference + token metering; this
  * only handles credit selection + debit + operator payout instruction. On its
  * `/v1/chat/completions` path the router calls `selectCredit` pre-flight; if a

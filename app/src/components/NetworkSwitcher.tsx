@@ -1,13 +1,13 @@
 /**
  * Chain switcher — the arena's NetworkButton pattern, scoped to the chains
- * Surplus actually runs on (SURPLUS_CHAINS). Switches the connected wallet's
+ * InferenceBazaar actually runs on (INFERENCE_BAZAAR_CHAINS). Switches the connected wallet's
  * network; chains not yet live show disabled ("soon"). Menu is solid + opens
  * upward (it lives in the sidebar dock).
  */
 import { useEffect, useRef, useState } from 'react'
 import { useAccount, useSwitchChain } from 'wagmi'
 import { cn } from '~/lib/cn'
-import { SURPLUS_CHAIN, SURPLUS_CHAINS } from '~/providers/web3'
+import { INFERENCE_BAZAAR_CHAIN, INFERENCE_BAZAAR_CHAINS } from '~/providers/web3'
 
 export function NetworkSwitcher({ collapsed = false }: { collapsed?: boolean }) {
   const [open, setOpen] = useState(false)
@@ -16,9 +16,9 @@ export function NetworkSwitcher({ collapsed = false }: { collapsed?: boolean }) 
   const { switchChain } = useSwitchChain()
 
   // Active = the wallet's chain when connected, else the app's default chain.
-  const activeId = chainId ?? SURPLUS_CHAIN.id
-  const active = SURPLUS_CHAINS.find((c) => c.id === activeId) ??
-    SURPLUS_CHAINS[0] ?? { id: activeId, name: 'Network', short: 'Network', live: false }
+  const activeId = chainId ?? INFERENCE_BAZAAR_CHAIN.id
+  const active = INFERENCE_BAZAAR_CHAINS.find((c) => c.id === activeId) ??
+    INFERENCE_BAZAAR_CHAINS[0] ?? { id: activeId, name: 'Network', short: 'Network', live: false }
 
   useEffect(() => {
     if (!open) return
@@ -53,7 +53,7 @@ export function NetworkSwitcher({ collapsed = false }: { collapsed?: boolean }) 
       {open && (
         <div className="absolute bottom-full left-0 z-[60] mb-2 w-56 rounded-[10px] border border-[var(--s-border)] bg-[var(--s-pop)] p-1.5 shadow-[var(--s-shadow-pop)]">
           <div className="mono-label px-2 py-1.5">Network</div>
-          {SURPLUS_CHAINS.map((c) => {
+          {INFERENCE_BAZAAR_CHAINS.map((c) => {
             const sel = c.id === activeId
             return (
               <button

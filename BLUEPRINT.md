@@ -1,4 +1,4 @@
-# Surplus blueprint — operator + open orderbook
+# Inference Bazaar blueprint — operator + open orderbook
 
 The Tangle blueprint that runs the inference-token market. It is a Rust operator
 that hosts an **open orderbook** off-chain and clears fills on-chain — the SOTA
@@ -14,7 +14,7 @@ blueprint.toml      manifest for `cargo tangle blueprint deploy`
 
 `MatchingEngine` (`crates/orderbook/src/engine.rs`) is the only thing the
 operator depends on. The default is `NativeBook` — a price-time-priority engine
-with **no third-party dependency**, ported from the tested `@surplus/market-core`
+with **no third-party dependency**, ported from the tested `@inference-bazaar/market-core`
 orderbook (match-on-insert, partial fills, self-match prevention, tick/min-qty
 validation, depth snapshots). Swapping the engine never touches operator code:
 
@@ -27,12 +27,12 @@ validation, depth snapshots). Swapping the engine never touches operator code:
 
 ## The operator is the venue
 
-`operator/` (binary `surplus-operator-lite`) hosts one book per instrument and
+`operator/` (binary `inference-bazaar-operator-lite`) hosts one book per instrument and
 exposes the market over HTTP:
 
 | Route | What |
 |---|---|
-| `POST /order` | place a limit order (seller lists surplus, buyer lifts, anyone rests) → fills + settlement intents |
+| `POST /order` | place a limit order (seller lists spare capacity, buyer lifts, anyone rests) → fills + settlement intents |
 | `POST /cancel` | cancel a resting order |
 | `POST /book` | depth snapshot + reference price + operator inventory |
 | `POST /mm-tick` | pull risk-gated quotes from the **mm-sidecar**, cancel-replace the operator's quotes |
@@ -48,16 +48,16 @@ Avellaneda–Stoikov today, an agent later); the sidecar's risk verdict, not the
 operator, is the safety boundary. Fills attribute inventory to the operator and
 emit a **settlement intent per fill** on the rail the order named — both rails
 are first-class (`router-credits` and `shielded`), cleared by the settlement
-layer in `@surplus/router-bridge`.
+layer in `@inference-bazaar/router-bridge`.
 
-Proven live end to end: seller lists surplus → MM ticks and crosses → buyers
+Proven live end to end: seller lists spare capacity → MM ticks and crosses → buyers
 lift the seller and the MM → inventory tracks correctly → settlement intents emit
 on the chosen rail.
 
 ## On-chain runner (built)
 
 The venue runs INSIDE a real Tangle `BlueprintRunner`. `operator/src/bin/blueprint.rs`
-(bin `surplus-operator`, `--features blueprint`) mirrors the llm-inference-blueprint
+(bin `inference-bazaar-operator`, `--features blueprint`) mirrors the llm-inference-blueprint
 operator:
 
 - The venue starts as a `BackgroundService` (the market is live before the
@@ -73,7 +73,7 @@ operator:
 
 Verified: compiles against the full alpha SDK (rustc 1.91, `core2` patched like
 the reference repos — see `rust-toolchain.toml` and the root `[patch.crates-io]`),
-and the binary boots the real blueprint CLI (`surplus-operator run --data-dir …
+and the binary boots the real blueprint CLI (`inference-bazaar-operator run --data-dir …
 --http-rpc-url …`).
 
 **Next:** trigger `workflow_tick` through an actual on-chain job — `cargo tangle
@@ -83,11 +83,11 @@ See `scripts/` and `deploy/`.
 
 ## The settlement spine (built)
 
-The venue's fills are no longer advisory. `contracts/src/SurplusSettlement.sol`
+The venue's fills are no longer advisory. `contracts/src/InferenceBazaarSettlement.sol`
 clears EIP-712 signed fills **atomically** (debit buyer / pay seller / mint a
 collateral-backed credit lot in one tx), enforces the redemption guarantee
 (holder receipt or attester quorum; deadline default pays the holder from
-issuer collateral + penalty; `SurplusBSM` slashes restake via tnt-core on top),
+issuer collateral + penalty; `InferenceBazaarBSM` slashes restake via tnt-core on top),
 and verifies compressed batches at one boundary with two interchangeable
 verifiers — attester quorum (`settleBatchAttested`) now, **SP1 proof**
 (`settleBatchProven`) when volume warrants. The SP1 program lives in

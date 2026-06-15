@@ -7,7 +7,7 @@ import {
   type QuoteParams,
   type RiskLimits,
   SimulatedMarket,
-} from '@surplus/market-core'
+} from '@inference-bazaar/market-core'
 import { runMarketMakingLoop } from './run'
 import { SimVenue } from './sim-venue'
 

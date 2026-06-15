@@ -1,5 +1,5 @@
 {
-  "name": "@surplus/mm-eval",
+  "name": "@inference-bazaar/mm-eval",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
@@ -13,8 +13,8 @@
     "sweep": "tsx src/demo.ts"
   },
   "dependencies": {
-    "@surplus/market-core": "workspace:*",
-    "@surplus/mm-loop": "workspace:*"
+    "@inference-bazaar/market-core": "workspace:*",
+    "@inference-bazaar/mm-loop": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",

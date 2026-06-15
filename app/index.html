@@ -6,7 +6,7 @@
     <title>Inference Bazaar — an open market for AI inference</title>
     <meta
       name="description"
-      content="Buy discounted AI inference, sell your surplus, market-make the spread. Prepaid inference-token credits, redeemable through the Tangle Router."
+      content="Buy discounted AI inference, sell your inference-bazaar, market-make the spread. Prepaid inference-token credits, redeemable through the Tangle Router."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -19,7 +19,7 @@
       (function () {
         try {
           var p = new URLSearchParams(location.search).get('theme')
-          var t = p || localStorage.getItem('surplus_theme') ||
+          var t = p || localStorage.getItem('inference_bazaar_theme') ||
             (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
           document.documentElement.setAttribute('data-theme', t)
         } catch (e) {}

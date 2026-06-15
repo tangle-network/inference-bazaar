@@ -1,14 +1,14 @@
 {
-  "name": "surplus",
+  "name": "inference-bazaar",
   "private": true,
   "version": "0.1.0",
-  "description": "Surplus Intelligence — open market for AI inference. Buy discounted inference, sell surplus inference, market-make the spread.",
+  "description": "Inference Bazaar — an open market for AI inference. Buy discounted inference, sell spare capacity, market-make the spread.",
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "demo:mm": "pnpm --filter @surplus/mm-loop demo"
+    "demo:mm": "pnpm --filter @inference-bazaar/mm-loop demo"
   },
   "devDependencies": {
     "typescript": "^5.8.0",

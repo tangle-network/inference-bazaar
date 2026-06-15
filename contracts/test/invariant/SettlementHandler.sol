@@ -4,7 +4,7 @@ pragma solidity ^0.8.26;
 import { CommonBase } from "forge-std/Base.sol";
 import { StdCheats } from "forge-std/StdCheats.sol";
 import { StdUtils } from "forge-std/StdUtils.sol";
-import { SurplusSettlement } from "../../src/SurplusSettlement.sol";
+import { InferenceBazaarSettlement } from "../../src/InferenceBazaarSettlement.sol";
 import { MockUSD } from "../../src/dev/Mocks.sol";
 
 /// Drives random but valid sequences across every money-moving path so the
@@ -13,7 +13,7 @@ import { MockUSD } from "../../src/dev/Mocks.sol";
 /// an action that can't fire (no balance, wrong state) is a no-op, never a
 /// failed run — so the fuzzer keeps composing deeper sequences.
 contract SettlementHandler is CommonBase, StdCheats, StdUtils {
-    SurplusSettlement public settlement;
+    InferenceBazaarSettlement public settlement;
     MockUSD public usd;
     bytes32 public immutable BOOK;
     bytes32 constant INSTRUMENT = keccak256("model:output");
@@ -40,7 +40,7 @@ contract SettlementHandler is CommonBase, StdCheats, StdUtils {
     uint256 public spendsSettled;
     uint256 public reclaimsDone;
 
-    constructor(SurplusSettlement _s, MockUSD _usd, bytes32 _book, address _feeRecipient) {
+    constructor(InferenceBazaarSettlement _s, MockUSD _usd, bytes32 _book, address _feeRecipient) {
         settlement = _s;
         usd = _usd;
         BOOK = _book;
@@ -139,10 +139,10 @@ contract SettlementHandler is CommonBase, StdCheats, StdUtils {
         vm.stopPrank();
         ghostDeposited += cost + needCollat;
 
-        SurplusSettlement.Order memory buy = _order(0, price, qty, bytes32(0), buyer);
-        SurplusSettlement.Order memory sell = _order(1, price, qty, bytes32(0), seller);
-        SurplusSettlement.FillInput[] memory fills = new SurplusSettlement.FillInput[](1);
-        fills[0] = SurplusSettlement.FillInput({
+        InferenceBazaarSettlement.Order memory buy = _order(0, price, qty, bytes32(0), buyer);
+        InferenceBazaarSettlement.Order memory sell = _order(1, price, qty, bytes32(0), seller);
+        InferenceBazaarSettlement.FillInput[] memory fills = new InferenceBazaarSettlement.FillInput[](1);
+        fills[0] = InferenceBazaarSettlement.FillInput({
             buy: buy,
             buySig: _sign(_key(buyerKeySeed), buy),
             sell: sell,
@@ -187,7 +187,7 @@ contract SettlementHandler is CommonBase, StdCheats, StdUtils {
         // A fresh session key the holder delegates; the gateway (here, us) signs
         // the cumulative-served voucher with it. Keep the secret in secp256k1 range.
         uint256 sk = (uint256(keccak256(abi.encode("session", lotId, amount))) % (type(uint128).max)) + 1;
-        SurplusSettlement.SpendPermit memory permit = SurplusSettlement.SpendPermit({
+        InferenceBazaarSettlement.SpendPermit memory permit = InferenceBazaarSettlement.SpendPermit({
             lotId: lotId, sessionKey: vm.addr(sk), maxTokens: qty, expiry: uint64(block.timestamp + 1 days)
         });
         uint64 served = uint64(bound(amount, 1, qty - locked));
@@ -225,9 +225,9 @@ contract SettlementHandler is CommonBase, StdCheats, StdUtils {
     )
         internal
         view
-        returns (SurplusSettlement.Order memory)
+        returns (InferenceBazaarSettlement.Order memory)
     {
-        return SurplusSettlement.Order({
+        return InferenceBazaarSettlement.Order({
             instrument: INSTRUMENT,
             side: side,
             priceMicroPerM: price,
@@ -239,12 +239,12 @@ contract SettlementHandler is CommonBase, StdCheats, StdUtils {
         });
     }
 
-    function _sign(uint256 key, SurplusSettlement.Order memory o) internal view returns (bytes memory) {
+    function _sign(uint256 key, InferenceBazaarSettlement.Order memory o) internal view returns (bytes memory) {
         // orderDigest takes calldata; round-trip through an external view.
         return _signDigest(key, this.digestOf(o));
     }
 
-    function digestOf(SurplusSettlement.Order calldata o) external view returns (bytes32) {
+    function digestOf(InferenceBazaarSettlement.Order calldata o) external view returns (bytes32) {
         return settlement.orderDigest(o);
     }
 

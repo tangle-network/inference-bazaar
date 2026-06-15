@@ -1,4 +1,4 @@
-import type { QuoteSet } from '@surplus/market-core'
+import type { QuoteSet } from '@inference-bazaar/market-core'
 import type { OutputAdapter, SandboxEvent } from '@tangle-network/agent-runtime/loops'
 
 /**

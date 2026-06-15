@@ -1,15 +1,15 @@
-# Surplus blueprint manifest (consumed by `cargo tangle blueprint deploy`).
+# InferenceBazaar blueprint manifest (consumed by `cargo tangle blueprint deploy`).
 #
 # The market-maker operator for inference-token credits. Jobs mirror the
 # ai-trading-blueprint lifecycle but for a token-credit market: list an
 # instrument, start/stop making a market, push a reference price, and tick.
 #
 # Job handlers are wired in operator/src/bin/blueprint.rs (the full
-# `surplus-operator` bin, built with `--features blueprint`); the on-chain
-# manager is contracts/src/SurplusBSM.sol (see [blueprint.manager] below).
+# `inference-bazaar-operator` bin, built with `--features blueprint`); the on-chain
+# manager is contracts/src/InferenceBazaarBSM.sol (see [blueprint.manager] below).
 
 [blueprint]
-name = "surplus"
+name = "inference-bazaar"
 description = "Open market for AI inference — buy/sell prepaid inference token credits, operators make markets."
 author = "Tangle"
 license = "MIT OR Apache-2.0"
@@ -20,7 +20,7 @@ category = "inference-market"
 # redemption defaults. Deployed + bootstrapped by contracts/script/Deploy.s.sol
 # (or the Tangle runtime); set the address per network.
 [blueprint.manager]
-evm = "SurplusBSM"
+evm = "InferenceBazaarBSM"
 address = ""
 
 # Membership is an INSTANCE-level setting chosen at service-request time. The
@@ -34,7 +34,7 @@ default = "fixed"
 
 [blueprint.operator]
 # The full operator binary registered on-chain (built with --features blueprint).
-binary = "surplus-operator"
+binary = "inference-bazaar-operator"
 # HTTP market API the operator serves (see operator/src/main.rs).
 http_port = 9100
 
@@ -79,15 +79,15 @@ name = "workflow_tick"
 description = "Periodic tick: pull reference price, fetch sidecar quotes, place/update quotes. [implemented]"
 
 # Settlement: the legacy rails (chosen per order, never hard-wired) plus the
-# firm rail — EIP-712 signed orders cleared atomically on SurplusSettlement.
+# firm rail — EIP-712 signed orders cleared atomically on InferenceBazaarSettlement.
 [blueprint.settlement]
 rails = ["router-credits", "shielded", "firm"]
 # Router rail: the live Tangle Router / platform balance (Stripe + on-ramp).
 router_url = "https://router.tangle.tools"
 # Shielded rail: on-chain ShieldedCredits (set per network at deploy time).
 shielded_credits_address = ""
-# Firm rail: SurplusSettlement (contracts/src/SurplusSettlement.sol) — atomic
+# Firm rail: InferenceBazaarSettlement (contracts/src/InferenceBazaarSettlement.sol) — atomic
 # fill settlement, collateral-backed credit lots, redemption defaults, batched
 # verification by attester quorum or SP1 proof. Deploy via
 # contracts/script/Deploy.s.sol; set per network.
-surplus_settlement_address = ""
+inference_bazaar_settlement_address = ""

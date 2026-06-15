@@ -3,11 +3,11 @@ import {
   mulberry32,
   OrderBook,
   type Instrument,
-} from '@surplus/market-core'
+} from '@inference-bazaar/market-core'
 
 /**
  * Discount-capture backtest — the strategy mm-eval's sweep said is the real
- * edge: buy distressed surplus listed below the router reference, re-offer it
+ * edge: buy distressed inference-bazaar listed below the router reference, re-offer it
  * near list, keep the gap. Spread PnL is isolated structurally: the operator
  * posts NO bids and quotes one side only, so every micro of PnL here comes
  * from the acquisition discount, not from two-sided spread capture (which the
@@ -27,13 +27,13 @@ export interface DiscountCaptureConfig {
     driftPerTick: number
     volPerTick: number
   }
-  /** Distressed surplus flow: sellers dumping below reference. */
+  /** Distressed inference-bazaar flow: sellers dumping below reference. */
   dump: {
     /** Probability a dump arrives on a tick [0,1]. */
     probPerTick: number
     /** Mean dump size, tokens (exponential). */
     sizeMean: number
-    /** Mean discount below reference at which surplus is listed, bps. */
+    /** Mean discount below reference at which inference-bazaar is listed, bps. */
     discountBpsMean: number
   }
   /** Retail buy flow that lifts the operator's re-offer near list. */
@@ -142,7 +142,7 @@ function runSession(cfg: DiscountCaptureConfig, seed: number): DiscountSessionRe
     // 1. Reference walk (router list price).
     ref = Math.max(tick, Math.round(ref * (1 + gaussian(rand) * cfg.ref.volPerTick + cfg.ref.driftPerTick)))
 
-    // 2. Distressed surplus dump arrives below reference.
+    // 2. Distressed inference-bazaar dump arrives below reference.
     if (rand() < cfg.dump.probPerTick) {
       const discountBps = Math.max(0, cfg.dump.discountBpsMean * (0.5 + rand()))
       seq += 1

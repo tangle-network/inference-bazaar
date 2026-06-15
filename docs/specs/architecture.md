@@ -1,4 +1,4 @@
-# Surplus architecture — operators, roles, and how it scales
+# Inference Bazaar architecture — operators, roles, and how it scales
 
 This doc answers three questions that recur:
 
@@ -19,12 +19,12 @@ it scales.
 ## 1. Operator vs market maker vs CLOB node
 
 These are not three machines. They are roles layered inside one operator
-process (the `surplus-operator` binary). One identity (one EIP-712 signing key,
-bonded with collateral on `SurplusSettlement`) can wear up to three hats:
+process (the `inference-bazaar-operator` binary). One identity (one EIP-712 signing key,
+bonded with collateral on `InferenceBazaarSettlement`) can wear up to three hats:
 
 ```
-┌─────────────────────────── ONE OPERATOR (surplus-operator process) ───────────────────────────┐
-│  identity: 1 EIP-712 signing key  ·  bonded (collateral) on SurplusSettlement                   │
+┌─────────────────────────── ONE OPERATOR (inference-bazaar-operator process) ───────────────────────────┐
+│  identity: 1 EIP-712 signing key  ·  bonded (collateral) on InferenceBazaarSettlement                   │
 │                                                                                                 │
 │   ┌── role 1: MARKET MAKER / ISSUER ──┐  ┌── role 2: CLOB NODE ────┐  ┌── role 3: INFERENCE ──┐ │
 │   │ • quoting loop (mm-sidecar)        │  │ • gossip orders         │  │ • serves the model    │ │
@@ -42,7 +42,7 @@ bonded with collateral on `SurplusSettlement`) can wear up to three hats:
 
 ```mermaid
 flowchart TB
-  subgraph OP["ONE OPERATOR — 1 signing key, bonded on SurplusSettlement"]
+  subgraph OP["ONE OPERATOR — 1 signing key, bonded on InferenceBazaarSettlement"]
     MM["role 1: MARKET MAKER / ISSUER<br/>quotes, signs sells, mints lots<br/>(OPTIONAL — op5 skips this)"]
     CLOB["role 2: CLOB NODE / ATTESTER<br/>gossip, propose, verify, co-sign, submit"]
     INF["role 3: INFERENCE SERVER<br/>serves the model the lots bond to"]
@@ -60,7 +60,7 @@ proof — it co-signs but has no quoting loop, so it never issues.
 > model") is subtle: it treats *being in a book* as *being an issuer*. A
 > pure attester like op5 is in the book but does not issue, so the invariant is
 > slightly broader than the role it guards. (Bridged today by pointing
-> `SURPLUS_INFERENCE_URL` at the Tangle Router; the durable fix is an explicit
+> `INFERENCE_BAZAAR_INFERENCE_URL` at the Tangle Router; the durable fix is an explicit
 > attester-only mode.)
 
 ### The live fleet today (one book, `0x0`, 2-of-3)
@@ -81,7 +81,7 @@ proof — it co-signs but has no quoting loop, so it never issues.
                                  proposer submits settleBatchAttested(book, fills, 2-of-3 sigs)
                                             ▼
                        ┌──────────────────────────────────┐
-                       │  SurplusSettlement (Base Sepolia) │  re-verifies quorum, applies fills,
+                       │  InferenceBazaarSettlement (Base Sepolia) │  re-verifies quorum, applies fills,
                        │  0x64867eac…  · book 0x0 nonce++  │  enforces balance/collateral/cap
                        └──────────────────────────────────┘
 ```
@@ -98,7 +98,7 @@ Liquidity is **two orthogonal layers** (this is the locked target):
 
 ```
                        ┌──────────────── GLOBAL LAYER (untrusted, read-side) ────────────────┐
-                       │  NBBO aggregation  +  smart-order-router  +  ONE SurplusSettlement   │
+                       │  NBBO aggregation  +  smart-order-router  +  ONE InferenceBazaarSettlement   │
                        │  "aggregation introduces NO new trust"                               │
                        └──────────────┬───────────────────┬───────────────────┬──────────────┘
                                       │                    │                   │
@@ -120,7 +120,7 @@ flowchart TB
   subgraph GLOBAL["GLOBAL LAYER — untrusted, read-side"]
     NBBO["NBBO aggregation<br/>(merge every venue's top-of-book)"]
     SOR["smart-order-router<br/>(split an order across venues)"]
-    SETTLE["ONE SurplusSettlement contract<br/>(per-book nonce + per-book attesters)"]
+    SETTLE["ONE InferenceBazaarSettlement contract<br/>(per-book nonce + per-book attesters)"]
   end
   subgraph A["INSTANCE A — book, 3-of-5"]
     AM["epoch-matcher<br/>gossip scoped to THIS set"]
@@ -153,7 +153,7 @@ comes from three things that all scale trivially because none of them match
 orders globally:
 
 - **One settlement contract** — every book settles to the same
-  `SurplusSettlement`, scoped by `bookId` (per-book nonce + per-book attester
+  `InferenceBazaarSettlement`, scoped by `bookId` (per-book nonce + per-book attester
   set). On-chain throughput, not consensus, is the only shared limit, and it's
   shardable across L2s later.
 - **Uniform, portable orders** — every order on every venue is the same EIP-712

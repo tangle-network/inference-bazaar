@@ -1,4 +1,4 @@
-import { computeQuotes } from '@surplus/market-core'
+import { computeQuotes } from '@inference-bazaar/market-core'
 import {
   type AgentProfile,
   type AgentRunSpec,
@@ -51,7 +51,7 @@ export function algorithmicQuoterClient(): SandboxClient {
 /** Spec for the algorithmic client: the prompt IS the tick, verbatim JSON. */
 export function algorithmicRunSpec(): AgentRunSpec<MarketTick> {
   return {
-    profile: { name: 'surplus-as-quoter' } as AgentProfile,
+    profile: { name: 'inference-bazaar-as-quoter' } as AgentProfile,
     name: 'as-quoter',
     taskToPrompt: (tick) => JSON.stringify(tick),
   }
@@ -74,7 +74,7 @@ export function agenticRunSpec(profile: AgentProfile): AgentRunSpec<MarketTick> 
 
 export function renderAgentPrompt(tick: MarketTick): string {
   return [
-    'You are a market maker on the Surplus inference-token exchange.',
+    'You are a market maker on the InferenceBazaar inference-token exchange.',
     `Instrument: ${tick.instrument.id} — prepaid ${tick.instrument.tokenKind} tokens for ${tick.instrument.modelId}.`,
     'Prices are integer micro-tsUSD per 1M tokens; quantities are tokens.',
     '',

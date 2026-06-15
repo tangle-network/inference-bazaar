@@ -1,8 +1,8 @@
 {
-  "name": "@surplus/app",
+  "name": "@inference-bazaar/app",
   "private": true,
   "type": "module",
-  "description": "Surplus Intelligence — marketplace UI for prepaid inference-token credits.",
+  "description": "InferenceBazaar Intelligence — marketplace UI for prepaid inference-token credits.",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",

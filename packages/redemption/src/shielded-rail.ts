@@ -1,4 +1,4 @@
-import type { SpendAuthPayload } from '@surplus/router-bridge'
+import type { SpendAuthPayload } from '@inference-bazaar/router-bridge'
 import { CreditBook } from './credit-book'
 import type { DebitError, DebitResult, MeteredCall } from './types'
 import { isDebitError } from './types'
@@ -25,7 +25,7 @@ export interface ShieldedCreditBinding {
    * Selling operator's payout address. Every auth is pinned here — the router
    * rejects a SpendAuth whose operator does not match the routed operator, so
    * the call can only be served (and claimed) by the operator who sold the
-   * surplus. Refusal of a valid pinned auth is the Phase 6 slashing condition.
+   * inference-bazaar. Refusal of a valid pinned auth is the Phase 6 slashing condition.
    */
   operatorAddress: string
   /** Tangle service id the operator serves under. */

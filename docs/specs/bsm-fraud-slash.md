@@ -1,7 +1,7 @@
 # BSM fraud → slash: making CLOB attesters accountable
 
 Status: **design** (2026-06-13). The redemption-default slash rail is live
-(`SurplusBSM.challengeDefault` → `proposeSlash`). This spec covers the missing
+(`InferenceBazaarBSM.challengeDefault` → `proposeSlash`). This spec covers the missing
 half: turning **CLOB attester misconduct** into an on-chain slash. It is a
 design to react to, not yet implemented — the core change touches consensus, so
 it needs sign-off before code.
@@ -113,7 +113,7 @@ for each signer in quorumSigs:
         ITangleSlashing(tangleCore).proposeSlash(serviceId, signer, FORGERY_SLASH_BPS, evidence);
 ```
 
-`evidence = keccak256(abi.encode("surplus_clob_forgery", bookId, batchNonce, ordersCommitment, forged.order.trader))`.
+`evidence = keccak256(abi.encode("inference_bazaar_clob_forgery", bookId, batchNonce, ordersCommitment, forged.order.trader))`.
 Tangle core runs its dispute window before the slash finalizes, exactly like
 `challengeDefault`.
 

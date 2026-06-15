@@ -1,6 +1,6 @@
 # Spec — Blueprint-wide market: venue discovery, NBBO aggregation, and the shared CLOB
 
-**The end-game market structure for Surplus.** Today's app trades against one
+**The end-game market structure for Inference Bazaar.** Today's app trades against one
 operator's venue on one service instance. The protocol underneath is already
 plural — many service instances per blueprint, many operators per instance,
 one global settlement contract. This spec defines the three phases that take
@@ -24,7 +24,7 @@ attested path — see §3 for exactly what is proven vs open.
    `getOperatorPreferences(blueprintId, operator)`. Discovery is protocol
    data, never app config.
 3. **Settlement is global and order formats are uniform.** One
-   `SurplusSettlement` per chain. Every order on every venue is the same
+   `InferenceBazaarSettlement` per chain. Every order on every venue is the same
    EIP-712 `Order` under the same domain; every issuer's lots are backed by
    the same collateral rule (collateral ≥ liability × (1 + penalty), checked
    at mint). Quotes from different operators are therefore *directly
@@ -142,9 +142,9 @@ deployed on services 3 + 4. One refinement over the spec sketch: matching is
 **set-deterministic, not price-time** — intra-epoch priority is price then
 order-digest, never arrival order, so the proposer has zero sequencing
 discretion and "peers re-execute" is exact rather than trust-the-claimed-order.
-Transport is a seam (`ClobNet`): the HTTP peer list (`SURPLUS_CLOB_OPERATORS`,
+Transport is a seam (`ClobNet`): the HTTP peer list (`INFERENCE_BAZAAR_CLOB_OPERATORS`,
 what the live fleet runs), or — built with `--features mesh` and
-`SURPLUS_MESH_ADDR` — blueprint-networking's PKI-gated gossip, where the
+`INFERENCE_BAZAAR_MESH_ADDR` — blueprint-networking's PKI-gated gossip, where the
 handshake whitelist IS the bonded attester set (`AllowedKeys::EvmAddresses`,
 EVM-recovery handshakes, topic scoped per chain+contract), proven by a 3-node
 in-process e2e (`operator/tests/mesh_clob.rs`). Settled orders are final at
@@ -168,7 +168,7 @@ that's fixed upstream. BSM fraud-claim wiring remains open.
 
 ## 4. Non-goals
 
-- Off-chain custody or netting outside SurplusSettlement.
+- Off-chain custody or netting outside InferenceBazaarSettlement.
 - A privileged "official" venue: the registry treats every bonded operator
   identically; the reference deployment is just the first entry.
 - Bearer credit tokens (unchanged from the redemption spec — transfer happens

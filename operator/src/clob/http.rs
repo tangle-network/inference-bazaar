@@ -14,7 +14,7 @@ use axum::{
     Json, Router,
 };
 use serde_json::json;
-use surplus_matcher::elect_proposer;
+use inference_bazaar_matcher::elect_proposer;
 
 use super::{Clob, ClobConfig, SharedClob, WireCancel, WireOrder, WireProposal};
 use crate::venue::Venue;
@@ -103,7 +103,7 @@ async fn clob_status(State(c): State<SharedClob>) -> impl IntoResponse {
 }
 
 /// Boot the shared CLOB from env, picking the transport: blueprint-networking's
-/// PKI mesh when compiled with `mesh` and `SURPLUS_MESH_ADDR` is set, else the
+/// PKI mesh when compiled with `mesh` and `INFERENCE_BAZAAR_MESH_ADDR` is set, else the
 /// HTTP peer list. Returns the service plus its HTTP surface (order entry +
 /// ops endpoints — mounted in both transports; in mesh mode the fanout simply
 /// rides the mesh instead of peer URLs).
@@ -118,7 +118,7 @@ pub fn start_from_env(venue: Arc<Venue>) -> anyhow::Result<Option<(SharedClob, R
         return Ok(None);
     };
     #[cfg(feature = "mesh")]
-    if std::env::var("SURPLUS_MESH_ADDR").is_ok() {
+    if std::env::var("INFERENCE_BAZAAR_MESH_ADDR").is_ok() {
         tracing::info!("shared CLOB transport: PKI mesh (the whole fleet must run mesh)");
         return crate::mesh::start(venue, cfg).map(Some);
     }

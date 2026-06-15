@@ -27,8 +27,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, value::RawValue, Value};
-use surplus_settlement::core::alloy_primitives::{keccak256, Address, B256, U256};
-use surplus_settlement::core::hex;
+use inference_bazaar_settlement::core::alloy_primitives::{keccak256, Address, B256, U256};
+use inference_bazaar_settlement::core::hex;
 
 use crate::venue::{Venue, VenueError};
 
@@ -53,7 +53,7 @@ fn settlement_domain_separator(chain_id: U256, settlement: Address) -> B256 {
         )
         .as_slice(),
     );
-    dom.extend_from_slice(keccak256(b"SurplusSettlement").as_slice());
+    dom.extend_from_slice(keccak256(b"InferenceBazaarSettlement").as_slice());
     dom.extend_from_slice(keccak256(b"1").as_slice());
     dom.extend_from_slice(&chain_id.to_be_bytes::<32>());
     dom.extend_from_slice(&[0u8; 12]);
@@ -157,7 +157,7 @@ pub type SharedSpend = Arc<SpendSvc>;
 
 fn journal_path() -> Option<std::path::PathBuf> {
     std::env::var("DATA_DIR")
-        .or_else(|_| std::env::var("SURPLUS_DATA_DIR"))
+        .or_else(|_| std::env::var("INFERENCE_BAZAAR_DATA_DIR"))
         .ok()
         .map(|d| std::path::Path::new(&d).join("spendkeys.json"))
 }
@@ -198,7 +198,7 @@ impl SpendSvc {
     /// unverifiable permit would be a fail-open.
     #[cfg(feature = "chain")]
     pub async fn register(&self, body: RegisterBody) -> Result<Value, VenueError> {
-        use surplus_settlement::core::recover_signer;
+        use inference_bazaar_settlement::core::recover_signer;
 
         let ctx = self.venue.settle_ctx_pub()?;
         let (rpc, op_key) = match (ctx.rpc_url.as_deref(), ctx.submitter_key()) {
@@ -228,7 +228,7 @@ impl SpendSvc {
             .ok_or_else(|| VenueError::Rejected("unrecoverable holder signature".into()))?;
 
         let client =
-            surplus_settlement::chain::SettlementClient::connect(rpc, op_key, ctx.contract)
+            inference_bazaar_settlement::chain::SettlementClient::connect(rpc, op_key, ctx.contract)
                 .await
                 .map_err(|e| VenueError::Chain(e.to_string()))?;
         let lot = client
@@ -265,7 +265,7 @@ impl SpendSvc {
             .venue
             .instruments()
             .into_iter()
-            .find(|i| surplus_settlement::instrument_hash(&i.id) == lot.instrument)
+            .find(|i| inference_bazaar_settlement::instrument_hash(&i.id) == lot.instrument)
             .ok_or_else(|| VenueError::Rejected("unknown instrument hash on lot".into()))?;
 
         let stored = StoredPermit {
@@ -349,7 +349,7 @@ impl SpendSvc {
             permit.session_key,
             voucher.cumulative,
         );
-        if surplus_settlement::core::recover_signer(vdigest, &vsig) != Some(permit.session_key) {
+        if inference_bazaar_settlement::core::recover_signer(vdigest, &vsig) != Some(permit.session_key) {
             return Err((
                 StatusCode::UNAUTHORIZED,
                 oai_err("bad_voucher", "voucher not signed by the session key"),
@@ -460,7 +460,7 @@ impl SpendSvc {
         let mut out = completion;
         if let Some(obj) = out.as_object_mut() {
             obj.insert(
-                "surplus".into(),
+                "inference-bazaar".into(),
                 json!({ "servedTokens": used, "nextCumulative": total }),
             );
         }
@@ -469,7 +469,7 @@ impl SpendSvc {
 
     /// One STREAMED chat completion (`stream: true`): forward the upstream's SSE
     /// chunks token-by-token while tee-ing the final `usage` chunk to meter, then
-    /// emit a private `surplus` event (the gateway consumes+strips it to advance
+    /// emit a private `inference-bazaar` event (the gateway consumes+strips it to advance
     /// its voucher) followed by `[DONE]`. Billing is identical to the buffered
     /// path — authorization, cap, and metering go through the same gates.
     pub async fn complete_stream(
@@ -514,7 +514,7 @@ impl SpendSvc {
                         Some("[DONE]") => {
                             let u = used.min(remaining);
                             svc.record_served(session, already_served + u, u);
-                            let _ = tx.unbounded_send(Ok(surplus_event(u, already_served + u)));
+                            let _ = tx.unbounded_send(Ok(inference_bazaar_event(u, already_served + u)));
                             let _ =
                                 tx.unbounded_send(Ok(axum::body::Bytes::from_static(DONE_EVENT)));
                             finalized = true;
@@ -545,7 +545,7 @@ impl SpendSvc {
             if !finalized {
                 let u = used.min(remaining);
                 svc.record_served(session, already_served + u, u);
-                let _ = tx.unbounded_send(Ok(surplus_event(u, already_served + u)));
+                let _ = tx.unbounded_send(Ok(inference_bazaar_event(u, already_served + u)));
                 let _ = tx.unbounded_send(Ok(axum::body::Bytes::from_static(DONE_EVENT)));
             }
         });
@@ -599,7 +599,7 @@ impl SpendSvc {
             permit.session_key,
             voucher.cumulative,
         );
-        if surplus_settlement::core::recover_signer(vdigest, &vsig) != Some(permit.session_key) {
+        if inference_bazaar_settlement::core::recover_signer(vdigest, &vsig) != Some(permit.session_key) {
             return Err((
                 StatusCode::UNAUTHORIZED,
                 oai_err("bad_voucher", "voucher not signed by the session key"),
@@ -636,7 +636,7 @@ impl SpendSvc {
             .venue
             .instruments()
             .iter()
-            .map(|i| json!({ "id": i.model_id, "object": "model", "owned_by": "surplus" }))
+            .map(|i| json!({ "id": i.model_id, "object": "model", "owned_by": "inference-bazaar" }))
             .collect();
         json!({ "object": "list", "data": models })
     }
@@ -653,7 +653,7 @@ impl SpendSvc {
             (Some(r), Some(k)) => (r, k),
             _ => {
                 return Ok(
-                    json!({ "mode": "dry", "hint": "set SURPLUS_RPC_URL + SURPLUS_SUBMITTER_KEY" }),
+                    json!({ "mode": "dry", "hint": "set INFERENCE_BAZAAR_RPC_URL + INFERENCE_BAZAAR_SUBMITTER_KEY" }),
                 )
             }
         };
@@ -666,7 +666,7 @@ impl SpendSvc {
             return Ok(json!({ "mode": "noop", "settled": 0 }));
         }
         let client =
-            surplus_settlement::chain::SettlementClient::connect(rpc, op_key, ctx.contract)
+            inference_bazaar_settlement::chain::SettlementClient::connect(rpc, op_key, ctx.contract)
                 .await
                 .map_err(|e| VenueError::Chain(e.to_string()))?;
         // Verify the on-chain domain separator once before settling — a wrong chain
@@ -752,7 +752,7 @@ impl SpendSvc {
     #[cfg(feature = "chain")]
     async fn reconcile_revocations(
         &self,
-        client: &surplus_settlement::chain::SettlementClient,
+        client: &inference_bazaar_settlement::chain::SettlementClient,
     ) -> Vec<Address> {
         let Ok(ctx) = self.venue.settle_ctx_pub() else {
             return Vec::new();
@@ -851,8 +851,8 @@ const DONE_EVENT: &[u8] = b"data: [DONE]\n\n";
 /// The operator's private settlement event, injected into the stream right before
 /// `[DONE]`. The gateway parses it to advance its voucher and STRIPS it, so the
 /// developer's vanilla OpenAI client never sees it.
-fn surplus_event(served: u64, next: u64) -> axum::body::Bytes {
-    format!("data: {{\"surplus\":{{\"servedTokens\":{served},\"nextCumulative\":{next}}}}}\n\n")
+fn inference_bazaar_event(served: u64, next: u64) -> axum::body::Bytes {
+    format!("data: {{\"inference-bazaar\":{{\"servedTokens\":{served},\"nextCumulative\":{next}}}}}\n\n")
         .into_bytes()
         .into()
 }
@@ -920,15 +920,15 @@ fn voucher_from_headers(headers: &HeaderMap) -> Result<VoucherHeader, (StatusCod
             .map(str::to_string)
     };
     let (Some(sk), Some(cum), Some(sig)) = (
-        hdr("x-surplus-session"),
-        hdr("x-surplus-voucher-cum"),
-        hdr("x-surplus-voucher-sig"),
+        hdr("x-inference-bazaar-session"),
+        hdr("x-inference-bazaar-voucher-cum"),
+        hdr("x-inference-bazaar-voucher-sig"),
     ) else {
         return Err((
             StatusCode::UNAUTHORIZED,
             oai_err(
                 "missing_voucher",
-                "Use the surplus gateway; raw clients cannot drive a spend channel.",
+                "Use the inference-bazaar gateway; raw clients cannot drive a spend channel.",
             ),
         ));
     };
@@ -995,7 +995,7 @@ async fn spend_flush(State(s): State<SharedSpend>) -> impl IntoResponse {
 
 /// Background settlement pump for vouchered-but-unsettled spend.
 pub fn spawn_spend_flush(svc: SharedSpend) {
-    let interval = std::env::var("SURPLUS_FLUSH_INTERVAL_SECS")
+    let interval = std::env::var("INFERENCE_BAZAAR_FLUSH_INTERVAL_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
         .filter(|v: &u64| *v >= 5)

@@ -41,8 +41,8 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use surplus_orderbook::{MatchingEngine, NativeBook, Order as BookOrder, Side as BookSide};
-use surplus_settlement_core::{
+use inference_bazaar_orderbook::{MatchingEngine, NativeBook, Order as BookOrder, Side as BookSide};
+use inference_bazaar_settlement_core::{
     alloy_primitives::B256, fills_hash, instrument_hash, order_digest, BatchFill, Eip712Domain,
     Order as SignedOrder, SIDE_BUY, SIDE_SELL,
 };
@@ -167,15 +167,15 @@ pub fn match_epoch(
 }
 
 /// The input-set commitment for the proven path. Re-exported from
-/// [`surplus_settlement_core`] so the guest, the host prover, and the contract's
+/// [`inference_bazaar_settlement_core`] so the guest, the host prover, and the contract's
 /// watchers all derive it identically. See its docs for the trust boundary.
-pub use surplus_settlement_core::orders_commitment;
+pub use inference_bazaar_settlement_core::orders_commitment;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use surplus_settlement_core::alloy_primitives::Address;
-    use surplus_settlement_core::{domain, SIDE_SELL};
+    use inference_bazaar_settlement_core::alloy_primitives::Address;
+    use inference_bazaar_settlement_core::{domain, SIDE_SELL};
 
     fn dom() -> Eip712Domain {
         domain(84532, Address::with_last_byte(0xcc))
