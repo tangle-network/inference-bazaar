@@ -341,7 +341,7 @@ function TradeTicket({
         )}
 
         <p className="mt-4 font-body text-[15px] leading-relaxed text-[var(--s-text-subtle)]">
-          Execution is atomic on SurplusSettlement (Base Sepolia): your signed order pairs with the
+          Execution is atomic on the settlement contract (Base Sepolia): your signed order pairs with the
           operator's signed quote, payment debits your deposited balance, and the credit lot is
           minted against the issuer's on-chain collateral.
         </p>

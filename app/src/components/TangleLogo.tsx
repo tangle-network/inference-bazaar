@@ -43,7 +43,7 @@ export function SurplusBrand({ compact = false }: { compact?: boolean }) {
     <div className="flex items-center gap-2.5">
       <TangleMark size={38} />
       <div className="leading-none">
-        <div className="font-display text-[22px] font-bold tracking-tight text-[var(--s-text)]">Surplus</div>
+        <div className="font-display text-[22px] font-bold tracking-tight text-[var(--s-text)]">Bazaar</div>
         <div className="mt-1.5 flex items-center gap-1 font-data text-[12px] uppercase tracking-[0.18em] text-[var(--s-text-muted)]">
           on <TangleMark size={9} idSuffix="sub" /> Tangle
         </div>

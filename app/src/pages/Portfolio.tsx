@@ -411,7 +411,7 @@ export default function PortfolioPage() {
         <Panel className="mt-4" title="Credit lots — on-chain">
           {lots.isLoading && (
             <div className="px-4 py-8 text-center font-data text-[15px] text-[var(--s-text-muted)]">
-              Scanning SurplusSettlement fills…
+              Scanning settlement fills…
             </div>
           )}
           {lots.isSuccess && (lots.data?.length ?? 0) === 0 && (
