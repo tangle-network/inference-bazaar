@@ -212,6 +212,32 @@ contract SpendTest is SettlementTestBase {
         assertEq(settlement.liability(seller), liabilityBefore - 750_000, "full notional released");
     }
 
+    /// A SpendVoucher commits only (lotId, sessionKey, servedCumulative) — NOT the
+    /// permit. The holder may sign several permits for the same lot+sessionKey (a
+    /// cap raise, a renewal). The ONE voucher the gateway signed must NOT settle
+    /// once per permit: the cumulative guard is per-LOT, so the second settle of
+    /// the same acknowledgement reverts. (Regression for the H1 over-billing bug.)
+    function test_voucherCannotReplayAcrossPermits() public {
+        uint64 exp = uint64(block.timestamp + 30 days);
+        InferenceBazaarSettlement.SpendPermit memory p1 = permit(40_000, exp);
+        InferenceBazaarSettlement.SpendPermit memory p2 = permit(50_000, exp); // same lot+session, different cap
+        bytes memory holderSig1 = signPermit(buyerKey, p1);
+        bytes memory holderSig2 = signPermit(buyerKey, p2);
+        bytes memory voucher = signVoucher(sessionKey, 10_000); // ONE acknowledgement of 10k
+
+        // First settle draws 10k against the lot.
+        settlement.settleSpend(p1, holderSig1, 10_000, voucher);
+        (,,, uint64 qty,,,) = settlement.lots(lotId);
+        assertEq(qty, 40_000, "10k drawn once");
+
+        // Re-presenting the SAME voucher under a DIFFERENT permit must NOT bill again.
+        bytes32 pd2 = settlement.spendPermitDigest(p2);
+        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.NothingToSettle.selector, pd2));
+        settlement.settleSpend(p2, holderSig2, 10_000, voucher);
+        (,,, qty,,,) = settlement.lots(lotId);
+        assertEq(qty, 40_000, "no double debit");
+    }
+
     /// Cross-stack pin: the operator's Rust spend_permit_digest / spend_voucher_digest
     /// must produce these exact digests for the same fields under the same domain.
     /// Mirrored in operator/src/spend.rs::tests::digests_match_contract_pin.
