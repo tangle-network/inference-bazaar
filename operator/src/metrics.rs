@@ -218,7 +218,9 @@ mod tests {
         set_gauge(names::POOL_SIZE, 7);
         let text = metrics().render_prometheus();
         assert!(text.contains("inference_bazaar_clob_batches_submitted_total 2"));
-        assert!(text.contains("inference_bazaar_clob_attestations_refused_total{verdict=\"forged\"} 1"));
+        assert!(
+            text.contains("inference_bazaar_clob_attestations_refused_total{verdict=\"forged\"} 1")
+        );
         assert!(text.contains("inference_bazaar_clob_pool_size 7"));
     }
 

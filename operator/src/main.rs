@@ -1,9 +1,9 @@
 //! `inference-bazaar-operator-lite` — the HTTP venue with no Tangle substrate. For local
 //! e2e and the first testnet smoke. The on-chain operator is `src/bin/blueprint.rs`.
 
-use std::sync::Arc;
 use inference_bazaar_operator::http;
 use inference_bazaar_operator::Venue;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -20,7 +20,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Shared CLOB (opt-in via INFERENCE_BAZAAR_CLOB_OPERATORS): gossip + epoch consensus.
     // Transport: PKI mesh when built with `mesh` + INFERENCE_BAZAAR_MESH_ADDR, else HTTP.
-    if let Some((_clob, clob_router)) = inference_bazaar_operator::clob::start_from_env(venue.clone())? {
+    if let Some((_clob, clob_router)) =
+        inference_bazaar_operator::clob::start_from_env(venue.clone())?
+    {
         app = app.merge(clob_router);
         tracing::info!("shared CLOB epoch service enabled");
     }
@@ -33,7 +35,8 @@ async fn main() -> anyhow::Result<()> {
     // Rate limiting wraps the MERGED app — `merge` does not propagate layers.
     let app = http::rate_limited(app);
 
-    let addr = std::env::var("INFERENCE_BAZAAR_OPERATOR_ADDR").unwrap_or_else(|_| "127.0.0.1:9100".into());
+    let addr =
+        std::env::var("INFERENCE_BAZAAR_OPERATOR_ADDR").unwrap_or_else(|_| "127.0.0.1:9100".into());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("inference-bazaar operator-lite listening on http://{addr}");
     axum::serve(listener, app).await?;

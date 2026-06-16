@@ -41,7 +41,9 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use inference_bazaar_orderbook::{MatchingEngine, NativeBook, Order as BookOrder, Side as BookSide};
+use inference_bazaar_orderbook::{
+    MatchingEngine, NativeBook, Order as BookOrder, Side as BookSide,
+};
 use inference_bazaar_settlement_core::{
     alloy_primitives::B256, fills_hash, instrument_hash, order_digest, BatchFill, Eip712Domain,
     Order as SignedOrder, SIDE_BUY, SIDE_SELL,

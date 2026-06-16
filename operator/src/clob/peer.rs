@@ -4,10 +4,10 @@
 //! view of this node's pool and election state).
 
 use axum::http::StatusCode;
-use serde_json::{json, Value};
 use inference_bazaar_matcher::{elect_proposer, verify_proposal, BatchProposal, Verdict};
 use inference_bazaar_settlement::core::alloy_primitives::B256;
 use inference_bazaar_settlement::core::{batch_digest, recover_signer};
+use serde_json::{json, Value};
 
 use super::{Clob, WireAttestation, WireProposal};
 
@@ -54,9 +54,10 @@ impl Clob {
         // request. One ecrecover, before any expensive work.
         let domain = self.domain().clone();
         let claimed_digest = batch_digest(wire.book_id, wire.batch_nonce, wire.fills_hash, &domain);
-        let proposer_sig =
-            inference_bazaar_settlement::core::hex::decode(wire.proposer_sig.trim_start_matches("0x"))
-                .unwrap_or_default();
+        let proposer_sig = inference_bazaar_settlement::core::hex::decode(
+            wire.proposer_sig.trim_start_matches("0x"),
+        )
+        .unwrap_or_default();
         if recover_signer(claimed_digest, &proposer_sig) != Some(wire.proposer) {
             return Err((
                 StatusCode::UNAUTHORIZED,
@@ -122,7 +123,9 @@ impl Clob {
                     attester: self.me,
                     signature: format!(
                         "0x{}",
-                        inference_bazaar_settlement::core::hex::encode(self.signer().sign_digest(digest),)
+                        inference_bazaar_settlement::core::hex::encode(
+                            self.signer().sign_digest(digest),
+                        )
                     ),
                 })
             }

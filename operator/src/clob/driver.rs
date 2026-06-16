@@ -4,10 +4,10 @@
 //! on-chain client and the membership reconciler (the contract is the source of
 //! truth for the attester set).
 
-use serde_json::{json, Value};
 use inference_bazaar_matcher::{aggregate_attestation, match_epoch, Attestation};
 use inference_bazaar_settlement::core::{batch_digest, BatchFill, Order};
 use inference_bazaar_settlement::SignedOrder;
+use serde_json::{json, Value};
 
 // Used only by the pre-match simulation, which is itself `chain`-gated.
 #[cfg(feature = "chain")]
@@ -64,8 +64,9 @@ impl Clob {
         &self,
         fills: &[BatchFill],
         domain: &inference_bazaar_settlement::Eip712Domain,
-    ) -> anyhow::Result<std::collections::HashSet<inference_bazaar_settlement::core::alloy_primitives::B256>>
-    {
+    ) -> anyhow::Result<
+        std::collections::HashSet<inference_bazaar_settlement::core::alloy_primitives::B256>,
+    > {
         use inference_bazaar_settlement::core::alloy_primitives::{B256, U256};
         use inference_bazaar_settlement::core::{order_struct_hash, SIDE_BUY};
         let Some(client) = self.chain_client().await? else {
@@ -189,7 +190,10 @@ impl Clob {
             batch_nonce,
             instrument_id: inst.id.clone(),
             proposer: self.me,
-            proposer_sig: format!("0x{}", inference_bazaar_settlement::core::hex::encode(self_sig)),
+            proposer_sig: format!(
+                "0x{}",
+                inference_bazaar_settlement::core::hex::encode(self_sig)
+            ),
             orders: snapshot,
             fills_hash: batch.fills_hash,
         };
@@ -287,7 +291,8 @@ impl Clob {
             return Ok(None);
         };
         let client =
-            inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract).await?;
+            inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
+                .await?;
         // Verify the on-chain domain separator once before we ever submit: a wrong
         // chain id / contract address would otherwise produce batch digests the
         // quorum can't verify, failing every settle confusingly. Fail closed.

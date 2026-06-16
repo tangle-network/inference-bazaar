@@ -22,13 +22,28 @@ contract SpendTest is SettlementTestBase {
         session = vm.addr(sessionKey);
     }
 
-    function permit(uint64 maxTokens, uint64 expiry) internal view returns (InferenceBazaarSettlement.SpendPermit memory) {
-        return
-            InferenceBazaarSettlement.SpendPermit({ lotId: lotId, sessionKey: session, maxTokens: maxTokens, expiry: expiry });
+    function permit(
+        uint64 maxTokens,
+        uint64 expiry
+    )
+        internal
+        view
+        returns (InferenceBazaarSettlement.SpendPermit memory)
+    {
+        return InferenceBazaarSettlement.SpendPermit({
+            lotId: lotId, sessionKey: session, maxTokens: maxTokens, expiry: expiry
+        });
     }
 
     /// Holder authorizes the session key (the one wallet signature).
-    function signPermit(uint256 key, InferenceBazaarSettlement.SpendPermit memory p) internal view returns (bytes memory) {
+    function signPermit(
+        uint256 key,
+        InferenceBazaarSettlement.SpendPermit memory p
+    )
+        internal
+        view
+        returns (bytes memory)
+    {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, settlement.spendPermitDigest(p));
         return abi.encodePacked(r, s, v);
     }
@@ -202,10 +217,12 @@ contract SpendTest is SettlementTestBase {
     /// Mirrored in operator/src/spend.rs::tests::digests_match_contract_pin.
     function test_spendDigestPins() public {
         vm.chainId(3799);
-        InferenceBazaarSettlement impl =
-            new InferenceBazaarSettlement(settlement.paymentToken(), 30 days, 6 hours, 1 hours, 500, 200, address(0xFEE));
+        InferenceBazaarSettlement impl = new InferenceBazaarSettlement(
+            settlement.paymentToken(), 30 days, 6 hours, 1 hours, 500, 200, address(0xFEE)
+        );
         vm.etch(address(0x1111111111111111111111111111111111111111), address(impl).code);
-        InferenceBazaarSettlement pinned = InferenceBazaarSettlement(address(0x1111111111111111111111111111111111111111));
+        InferenceBazaarSettlement pinned =
+            InferenceBazaarSettlement(address(0x1111111111111111111111111111111111111111));
         InferenceBazaarSettlement.SpendPermit memory p = InferenceBazaarSettlement.SpendPermit({
             lotId: keccak256("pin-lot"),
             sessionKey: 0x2222222222222222222222222222222222222222,

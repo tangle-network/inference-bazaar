@@ -48,9 +48,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
 use inference_bazaar_settlement::core::alloy_primitives::{keccak256, Address, B256, U256};
 use inference_bazaar_settlement::SignedOrder;
+use serde::{Deserialize, Serialize};
 
 use crate::config::Instrument;
 use crate::market::now_unix;

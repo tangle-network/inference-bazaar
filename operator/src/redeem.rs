@@ -24,11 +24,11 @@
 //!   POST /redeem/receipt  { redemptionId, servedTokens, workCommitment, signature } → settle tx
 
 use crate::venue::{Venue, VenueError};
+use inference_bazaar_settlement::core::alloy_primitives::{keccak256, Address, B256, U256};
+use inference_bazaar_settlement::instrument_hash;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use serde_json::{json, Value};
-use inference_bazaar_settlement::core::alloy_primitives::{keccak256, Address, B256, U256};
-use inference_bazaar_settlement::instrument_hash;
 
 /// EIP-712 domain `InferenceBazaarServe/1`, bound to the settlement contract + chain so
 /// an authorization for one deployment is meaningless on another.
@@ -253,9 +253,10 @@ impl Venue {
         let signer = recover_signer(digest, &sig)
             .ok_or_else(|| VenueError::Rejected("unrecoverable auth signature".into()))?;
 
-        let client = inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
-            .await
-            .map_err(|e| VenueError::Chain(e.to_string()))?;
+        let client =
+            inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
+                .await
+                .map_err(|e| VenueError::Chain(e.to_string()))?;
 
         // The redemption must be open, in deadline, holder-authorized, and on a
         // lot WE issued.
@@ -374,7 +375,8 @@ impl Venue {
         // reproduce the commitment before signing.
         let model_id_hash = keccak256(inst.model_id.as_bytes());
         let out_hash = output_hash(&completion);
-        let work = inference_bazaar_settlement::work_commitment(model_id_hash, messages_hash, out_hash);
+        let work =
+            inference_bazaar_settlement::work_commitment(model_id_hash, messages_hash, out_hash);
 
         {
             let mut redeem = self.redeem.lock().unwrap();
@@ -430,9 +432,10 @@ impl Venue {
         let sig = hex::decode(body.signature.trim_start_matches("0x"))
             .map_err(|_| VenueError::Rejected("signature is not hex".into()))?;
 
-        let client = inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
-            .await
-            .map_err(|e| VenueError::Chain(e.to_string()))?;
+        let client =
+            inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
+                .await
+                .map_err(|e| VenueError::Chain(e.to_string()))?;
         client
             .settle_redemption(rid, body.served_tokens, work, sig)
             .await
@@ -474,9 +477,10 @@ impl Venue {
         if pending.is_empty() {
             return Ok(json!({ "mode": "noop" }));
         }
-        let client = inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
-            .await
-            .map_err(|e| VenueError::Chain(e.to_string()))?;
+        let client =
+            inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
+                .await
+                .map_err(|e| VenueError::Chain(e.to_string()))?;
         let now = crate::market::now_unix();
         let (mut attested, mut finalized, mut dropped) = (0u32, 0u32, 0u32);
         for (rid_str, served, work, served_at) in pending {
@@ -500,7 +504,8 @@ impl Venue {
                     let Ok(book) = client.lot_book(r.lotId).await else {
                         continue;
                     };
-                    let digest = inference_bazaar_settlement::receipt_digest(rid, served, work, &ctx.domain);
+                    let digest =
+                        inference_bazaar_settlement::receipt_digest(rid, served, work, &ctx.domain);
                     let sig = signer.sign_digest(digest).to_vec();
                     match client
                         .settle_redemption_attested(book, rid, served, work, vec![sig])
@@ -596,9 +601,9 @@ mod tests {
             RedeemAction::Drop
         );
     }
-    use serde_json::json;
     use inference_bazaar_settlement::core::recover_signer;
     use inference_bazaar_settlement::Signer;
+    use serde_json::json;
 
     #[test]
     fn output_hash_ignores_nondeterministic_fields() {

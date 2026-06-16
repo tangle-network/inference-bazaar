@@ -160,7 +160,7 @@ let acked = 0
 const c1 = await chat('hello from the spend rail', acked)
 const served1 = c1.usage.completion_tokens
 if (!c1.choices?.[0]?.message?.content) throw new Error('no completion content')
-acked = c1.inference-bazaar.nextCumulative
+acked = c1['inference-bazaar'].nextCumulative
 await ack(acked) // trailing ack makes THIS request settleable
 console.log(`served ${served1} tokens: "${c1.choices[0].message.content}"`)
 
@@ -202,7 +202,7 @@ if (Number(lot0[3]) - Number(lot1[3]) !== served1) throw new Error('lot quantity
 // ── 5. Second call proves cumulative settlement ──────────────────────────────
 const c2 = await chat('again', acked)
 const served2 = c2.usage.completion_tokens
-acked = c2.inference-bazaar.nextCumulative
+acked = c2['inference-bazaar'].nextCumulative
 await ack(acked)
 await post(`${VENUE}/v1/spend/flush`, {})
 const settledCum = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [digest] })
@@ -236,10 +236,10 @@ if (events[events.length - 1] !== '[DONE]') throw new Error('stream did not term
 const parsed = events.filter((e) => e !== '[DONE]').map((e) => JSON.parse(e))
 const streamedText = parsed.map((c) => c.choices?.[0]?.delta?.content ?? '').join('')
 if (!streamedText.includes('stub reply')) throw new Error(`streamed content wrong: "${streamedText}"`)
-const inference-bazaarEv = parsed.find((c) => c.inference-bazaar)
-if (!inference-bazaarEv) throw new Error('operator did not emit a inference-bazaar event in the stream')
-const served3 = inference-bazaarEv.inference-bazaar.servedTokens
-acked = inference-bazaarEv.inference-bazaar.nextCumulative
+const ibEv = parsed.find((c) => c['inference-bazaar'])
+if (!ibEv) throw new Error('operator did not emit an inference-bazaar event in the stream')
+const served3 = ibEv['inference-bazaar'].servedTokens
+acked = ibEv['inference-bazaar'].nextCumulative
 if (acked !== served1 + served2 + served3)
   throw new Error(`stream nextCumulative ${acked} != ${served1 + served2 + served3}`)
 await ack(acked)

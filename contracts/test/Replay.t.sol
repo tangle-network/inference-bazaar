@@ -249,7 +249,8 @@ contract ReplayTest is SettlementTestBase {
         InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
         InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
         InferenceBazaarSettlement.BatchFill[] memory fills = new InferenceBazaarSettlement.BatchFill[](1);
-        fills[0] = InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 50_000, execPriceMicroPerM: 15_000_000 });
+        fills[0] =
+            InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 50_000, execPriceMicroPerM: 15_000_000 });
 
         settlement.settleBatchAttested(BOOK, fills, attest(fills));
         assertEq(settlement.bookNonce(BOOK), 1);

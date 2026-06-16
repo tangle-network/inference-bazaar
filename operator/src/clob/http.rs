@@ -13,8 +13,8 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde_json::json;
 use inference_bazaar_matcher::elect_proposer;
+use serde_json::json;
 
 use super::{Clob, ClobConfig, SharedClob, WireCancel, WireOrder, WireProposal};
 use crate::venue::Venue;

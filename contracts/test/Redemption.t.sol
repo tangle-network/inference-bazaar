@@ -123,7 +123,9 @@ contract RedemptionTest is SettlementTestBase {
         bytes32 id = settlement.requestRedemption(lotId, 50_000); // lotId is a settleFills lot
         bytes[] memory sigs = quorumSign(settlement.receiptDigest(id, 50_000, WORK));
         vm.expectRevert(
-            abi.encodeWithSelector(InferenceBazaarSettlement.RedemptionBookMismatch.selector, settlement.NO_BOOK(), BOOK)
+            abi.encodeWithSelector(
+                InferenceBazaarSettlement.RedemptionBookMismatch.selector, settlement.NO_BOOK(), BOOK
+            )
         );
         settlement.settleRedemptionAttested(BOOK, id, 50_000, WORK, sigs);
     }
@@ -302,7 +304,8 @@ contract RedemptionTest is SettlementTestBase {
             salt: keccak256("batch-sell")
         });
         InferenceBazaarSettlement.BatchFill[] memory fills = new InferenceBazaarSettlement.BatchFill[](1);
-        fills[0] = InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 50_000, execPriceMicroPerM: 15_000_000 });
+        fills[0] =
+            InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 50_000, execPriceMicroPerM: 15_000_000 });
         bytes32 fillsHash = keccak256(abi.encode(fills));
         bytes32 digest = keccak256(
             abi.encodePacked(
