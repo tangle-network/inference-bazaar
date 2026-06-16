@@ -41,7 +41,7 @@ TICK_JOB_INDEX="${TICK_JOB_INDEX:-5}"
 # workflow_tick takes one field: the instrument id. It must be a market the
 # venue actually quotes (live router reference) or the tick errors with
 # NoReference and no result lands. Override in /etc/inference-bazaar/tick-keeper-<id>.env.
-TICK_INSTRUMENT="${TICK_INSTRUMENT:-claude-sonnet-4-6:output}"
+TICK_INSTRUMENT="${TICK_INSTRUMENT:-groq/llama-3.1-8b-instant:output}"
 # Historical submission used gasLimit 234211 (gasUsed 0x3635d = 222045);
 # 400k gives headroom without risking a huge burn on revert.
 TICK_GAS_LIMIT="${TICK_GAS_LIMIT:-400000}"

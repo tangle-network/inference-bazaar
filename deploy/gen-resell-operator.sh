@@ -21,11 +21,11 @@
 #                   Tangle operator identity is imported into the keystore separately)
 #   SUBMITTER_KEY   gas/submitter key, 0x-hex (keep distinct from OPERATOR_KEY)
 #   ROUTER_API_KEY  this operator's OWN Tangle Router API key (the resell credential)
-#   INSTRUMENT      market to make, e.g. anthropic/claude-opus-4-8:output
+#   INSTRUMENT      market to make, e.g. groq/llama-3.1-8b-instant:output
 #
 # Usage:
 #   OP_N=5 OPERATOR_KEY=0x.. SUBMITTER_KEY=0x.. ROUTER_API_KEY=tngl-.. \
-#   INSTRUMENT=anthropic/claude-opus-4-8:output deploy/gen-resell-operator.sh
+#   INSTRUMENT=groq/llama-3.1-8b-instant:output deploy/gen-resell-operator.sh
 set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -33,7 +33,7 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${OPERATOR_KEY:?set OPERATOR_KEY -- 0x-hex EVM attester key}"
 : "${ROUTER_API_KEY:?set ROUTER_API_KEY -- this operator Tangle Router API key}"
 SUBMITTER_KEY="${SUBMITTER_KEY:-$OPERATOR_KEY}"
-INSTRUMENT="${INSTRUMENT:-anthropic/claude-opus-4-8:output}"
+INSTRUMENT="${INSTRUMENT:-groq/llama-3.1-8b-instant:output}"
 ROUTER_URL="${ROUTER_URL:-https://router.tangle.tools}"
 SETTLEMENT_ADDR="${INFERENCE_BAZAAR_SETTLEMENT_ADDR:-0x64867eacf2e4581d182c2Be634cfD7fF3D3d9f83}"
 BLUEPRINT_ID="${BLUEPRINT_ID:-17}"

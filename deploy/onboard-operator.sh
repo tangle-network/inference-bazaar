@@ -78,7 +78,7 @@ INFERENCE_BAZAAR_RPC_URL=$INFERENCE_BAZAAR_RPC_URL
 INFERENCE_BAZAAR_FROM_BLOCK=${INFERENCE_BAZAAR_FROM_BLOCK:-0}
 INFERENCE_BAZAAR_OPERATOR_KEY=$OPERATOR_KEY
 INFERENCE_BAZAAR_SUBMITTER_KEY=$SUBMITTER_KEY
-INFERENCE_BAZAAR_INSTRUMENT=${INFERENCE_BAZAAR_INSTRUMENT:-anthropic/claude-opus-4-8:output}
+INFERENCE_BAZAAR_INSTRUMENT=${INFERENCE_BAZAAR_INSTRUMENT:-groq/llama-3.1-8b-instant:output}
 INFERENCE_BAZAAR_MM_SIZE=${INFERENCE_BAZAAR_MM_SIZE:-50000}
 INFERENCE_BAZAAR_OPERATOR_ADDR=${INFERENCE_BAZAAR_OPERATOR_ADDR:-127.0.0.1:9100}
 INFERENCE_BAZAAR_SIDECAR_URL=${INFERENCE_BAZAAR_SIDECAR_URL:-http://127.0.0.1:9110}
@@ -107,7 +107,7 @@ Next:
        cargo run --release -p inference-bazaar-operator --bin inference-bazaar-operator-lite
      (or the blueprint runner: --bin inference-bazaar-operator --features blueprint -- run)
   3. Quote: curl -X POST http://127.0.0.1:9100/mm-tick -H 'content-type: application/json' \\
-       -d '{"instrumentId":"${INFERENCE_BAZAAR_INSTRUMENT:-anthropic/claude-opus-4-8:output}"}'
+       -d '{"instrumentId":"${INFERENCE_BAZAAR_INSTRUMENT:-groq/llama-3.1-8b-instant:output}"}'
 
 To join the on-chain blueprint service (governance, multi-party), see
 docs/OPERATOR_ONBOARDING.md §8 — register, request-service, get approved.

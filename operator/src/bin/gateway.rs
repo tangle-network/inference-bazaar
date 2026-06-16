@@ -26,9 +26,10 @@ use std::sync::{Arc, Mutex};
 
 use axum::{
     extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::{get, post},
+    http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Response},
+    routing::{get, options, post},
     Json, Router,
 };
 use inference_bazaar_operator::spend::spend_voucher_digest;
@@ -377,6 +378,52 @@ async fn models(State(g): State<Shared>) -> impl IntoResponse {
     }
 }
 
+async fn cors_preflight() -> impl IntoResponse {
+    let mut headers = HeaderMap::new();
+    apply_cors_headers(&mut headers);
+    (StatusCode::NO_CONTENT, headers)
+}
+
+async fn with_cors(req: Request<axum::body::Body>, next: Next) -> Response {
+    if req.method() == Method::OPTIONS {
+        return cors_preflight().await.into_response();
+    }
+    let mut res = next.run(req).await;
+    apply_cors_headers(res.headers_mut());
+    res
+}
+
+fn apply_cors_headers(headers: &mut HeaderMap) {
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("GET,POST,OPTIONS"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static("content-type,authorization"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_MAX_AGE,
+        HeaderValue::from_static("600"),
+    );
+    headers.insert(
+        HeaderNameExt::access_control_allow_private_network(),
+        HeaderValue::from_static("true"),
+    );
+}
+
+struct HeaderNameExt;
+
+impl HeaderNameExt {
+    fn access_control_allow_private_network() -> header::HeaderName {
+        header::HeaderName::from_static("access-control-allow-private-network")
+    }
+}
+
 fn err(code: &str, message: &str) -> Value {
     json!({ "error": { "type": code, "code": code, "message": message } })
 }
@@ -509,9 +556,11 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let app = Router::new()
-        .route("/v1/chat/completions", post(chat))
-        .route("/v1/models", get(models))
-        .with_state(gateway);
+        .route("/v1/chat/completions", post(chat).options(cors_preflight))
+        .route("/v1/models", get(models).options(cors_preflight))
+        .route("/v1/*path", options(cors_preflight))
+        .with_state(gateway)
+        .layer(axum::middleware::from_fn(with_cors));
     let listener = tokio::net::TcpListener::bind(&listen).await?;
     axum::serve(listener, app).await?;
     Ok(())

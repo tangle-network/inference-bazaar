@@ -117,7 +117,7 @@ Pick one — the operator panics at boot if a bonded issuer has neither:
   (+ `INFERENCE_BAZAAR_INFERENCE_API_KEY` if it needs auth).
 
 The model you serve must match the instrument you quote
-(`<model>:<kind>`, e.g. `anthropic/claude-opus-4-8:output`).
+(`<model>:<kind>`, e.g. `groq/llama-3.1-8b-instant:output`).
 
 ---
 
@@ -154,7 +154,7 @@ for a bonded issuer:
 | Var | Default | What |
 |---|---|---|
 | `INFERENCE_BAZAAR_OPERATOR_ADDR` | `127.0.0.1:9100` | HTTP bind address |
-| `INFERENCE_BAZAAR_INSTRUMENT` | `anthropic/claude-opus-4-8:output` | boot market `<model>:<kind>` |
+| `INFERENCE_BAZAAR_INSTRUMENT` | `groq/llama-3.1-8b-instant:output` | boot market `<model>:<kind>` |
 | `INFERENCE_BAZAAR_MM_SIZE` | `50000` | quote size per level, tokens |
 | `INFERENCE_BAZAAR_ROUTER_URL` | `https://router.tangle.tools` | reference pricing |
 | `INFERENCE_BAZAAR_FROM_BLOCK` | `0` | block to scan from for `/credits` (set to the deploy block) |
@@ -206,7 +206,7 @@ Once an instance is live, kick a quote cycle (or let the tick-keeper do it every
 ```bash
 curl -X POST http://127.0.0.1:9100/mm-tick \
   -H 'content-type: application/json' \
-  -d '{"instrumentId":"anthropic/claude-opus-4-8:output"}'
+  -d '{"instrumentId":"groq/llama-3.1-8b-instant:output"}'
 ```
 
 You're live when `GET /book` shows your quotes and a buyer's `/rfq` returns a

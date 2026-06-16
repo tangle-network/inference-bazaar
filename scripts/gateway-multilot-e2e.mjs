@@ -14,7 +14,7 @@ const VENUE = process.env.VENUE ?? 'http://127.0.0.1:9210'
 const GW_PORT = Number(process.env.GW_PORT ?? 8088)
 const GATEWAY_BIN = process.env.GATEWAY_BIN ?? './target/debug/inference-bazaar-gateway'
 const GW = `http://127.0.0.1:${GW_PORT}`
-const INSTRUMENT = 'claude-sonnet-4-6:output'
+const INSTRUMENT = process.env.INSTRUMENT ?? 'groq/llama-3.1-8b-instant:output'
 
 const operator = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80')
 const buyer = privateKeyToAccount('0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6')
@@ -23,8 +23,7 @@ const settlementAbi = parseAbi([
   'function deposit(uint256 amount)',
   'function depositCollateral(uint256 amount)',
   'function lots(bytes32) view returns (address holder, address issuer, bytes32 instrument, uint64 qtyTokens, uint64 lockedTokens, uint64 expiry, uint128 notionalMicro)',
-  'function spendSettled(bytes32 permitDigest) view returns (uint64)',
-  'function spendPermitDigest((bytes32 lotId, address sessionKey, uint64 maxTokens, uint64 expiry) p) view returns (bytes32)',
+  'function spendSettled(bytes32 lotId) view returns (uint64)',
 ])
 const usdAbi = parseAbi([
   'function mint(address to, uint256 amount)',
@@ -207,15 +206,11 @@ try {
 
   // ── Flush + prove BOTH lots debited on-chain ────────────────────────────────
   await post(`${VENUE}/v1/spend/flush`, {})
-  const digest = (lotId, cap) => pub.readContract({
-    address: SETTLEMENT, abi: settlementAbi, functionName: 'spendPermitDigest',
-    args: [{ lotId, sessionKey: lotId === c1.lotId ? c1.session.address : c2.session.address, maxTokens: cap, expiry }],
-  })
-  const settledOf = async (lotId, cap) => Number(await pub.readContract({
-    address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [await digest(lotId, cap)],
+  const settledOf = async (lotId) => Number(await pub.readContract({
+    address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [lotId],
   }))
-  const settled1 = await settledOf(c1.lotId, CAP1)
-  const settled2a = await settledOf(c2.lotId, CAP2)
+  const settled1 = await settledOf(c1.lotId)
+  const settled2a = await settledOf(c2.lotId)
   if (settled1 !== Number(CAP1)) throw new Error(`lot1 should be fully drained to ${CAP1}, got ${settled1}`)
   if (settled2a <= 0) throw new Error(`lot2 should have served the failover calls, got ${settled2a}`)
 
@@ -239,7 +234,7 @@ try {
 
   // The streaming + post-restart calls must have billed lot2 further on-chain.
   await post(`${VENUE}/v1/spend/flush`, {})
-  const settled2b = await settledOf(c2.lotId, CAP2)
+  const settled2b = await settledOf(c2.lotId)
   if (settled2b <= settled2a) throw new Error(`lot2 should bill further after stream+restart: ${settled2a} -> ${settled2b}`)
 
   console.log('')

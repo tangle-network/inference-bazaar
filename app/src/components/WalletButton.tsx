@@ -69,9 +69,14 @@ export function WalletButton({
             )
           }
           return (
-            <button onClick={show} className="btn-primary h-10" disabled={status === 'reconnecting'}>
+            <button
+              onClick={show}
+              className="btn-primary h-10 w-10 !px-0 sm:w-auto sm:!px-4"
+              disabled={status === 'reconnecting'}
+              title="Connect wallet"
+            >
               <span className="i-ph:wallet text-[18px]" />
-              {status === 'reconnecting' ? 'Reconnecting…' : 'Connect'}
+              <span className="hidden sm:inline">{status === 'reconnecting' ? 'Reconnecting…' : 'Connect'}</span>
             </button>
           )
         }
