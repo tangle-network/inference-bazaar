@@ -1,6 +1,7 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useReadContracts } from 'wagmi'
+import { useQueryClient } from '@tanstack/react-query'
 import { Identicon } from '@tangle-network/blueprint-ui/components'
 import type { Address } from 'viem'
 import { formatUnits } from 'viem'
@@ -10,7 +11,7 @@ import { cn } from '~/lib/cn'
 import { compactUsd, truncAddr } from '~/lib/format'
 import { CHAIN, useInstruments, useVenueHealth } from '~/lib/api'
 import { SETTLEMENT, SETTLEMENT_ABI } from '~/lib/settlement'
-import { useVenueRegistry } from '~/lib/venues'
+import { useVenueRegistry, useMarketRequests, requestMarket, type Venue } from '~/lib/venues'
 
 const STAKING_ABI = [
   {
@@ -28,6 +29,97 @@ const STAKING_ABI = [
     stateMutability: 'view',
   },
 ] as const
+
+/** Buyer-side demand: request a market operators aren't quoting yet, and see the
+ * aggregated demand book (what's wanted vs already quoted) across the operator set. */
+function RequestMarket({ venues, servedIds }: { venues: Venue[] | undefined; servedIds: Set<string> }) {
+  const [model, setModel] = useState('')
+  const [kind, setKind] = useState<'output' | 'input'>('output')
+  const [busy, setBusy] = useState(false)
+  const [sent, setSent] = useState<string | null>(null)
+  const demand = useMarketRequests(venues)
+  const qc = useQueryClient()
+  const reachable = (venues ?? []).filter((v) => v.healthy).length
+
+  async function submit() {
+    const m = model.trim()
+    if (!m || busy) return
+    setBusy(true)
+    setSent(null)
+    try {
+      const n = await requestMarket(venues, m, kind)
+      setSent(
+        n > 0
+          ? `Requested ${m}:${kind} — ${n} operator${n === 1 ? '' : 's'} notified`
+          : 'No operators reachable right now',
+      )
+      setModel('')
+      void qc.invalidateQueries({ queryKey: ['market-requests'] })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Panel className="mt-4 p-4" title="Request a market">
+      <p className="font-body text-[15px] text-[var(--s-text-muted)]">
+        Want a model the operators aren't quoting yet? Signal demand — operators read the demand
+        book to decide what to list next.
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          placeholder="anthropic/claude-opus-4-8"
+          className="h-10 min-w-[240px] flex-1 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-glass)] px-3 font-data text-[15px] text-[var(--s-text)] placeholder:text-[var(--s-text-subtle)] focus-ring"
+        />
+        <select
+          value={kind}
+          onChange={(e) => setKind(e.target.value as 'output' | 'input')}
+          className="h-10 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-glass)] px-2 font-data text-[15px] text-[var(--s-text)]"
+        >
+          <option value="output">output</option>
+          <option value="input">input</option>
+        </select>
+        <button
+          onClick={submit}
+          disabled={busy || !model.trim() || reachable === 0}
+          className="btn-primary h-10"
+        >
+          {busy ? 'Sending…' : 'Request'}
+        </button>
+      </div>
+      {sent && <div className="mt-2 font-data text-[15px] text-[var(--s-emerald)]">{sent}</div>}
+
+      {(demand.data?.length ?? 0) > 0 && (
+        <div className="mt-4">
+          <div className="mono-label mb-2">Most requested</div>
+          <div className="flex flex-col gap-1.5">
+            {demand.data!.slice(0, 8).map((d) => (
+              <div
+                key={d.instrumentId}
+                className="flex items-center justify-between gap-3 rounded-[6px] bg-[var(--s-bg)]/40 px-3 py-1.5"
+              >
+                <span className="font-data text-[15px] text-[var(--s-text)]">{d.instrumentId}</span>
+                <span className="flex items-center gap-2">
+                  {servedIds.has(d.instrumentId) ? (
+                    <Badge tone="emerald">quoted</Badge>
+                  ) : (
+                    <Badge tone="amber">wanted</Badge>
+                  )}
+                  <span className="font-data text-[15px] tabular-nums text-[var(--s-text-muted)]">
+                    {d.count}×
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Panel>
+  )
+}
 
 export default function OperatorsPage() {
   // Multi-instance: the directory is the UNION of operators across every ACTIVE
@@ -95,6 +187,11 @@ export default function OperatorsPage() {
           <Stat label="Markets quoted" value={instruments.data?.length ?? '…'} />
           <Stat label="Chain" value="Base Sepolia" sub={`#${CHAIN.id}`} />
         </div>
+
+        <RequestMarket
+          venues={registry.data}
+          servedIds={new Set((instruments.data ?? []).map((i) => i.id))}
+        />
 
         <Panel className="mt-4" title="On-chain operator set">
           {registry.isError && (

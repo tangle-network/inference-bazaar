@@ -90,6 +90,17 @@ pub struct Venue {
     /// Runtime quoting overrides set by the `configure` job (job 1). `None`
     /// fields fall back to the boot config; mm_tick applies them per tick.
     pub(crate) overrides: Mutex<ParamOverride>,
+    /// Buyer-side demand: instrumentId -> (request count, last unix ts). A buyer
+    /// hits `POST /market-requests` for a model they want quoted; operators read
+    /// `GET /market-requests` to decide what to list next. Persisted to DATA_DIR.
+    pub(crate) market_requests: Mutex<HashMap<String, MarketDemand>>,
+}
+
+/// Accumulated demand for one market a buyer asked operators to make.
+#[derive(Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub(crate) struct MarketDemand {
+    pub count: u64,
+    pub last_ts: u64,
 }
 
 /// Operator-wide quoting knobs the `configure` job can retune at runtime
@@ -194,6 +205,7 @@ impl Venue {
             inference,
             attester_only,
             overrides: Mutex::new(ParamOverride::default()),
+            market_requests: Mutex::new(load_market_requests()),
         };
         venue.load_outbox();
         venue.load_refs();
@@ -347,6 +359,34 @@ impl Venue {
             })
             .collect();
         json!({ "ok": true, "instruments": instruments, "inference": self.inference.target() })
+    }
+
+    /// Record a buyer's request that operators make a market in `model:kind`.
+    /// Idempotent-ish: it accumulates a count so demand is visible, not spammy.
+    pub fn record_market_request(&self, model: &str, kind: &str) -> Value {
+        let id = format!("{model}:{kind}");
+        let now = crate::market::now_unix();
+        {
+            let mut m = self.market_requests.lock().unwrap();
+            let e = m.entry(id.clone()).or_default();
+            e.count += 1;
+            e.last_ts = now;
+            persist_market_requests(&m);
+        }
+        json!({ "ok": true, "instrumentId": id })
+    }
+
+    /// The demand book: which markets buyers asked for, most-wanted first.
+    pub fn market_requests_json(&self) -> Value {
+        let m = self.market_requests.lock().unwrap();
+        let mut rows: Vec<Value> = m
+            .iter()
+            .map(|(id, d)| {
+                json!({ "instrumentId": id, "count": d.count, "lastRequestedAt": d.last_ts })
+            })
+            .collect();
+        rows.sort_by(|a, b| b["count"].as_u64().cmp(&a["count"].as_u64()));
+        json!({ "requests": rows })
     }
 
     /// `configure` (job 1): retune operator-wide quoting knobs at runtime. Each
@@ -660,6 +700,30 @@ fn refs_path() -> Option<std::path::PathBuf> {
     std::env::var("DATA_DIR")
         .ok()
         .map(|d| std::path::Path::new(&d).join("refs.json"))
+}
+
+fn market_requests_path() -> Option<std::path::PathBuf> {
+    std::env::var("DATA_DIR")
+        .ok()
+        .map(|d| std::path::Path::new(&d).join("market-requests.json"))
+}
+
+fn load_market_requests() -> HashMap<String, MarketDemand> {
+    market_requests_path()
+        .and_then(|p| std::fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn persist_market_requests(m: &HashMap<String, MarketDemand>) {
+    let Some(path) = market_requests_path() else {
+        return;
+    };
+    if let Ok(json) = serde_json::to_vec_pretty(m) {
+        if let Err(e) = std::fs::write(&path, json) {
+            tracing::warn!("failed to persist market requests: {e}");
+        }
+    }
 }
 
 fn redeem_path() -> Option<std::path::PathBuf> {
