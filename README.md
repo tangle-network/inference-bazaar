@@ -71,6 +71,18 @@ final ref mid   $15.1555 per 1M tokens
 loop iterations 120, cost $0
 ```
 
+## Run an operator
+
+To sell inference on the market — build the operator, post collateral, point it
+at your inference backend, and quote — follow **[docs/OPERATOR_ONBOARDING.md](docs/OPERATOR_ONBOARDING.md)**.
+The mechanical steps are scripted:
+
+```bash
+source deploy/.env.deployed                 # contract coordinates from a deploy
+OPERATOR_KEY=0x... INFERENCE_BAZAAR_INFERENCE_URL=https://your-backend/v1 \
+  COLLATERAL_AMOUNT=20000000 deploy/onboard-operator.sh
+```
+
 ## Using the loop
 
 ```ts
