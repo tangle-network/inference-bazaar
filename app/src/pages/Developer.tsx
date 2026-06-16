@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAccount, useReadContract, useSignTypedData } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import type { Address, Hex } from 'viem'
@@ -24,8 +25,7 @@ import { useVenueRegistry, endpointFor, type Venue } from '~/lib/venues'
 import { privacyOn } from '~/lib/privacy'
 
 type Tab = 'gateway' | 'router' | 'tcloud'
-type AgentProfile = 'builder' | 'operator' | 'research' | 'custom'
-type ToolKey = 'market' | 'chain' | 'memory' | 'mcp'
+type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
 
 interface ChatMessage {
   id: string
@@ -44,31 +44,10 @@ interface ChatModelOption {
   outputMicroPerM: number
 }
 
-const PROFILE_LABELS: Record<AgentProfile, string> = {
-  builder: 'Builder',
-  operator: 'Operator',
-  research: 'Research',
-  custom: 'Custom',
-}
-
-const PROFILE_PROMPTS: Record<AgentProfile, string> = {
-  builder: 'You are a concise senior engineer. Prefer concrete implementation steps and runnable commands.',
-  operator: 'You are an inference-market operator. Prioritize reliability, cost, settlement risk, and live verification.',
-  research: 'You are a research analyst. Separate measured facts from inference and include the smallest useful evidence.',
-  custom: 'Follow the agent profile below exactly where it is specific.',
-}
-
-const TOOL_OPTIONS: { key: ToolKey; label: string; icon: string; prompt: string }[] = [
-  { key: 'market', label: 'Market', icon: 'i-ph:chart-line-up', prompt: 'Can reason over Inference Bazaar lots, books, operators, prices, and spend state.' },
-  { key: 'chain', label: 'Chain', icon: 'i-ph:link-simple-horizontal', prompt: 'Can request on-chain evidence such as tx hashes, balances, lots, and settlement status.' },
-  { key: 'memory', label: 'Memory', icon: 'i-ph:database', prompt: 'Can maintain project context across turns when the caller provides it.' },
-  { key: 'mcp', label: 'MCP', icon: 'i-ph:plugs-connected', prompt: 'Can call declared MCP servers when an external runtime provides those tools.' },
-]
-
 const STARTER_PROMPTS = [
-  'Price this agent workflow against my lots',
-  'Draft a gateway client for a Next.js app',
-  'Check the settlement risk before I scale this',
+  'Show me a minimal OpenAI client for my lot-backed key',
+  'Compare cheap models for a coding assistant',
+  'What should I verify before routing this through production?',
 ]
 
 /** Three ways to spend credits over the API. Each tab is the real integration
@@ -78,7 +57,7 @@ const TABS: Record<Tab, { label: string; badge: { tone: 'emerald' | 'amber'; tex
   gateway: {
     label: 'Gateway',
     badge: { tone: 'emerald', text: 'Live' },
-    note: 'Zero trust — the gateway runs on your machine and holds the session key; the operator can never bill more than it signs.',
+    note: 'Local gateway for lot-backed API keys. Your app talks OpenAI-compatible HTTP; the gateway signs spend vouchers.',
     code: `from openai import OpenAI
 
 # Run inference-bazaar-gateway with a minted lot key, then call:
@@ -92,7 +71,7 @@ resp = client.chat.completions.create(
   router: {
     label: 'Router',
     badge: { tone: 'amber', text: 'Credits rolling out' },
-    note: 'One endpoint for every model on Tangle. The endpoint is live; auto-spending your held credit lots through it is rolling out — today route via your platform balance or shielded credits.',
+    note: 'Live model router. Auto-spending Bazaar lots through the router is not the default path yet.',
     code: `from openai import OpenAI
 
 # The Tangle Router — one base URL for every model, routed to a bonded operator.
@@ -106,7 +85,7 @@ resp = client.chat.completions.create(
   tcloud: {
     label: 'tcloud',
     badge: { tone: 'amber', text: 'Preview · tcloud#41' },
-    note: 'The tcloud buyer SDK: `pricing` picks how you pay. credits spends your discounted lots soonest-expiry-first; market/limit cap the price you accept.',
+    note: 'SDK preview for cloud apps. Credit-lot pricing is still behind the preview surface.',
     code: `import { chat } from "@tangle-network/tcloud"
 
 const res = await chat({
@@ -123,7 +102,7 @@ function Quickstart() {
   return (
     <Panel className="p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-display text-[17px] font-semibold text-[var(--s-text)]">Connect your app</h2>
+        <h2 className="font-display text-[17px] font-semibold text-[var(--s-text)]">API access</h2>
         <Segmented
           size="sm"
           value={tab}
@@ -215,11 +194,17 @@ function ChatModelPicker({
   models,
   onChange,
   loading,
+  compact = false,
+  placement = 'bottom',
+  className,
 }: {
   value: string
   models: ChatModelOption[]
   onChange: (id: string) => void
   loading: boolean
+  compact?: boolean
+  placement?: 'top' | 'bottom'
+  className?: string
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -244,21 +229,26 @@ function ChatModelPicker({
   }, [open])
 
   return (
-    <div ref={ref} className="relative min-w-0">
+    <div ref={ref} className={cn('relative min-w-0', className)}>
       <button
         type="button"
         data-testid="developer-model-picker"
         onClick={() => setOpen((v) => !v)}
-        className="flex h-[46px] w-full min-w-0 items-center gap-3 rounded-[9px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] outline-none transition-colors hover:border-[var(--s-accent)]/45 focus-visible:border-[var(--s-accent)]/70"
+        className={cn(
+          'flex w-full min-w-0 items-center text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] outline-none transition-colors hover:border-[var(--s-accent)]/45 focus-visible:border-[var(--s-accent)]/70',
+          compact
+            ? 'h-8 gap-2 rounded-[7px] border border-transparent bg-[var(--s-bg)]/60 px-2'
+            : 'h-[46px] gap-3 rounded-[9px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3',
+        )}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <ProviderMark provider={selected.provider} />
+        <ProviderMark provider={selected.provider} size={compact ? 'sm' : 'md'} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate font-data text-[15px] font-semibold text-[var(--s-text)]">
+          <span className={cn('block truncate font-data font-semibold text-[var(--s-text)]', compact ? 'text-[12px]' : 'text-[15px]')}>
             {selected.name}
           </span>
-          <span className="mt-0.5 flex min-w-0 items-center gap-2 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
+          <span className={cn('mt-0.5 min-w-0 items-center gap-2 font-data uppercase tracking-wide text-[var(--s-text-muted)]', compact ? 'hidden' : 'flex text-[12px]')}>
             <span className="truncate">{selected.provider}</span>
             <span className="text-[var(--s-text-subtle)]">/</span>
             <span>{formatModelPrice(selected.outputMicroPerM)} out</span>
@@ -270,7 +260,10 @@ function ChatModelPicker({
       {open && (
         <div
           data-testid="developer-model-picker-list"
-          className="absolute left-0 top-full z-40 mt-2 w-[min(92vw,560px)] overflow-hidden rounded-[10px] border border-[var(--s-border)] bg-[var(--s-panel)] shadow-[0_18px_60px_rgba(0,0,0,0.28)]"
+          className={cn(
+            'absolute left-0 z-40 w-[min(92vw,560px)] overflow-hidden rounded-[10px] border border-[var(--s-border)] bg-[var(--s-panel)] shadow-[0_18px_60px_rgba(0,0,0,0.28)]',
+            placement === 'top' ? 'bottom-full mb-2' : 'top-full mt-2',
+          )}
           role="listbox"
         >
           <div className="border-b border-[var(--s-divider)] p-2">
@@ -337,56 +330,87 @@ function ChatModelPicker({
   )
 }
 
-function lines(raw: string) {
-  return raw
-    .split(/[\n,]/)
-    .map((x) => x.trim())
-    .filter(Boolean)
+function supportsNativeThinking(modelId: string) {
+  const id = modelId.toLowerCase()
+  return id.includes('openai/') || id.startsWith('gpt-') || /\bo[134]\b/.test(id)
 }
 
-function buildSystemPrompt(params: {
-  profile: AgentProfile
-  customProfile: string
-  thinking: boolean
-  skills: string
-  tools: Set<ToolKey>
-  mcp: string
-}) {
-  const skillList = lines(params.skills)
-  const mcpList = lines(params.mcp)
-  const toolPrompts = TOOL_OPTIONS.filter((t) => params.tools.has(t.key)).map((t) => `- ${t.prompt}`)
+function thinkingOptionsFor(modelId: string): { value: ThinkingLevel; label: string }[] {
+  const id = modelId.toLowerCase()
+  if (supportsNativeThinking(id)) {
+    return [
+      { value: 'off', label: 'Off' },
+      { value: 'low', label: 'Low' },
+      { value: 'medium', label: 'Med' },
+      { value: 'high', label: 'High' },
+    ]
+  }
+  if (id.includes('gemini') || id.includes('deepseek')) {
+    return [
+      { value: 'off', label: 'Off' },
+      { value: 'low', label: 'Low' },
+      { value: 'medium', label: 'Med' },
+    ]
+  }
   return [
-    PROFILE_PROMPTS[params.profile],
-    params.customProfile.trim(),
-    params.thinking ? 'Use a private scratchpad for hard parts, but only return the final answer and essential evidence.' : '',
-    skillList.length ? `Skills:\n${skillList.map((s) => `- ${s}`).join('\n')}` : '',
-    toolPrompts.length ? `Available tool contract:\n${toolPrompts.join('\n')}` : '',
-    mcpList.length ? `MCP servers declared by caller:\n${mcpList.map((s) => `- ${s}`).join('\n')}` : '',
+    { value: 'off', label: 'Off' },
+    { value: 'low', label: 'Low' },
+  ]
+}
+
+function thinkingInstruction(thinking: ThinkingLevel) {
+  if (thinking === 'off') return ''
+  if (thinking === 'low') return 'Answer directly. Use a quick private check for assumptions before responding.'
+  if (thinking === 'medium') return 'Work through the problem carefully before answering. Return the answer and only the essential evidence.'
+  return 'Think deeply before answering. Resolve tradeoffs explicitly, then return a concise final answer with the key evidence.'
+}
+
+function buildSystemPrompt(thinking: ThinkingLevel) {
+  return [
+    'You are a concise developer assistant for Inference Bazaar. Give concrete, runnable answers.',
+    thinkingInstruction(thinking),
   ]
     .filter(Boolean)
     .join('\n\n')
 }
 
-function DeveloperChat({ activeLots }: { activeLots: CreditLot[] }) {
-  const catalog = useCatalog()
-  const [gatewayUrl, setGatewayUrl] = useState('http://127.0.0.1:8088/v1')
-  const [apiKey, setApiKey] = useState('sk-inference-bazaar')
-  const [gatewayModels, setGatewayModels] = useState<string[]>([])
-  const [model, setModel] = useState('groq/llama-3.1-8b-instant')
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [input, setInput] = useState('What can I build with these inference lots?')
-  const [profile, setProfile] = useState<AgentProfile>('builder')
-  const [customProfile, setCustomProfile] = useState('')
-  const [skills, setSkills] = useState('typescript, router integrations, on-chain settlement')
-  const [mcp, setMcp] = useState('github, figma, tangle-admin')
-  const [tools, setTools] = useState<Set<ToolKey>>(() => new Set(['market', 'chain']))
-  const [thinking, setThinking] = useState(true)
-  const [maxTokens, setMaxTokens] = useState(600)
-  const [busy, setBusy] = useState(false)
-  const [gatewayState, setGatewayState] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
-  const [gatewayError, setGatewayError] = useState<string | null>(null)
+function CoherencePicker({
+  value,
+  options,
+  onChange,
+}: {
+  value: ThinkingLevel
+  options: { value: ThinkingLevel; label: string }[]
+  onChange: (value: ThinkingLevel) => void
+}) {
+  return (
+    <div className="inline-flex h-8 rounded-[7px] bg-[var(--s-bg)]/60 p-0.5" role="radiogroup" aria-label="Thinking">
+      {options.map((option) => {
+        const active = option.value === value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            aria-pressed={active}
+            className={cn(
+              'h-7 rounded-[6px] px-2 font-data text-[12px] font-semibold uppercase tracking-wide transition-colors',
+              active
+                ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
+                : 'text-[var(--s-text-muted)] hover:text-[var(--s-text-secondary)]',
+            )}
+          >
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
-  const modelOptions = useMemo(() => {
+function useDeveloperModels(gatewayModels: string[]) {
+  const catalog = useCatalog()
+  return useMemo(() => {
     const byId = catalog.data ?? new Map<string, CatalogModel>()
     const ids = gatewayModels.length
       ? gatewayModels
@@ -414,12 +438,43 @@ function DeveloperChat({ activeLots }: { activeLots: CreditLot[] }) {
     }
     return out
   }, [catalog.data, gatewayModels])
+}
+
+export function DeveloperChatPage() {
+  const { address } = useAccount()
+  const lots = useMyLots(address)
+  const [gatewayUrl, setGatewayUrl] = useState('http://127.0.0.1:8088/v1')
+  const [apiKey, setApiKey] = useState('sk-inference-bazaar')
+  const [gatewayModels, setGatewayModels] = useState<string[]>([])
+  const [model, setModel] = useState('groq/llama-3.1-8b-instant')
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [input, setInput] = useState('')
+  const [thinking, setThinking] = useState<ThinkingLevel>('low')
+  const [maxTokens, setMaxTokens] = useState(600)
+  const [busy, setBusy] = useState(false)
+  const [gatewayOpen, setGatewayOpen] = useState(false)
+  const [gatewayState, setGatewayState] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
+  const [gatewayError, setGatewayError] = useState<string | null>(null)
+
+  const modelOptions = useDeveloperModels(gatewayModels)
+  const selected = modelOptions.find((m) => m.id === model) ?? fallbackModelOption(model)
+  const thinkingOptions = useMemo(() => thinkingOptionsFor(model), [model])
+  const statusTone = gatewayState === 'ok' ? 'emerald' : gatewayState === 'error' ? 'crimson' : 'neutral'
+  const activeLots = (lots.data ?? []).filter(
+    (l) => l.qtyTokens - l.lockedTokens > 0n && Number(l.expiry) * 1000 > Date.now(),
+  )
 
   useEffect(() => {
     if (modelOptions.length > 0 && !modelOptions.some((m) => m.id === model)) {
       setModel(modelOptions[0]!.id)
     }
   }, [model, modelOptions])
+
+  useEffect(() => {
+    if (!thinkingOptions.some((option) => option.value === thinking)) {
+      setThinking(thinkingOptions[thinkingOptions.length - 1]?.value ?? 'off')
+    }
+  }, [thinking, thinkingOptions])
 
   useEffect(() => {
     void refreshGatewayModels()
@@ -452,15 +507,6 @@ function DeveloperChat({ activeLots }: { activeLots: CreditLot[] }) {
     }
   }
 
-  function toggleTool(key: ToolKey) {
-    setTools((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
-
   async function send() {
     const prompt = input.trim()
     const base = normalizeGatewayUrl(gatewayUrl)
@@ -471,14 +517,21 @@ function DeveloperChat({ activeLots }: { activeLots: CreditLot[] }) {
     setInput('')
     setBusy(true)
     try {
-      const system = buildSystemPrompt({ profile, customProfile, thinking, skills, tools, mcp })
-      const body = {
+      const body: {
+        model: string
+        max_tokens: number
+        messages: { role: 'system' | 'user' | 'assistant'; content: string }[]
+        reasoning_effort?: Exclude<ThinkingLevel, 'off'>
+      } = {
         model,
         max_tokens: maxTokens,
         messages: [
-          { role: 'system', content: system },
+          { role: 'system', content: buildSystemPrompt(thinking) },
           ...nextMessages.map((m) => ({ role: m.role, content: m.content })),
         ],
+      }
+      if (supportsNativeThinking(model) && thinking !== 'off') {
+        body.reasoning_effort = thinking
       }
       const started = performance.now()
       const res = await fetch(`${base}/chat/completions`, {
@@ -522,83 +575,103 @@ function DeveloperChat({ activeLots }: { activeLots: CreditLot[] }) {
     }
   }
 
-  const selected = modelOptions.find((m) => m.id === model) ?? fallbackModelOption(model)
-  const statusTone = gatewayState === 'ok' ? 'emerald' : gatewayState === 'error' ? 'crimson' : 'neutral'
-  const activeToolLabels = TOOL_OPTIONS.filter((tool) => tools.has(tool.key))
-
   return (
-    <Panel className="overflow-visible" bodyClassName="grid gap-0 lg:grid-cols-[minmax(0,1fr)_340px]">
-      <div className="flex min-h-[620px] flex-col border-b border-[var(--s-divider)] lg:border-b-0 lg:border-r">
-        <div className="grid gap-3 border-b border-[var(--s-divider)] px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-4">
-          <ChatModelPicker
-            value={model}
-            models={modelOptions}
-            onChange={setModel}
-            loading={gatewayState === 'checking'}
-          />
-          <div className="flex items-center justify-between gap-2 sm:justify-end">
-            <Badge tone={statusTone}>{gatewayStateLabel(gatewayState)}</Badge>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <header className="shrink-0 border-b border-[var(--s-divider)] bg-[color-mix(in_srgb,var(--s-bg)_82%,transparent)] px-3 py-3 backdrop-blur-xl sm:px-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <ProviderMark provider={selected.provider} size="sm" />
+              <h1 className="truncate font-display text-[20px] font-semibold text-[var(--s-text)]">Chat</h1>
+              <Badge tone={statusTone}>{gatewayStateLabel(gatewayState)}</Badge>
+            </div>
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
+              <span className="truncate">{selected.provider}</span>
+              <span className="text-[var(--s-text-subtle)]">/</span>
+              <span>{selected.outputMicroPerM ? pricePerM(selected.outputMicroPerM) : 'metered'} out</span>
+              <span className="text-[var(--s-text-subtle)]">/</span>
+              <span>{lots.isLoading ? '...' : activeLots.length} active lots</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => void refreshGatewayModels()}
-              className="btn-secondary h-9 w-9 !px-0"
-              title="Refresh gateway models"
+              type="button"
+              onClick={() => setGatewayOpen((v) => !v)}
+              aria-expanded={gatewayOpen}
+              className="btn-secondary h-9 whitespace-nowrap"
             >
-              <span className={cn(gatewayState === 'checking' ? 'i-ph:circle-notch animate-spin' : 'i-ph:arrow-clockwise', 'text-[16px]')} />
+              <span className="i-ph:terminal-window text-[16px]" /> Gateway
             </button>
+            <Link to="/developer" className="btn-secondary h-9 whitespace-nowrap">
+              <span className="i-ph:key text-[16px]" /> API keys
+            </Link>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 border-b border-[var(--s-divider)] sm:grid-cols-4">
-          <Stat label="Lots" value={activeLots.length} tone="accent" sub="wallet" />
-          <Stat
-            label="Profile"
-            value={PROFILE_LABELS[profile]}
-            sub={thinking ? 'private scratchpad' : 'direct replies'}
-          />
-          <Stat label="Provider" value={selected.provider} sub={selected.id} />
-          <Stat label="Output" value={selected.outputMicroPerM ? pricePerM(selected.outputMicroPerM) : '—'} sub="/1M tokens" />
-        </div>
+        {gatewayOpen && (
+          <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(220px,320px)_auto]">
+            <label className="flex h-9 min-w-0 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-2.5">
+              <span className="i-ph:terminal-window shrink-0 text-[15px] text-[var(--s-text-subtle)]" />
+              <input
+                aria-label="Gateway URL"
+                value={gatewayUrl}
+                onChange={(e) => setGatewayUrl(e.target.value)}
+                className="h-full min-w-0 flex-1 bg-transparent font-data text-[14px] text-[var(--s-text)] outline-none"
+              />
+            </label>
+            <label className="flex h-9 min-w-0 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-2.5">
+              <span className="i-ph:key shrink-0 text-[15px] text-[var(--s-text-subtle)]" />
+              <input
+                aria-label="Gateway API key"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                className="h-full min-w-0 flex-1 bg-transparent font-data text-[14px] text-[var(--s-text)] outline-none"
+              />
+            </label>
+            <button
+              onClick={() => void refreshGatewayModels()}
+              className="btn-secondary h-9 justify-center"
+              title="Refresh gateway models"
+            >
+              <span className={cn(gatewayState === 'checking' ? 'i-ph:circle-notch animate-spin' : 'i-ph:arrow-clockwise', 'text-[16px]')} />
+              Refresh
+            </button>
+          </div>
+        )}
+      </header>
 
-        <div data-testid="developer-chat-log" className="flex-1 space-y-3 overflow-y-auto px-3 py-4 sm:px-4">
+      <section data-testid="developer-chat-log" className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6">
+        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col justify-end gap-3">
           {messages.length === 0 ? (
-            <div className="flex h-full min-h-[280px] items-center justify-center">
-              <div className="w-full max-w-[560px]">
-                <div className="flex items-center gap-3">
-                  <ProviderMark provider={selected.provider} />
-                  <div className="min-w-0">
-                    <h2 className="font-display text-[22px] font-semibold leading-tight text-[var(--s-text)]">
-                      Lot-backed chat
-                    </h2>
-                    <p className="mt-1 font-body text-[15px] leading-relaxed text-[var(--s-text-muted)]">
-                      OpenAI-compatible requests, metered through the local gateway.
-                    </p>
-                  </div>
+            <div className="my-auto w-full max-w-[680px] self-center py-8">
+              <div className="flex items-center gap-3">
+                <ProviderMark provider={selected.provider} />
+                <div className="min-w-0">
+                  <h2 className="font-display text-[24px] font-semibold leading-tight text-[var(--s-text)]">
+                    Lot-backed chat
+                  </h2>
+                  <p className="mt-1 font-body text-[15px] leading-relaxed text-[var(--s-text-muted)]">
+                    Spend through the local gateway with any OpenAI-compatible model.
+                  </p>
                 </div>
-                {gatewayError && (
-                  <div className="mt-4 flex items-center gap-2 rounded-[8px] border border-[var(--s-crimson)]/25 bg-[var(--s-crimson-soft)] px-3 py-2 font-data text-[13px] text-[var(--s-crimson)]">
-                    <span className="i-ph:warning-circle shrink-0 text-[16px]" />
-                    <span className="min-w-0 truncate">{gatewayError}</span>
-                  </div>
-                )}
-                <div className="mt-5 flex flex-wrap gap-2">
-                  {STARTER_PROMPTS.map((prompt) => (
-                    <button
-                      key={prompt}
-                      type="button"
-                      onClick={() => setInput(prompt)}
-                      className="rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 py-2 text-left font-data text-[13px] text-[var(--s-text-secondary)] transition-colors hover:border-[var(--s-accent)]/45 hover:text-[var(--s-accent)]"
-                    >
-                      {prompt}
-                    </button>
-                  ))}
+              </div>
+              {gatewayError && (
+                <div className="mt-4 flex items-center gap-2 rounded-[8px] border border-[var(--s-crimson)]/25 bg-[var(--s-crimson-soft)] px-3 py-2 font-data text-[13px] text-[var(--s-crimson)]">
+                  <span className="i-ph:warning-circle shrink-0 text-[16px]" />
+                  <span className="min-w-0 truncate">{gatewayError}</span>
                 </div>
-                <div className="mt-4 flex flex-wrap items-center gap-2 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
-                  <span>{PROFILE_LABELS[profile]}</span>
-                  <span className="text-[var(--s-text-subtle)]">/</span>
-                  <span>{activeToolLabels.length ? activeToolLabels.map((tool) => tool.label).join(', ') : 'no tools'}</span>
-                  <span className="text-[var(--s-text-subtle)]">/</span>
-                  <span>{maxTokens} max tokens</span>
-                </div>
+              )}
+              <div className="mt-5 grid gap-2 sm:grid-cols-3">
+                {STARTER_PROMPTS.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => setInput(prompt)}
+                    className="min-h-[74px] rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 py-2 text-left font-data text-[13px] leading-relaxed text-[var(--s-text-secondary)] transition-colors hover:border-[var(--s-accent)]/45 hover:text-[var(--s-accent)]"
+                  >
+                    {prompt}
+                  </button>
+                ))}
               </div>
             </div>
           ) : (
@@ -618,7 +691,7 @@ function DeveloperChat({ activeLots }: { activeLots: CreditLot[] }) {
                 )}
                 <div
                   className={cn(
-                    'max-w-[86%] rounded-[10px] border px-3 py-2',
+                    'max-w-[min(86%,720px)] rounded-[10px] border px-3 py-2',
                     m.role === 'user'
                       ? 'border-[var(--s-accent)]/30 bg-[var(--s-accent-soft)] text-[var(--s-text)]'
                       : m.error
@@ -629,7 +702,7 @@ function DeveloperChat({ activeLots }: { activeLots: CreditLot[] }) {
                   <div className="whitespace-pre-wrap font-body text-[15px] leading-relaxed">{m.content}</div>
                   {m.usage && (
                     <div className="mt-2 font-data text-[12px] text-[var(--s-text-muted)]">
-                      {m.usage.total_tokens ?? '—'} tokens · {m.ms ?? '—'} ms
+                      {m.usage.total_tokens ?? '...'} tokens · {m.ms ?? '...'} ms
                     </div>
                   )}
                 </div>
@@ -637,159 +710,67 @@ function DeveloperChat({ activeLots }: { activeLots: CreditLot[] }) {
             ))
           )}
         </div>
+      </section>
 
-        <div className="border-t border-[var(--s-divider)] p-3">
-          <div className="overflow-hidden rounded-[12px] border border-[var(--s-border)] bg-[var(--s-surface)]">
-            <textarea
-              data-testid="developer-chat-input"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              rows={3}
-              className="min-h-[86px] w-full resize-none bg-transparent px-3 py-3 font-body text-[15px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)]"
-              placeholder="Message your lot-backed agent..."
-            />
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--s-divider)] px-2 py-2">
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <span className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--s-bg)]/60 px-2 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
-                  <span className="i-ph:user-focus text-[15px]" />
-                  {PROFILE_LABELS[profile]}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setThinking((v) => !v)}
-                  aria-pressed={thinking}
-                  className={cn(
-                    'inline-flex h-8 items-center gap-1.5 rounded-[7px] px-2 font-data text-[12px] font-semibold uppercase tracking-wide transition-colors',
-                    thinking
-                      ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
-                      : 'bg-[var(--s-bg)]/60 text-[var(--s-text-muted)] hover:text-[var(--s-text-secondary)]',
-                  )}
-                  title="Toggle private reasoning guidance"
-                >
-                  <span className="i-ph:brain text-[15px]" />
-                  Thinking
-                </button>
-                <label className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--s-bg)]/60 px-2 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
-                  Max
-                  <input
-                    aria-label="Max tokens"
-                    type="number"
-                    min={64}
-                    max={4096}
-                    step={64}
-                    value={maxTokens}
-                    onChange={(e) => setMaxTokens(Number(e.target.value))}
-                    className="h-6 w-[68px] bg-transparent text-right font-data text-[13px] text-[var(--s-text)] outline-none"
-                  />
-                </label>
-              </div>
-              <button
-                data-testid="developer-chat-send"
-                onClick={() => void send()}
-                disabled={busy || !input.trim()}
-                className="btn-primary h-9 w-11 !px-0"
-                title="Send"
-              >
-                <span className={cn(busy ? 'i-ph:circle-notch animate-spin' : 'i-ph:paper-plane-tilt', 'text-[18px]')} />
-              </button>
+      <footer className="shrink-0 border-t border-[var(--s-divider)] bg-[color-mix(in_srgb,var(--s-bg)_86%,transparent)] p-3 backdrop-blur-xl sm:p-4">
+        <div className="mx-auto max-w-4xl overflow-visible rounded-[12px] border border-[var(--s-border)] bg-[var(--s-surface)] shadow-[0_10px_40px_rgba(0,0,0,0.12)]">
+          <textarea
+            data-testid="developer-chat-input"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                void send()
+              }
+            }}
+            rows={3}
+            className="max-h-[28dvh] min-h-[92px] w-full resize-none bg-transparent px-3 py-3 font-body text-[15px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)]"
+            placeholder="Message your lot-backed model..."
+          />
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--s-divider)] px-2 py-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+              <ChatModelPicker
+                value={model}
+                models={modelOptions}
+                onChange={setModel}
+                loading={gatewayState === 'checking'}
+                compact
+                placement="top"
+                className="w-[min(100%,360px)]"
+              />
+              <span className="inline-flex h-8 items-center gap-1 rounded-[7px] bg-[var(--s-bg)]/60 px-2 font-data text-[12px] font-semibold uppercase tracking-wide text-[var(--s-text-muted)]">
+                <span className="i-ph:brain text-[15px]" />
+                Think
+              </span>
+              <CoherencePicker value={thinking} options={thinkingOptions} onChange={setThinking} />
+              <label className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--s-bg)]/60 px-2 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
+                Max
+                <input
+                  aria-label="Max tokens"
+                  type="number"
+                  min={64}
+                  max={4096}
+                  step={64}
+                  value={maxTokens}
+                  onChange={(e) => setMaxTokens(Number(e.target.value))}
+                  className="h-6 w-[68px] bg-transparent text-right font-data text-[13px] text-[var(--s-text)] outline-none"
+                />
+              </label>
             </div>
+            <button
+              data-testid="developer-chat-send"
+              onClick={() => void send()}
+              disabled={busy || !input.trim()}
+              className="btn-primary h-9 w-11 !px-0"
+              title="Send"
+            >
+              <span className={cn(busy ? 'i-ph:circle-notch animate-spin' : 'i-ph:paper-plane-tilt', 'text-[18px]')} />
+            </button>
           </div>
         </div>
-      </div>
-
-      <div className="divide-y divide-[var(--s-divider)] bg-[var(--s-bg)]/20 lg:bg-transparent">
-        <section className="p-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="mono-label">Runtime</div>
-            <Badge tone={statusTone}>{gatewayStateLabel(gatewayState)}</Badge>
-          </div>
-          <div className="mt-3 grid gap-2">
-            <div className="flex h-9 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-2.5">
-              <span className="i-ph:terminal-window shrink-0 text-[15px] text-[var(--s-text-subtle)]" />
-              <input
-                aria-label="Gateway URL"
-                value={gatewayUrl}
-                onChange={(e) => setGatewayUrl(e.target.value)}
-                className="h-full min-w-0 flex-1 bg-transparent font-data text-[15px] text-[var(--s-text)] outline-none"
-              />
-            </div>
-            <div className="flex h-9 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-2.5">
-              <span className="i-ph:key shrink-0 text-[15px] text-[var(--s-text-subtle)]" />
-              <input
-                aria-label="Gateway API key"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className="h-full min-w-0 flex-1 bg-transparent font-data text-[15px] text-[var(--s-text)] outline-none"
-              />
-            </div>
-          </div>
-        </section>
-
-        <section className="p-4">
-          <div className="mono-label mb-2">Agent</div>
-          <Segmented
-            size="sm"
-            value={profile}
-            onChange={setProfile}
-            options={(Object.keys(PROFILE_LABELS) as AgentProfile[]).map((value) => ({
-              value,
-              label: PROFILE_LABELS[value],
-            }))}
-          />
-          {profile === 'custom' && (
-            <textarea
-              value={customProfile}
-              onChange={(e) => setCustomProfile(e.target.value)}
-              rows={3}
-              className="mt-2 w-full resize-none rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 py-2 font-body text-[15px] text-[var(--s-text)] outline-none focus:border-[var(--s-accent)]/50"
-              placeholder="Agent role, boundaries, style…"
-            />
-          )}
-        </section>
-
-        <section className="p-4">
-          <div className="mono-label mb-2">Tools</div>
-          <div className="grid grid-cols-2 gap-2">
-            {TOOL_OPTIONS.map((tool) => {
-              const active = tools.has(tool.key)
-              return (
-                <button
-                  key={tool.key}
-                  onClick={() => toggleTool(tool.key)}
-                  aria-pressed={active}
-                  className={cn(
-                    'flex h-9 items-center justify-start gap-2 rounded-[8px] border px-3 font-data text-[15px] transition-colors',
-                    active
-                      ? 'border-[var(--s-brand)]/40 bg-[var(--s-brand-soft)] text-[var(--s-brand)]'
-                      : 'border-[var(--s-border)] bg-[var(--s-surface)] text-[var(--s-text-muted)] hover:text-[var(--s-text-secondary)]',
-                  )}
-                >
-                  <span className={cn(active ? tool.icon : 'i-ph:square', 'text-[16px]')} />
-                  {tool.label}
-                </button>
-              )
-            })}
-          </div>
-        </section>
-
-        <section className="p-4">
-          <div className="mono-label mb-2">Skills</div>
-          <textarea
-            value={skills}
-            onChange={(e) => setSkills(e.target.value)}
-            rows={3}
-            className="w-full resize-none rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 py-2 font-body text-[15px] text-[var(--s-text)] outline-none focus:border-[var(--s-accent)]/50"
-          />
-          <div className="mono-label mb-2 mt-4">MCP</div>
-          <textarea
-            value={mcp}
-            onChange={(e) => setMcp(e.target.value)}
-            rows={3}
-            className="w-full resize-none rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 py-2 font-body text-[15px] text-[var(--s-text)] outline-none focus:border-[var(--s-accent)]/50"
-          />
-        </section>
-      </div>
-    </Panel>
+      </footer>
+    </div>
   )
 }
 
@@ -937,19 +918,24 @@ export default function DeveloperPage() {
     <div>
       <PageHeader
         title="Developer"
-        subtitle="Your inference credits, as an OpenAI-compatible API."
+        subtitle="API keys, credit spend, and integration paths."
         right={
-          isConnected && all.length > 0 ? (
-            <button
-              onClick={() => void meter.sync(all, registry.data)}
-              disabled={meter.syncing}
-              className="btn-secondary h-9 whitespace-nowrap"
-              title="Sign a read-only query to fetch live, unsettled spend from your operators"
-            >
-              <span className={meter.syncing ? 'i-ph:circle-notch animate-spin text-[16px]' : 'i-ph:pulse text-[16px]'} />
-              {meter.syncing ? 'Signing…' : meter.rows ? 'Refresh live usage' : 'Sync live usage'}
-            </button>
-          ) : undefined
+          <>
+            <Link to="/developer/chat" className="btn-primary h-9 whitespace-nowrap">
+              <span className="i-ph:chat-circle-dots text-[16px]" /> Open chat
+            </Link>
+            {isConnected && all.length > 0 ? (
+              <button
+                onClick={() => void meter.sync(all, registry.data)}
+                disabled={meter.syncing}
+                className="btn-secondary h-9 whitespace-nowrap"
+                title="Sign a read-only query to fetch live, unsettled spend from your operators"
+              >
+                <span className={meter.syncing ? 'i-ph:circle-notch animate-spin text-[16px]' : 'i-ph:pulse text-[16px]'} />
+                {meter.syncing ? 'Signing...' : meter.rows ? 'Refresh usage' : 'Sync usage'}
+              </button>
+            ) : null}
+          </>
         }
       />
 
@@ -991,10 +977,6 @@ export default function DeveloperPage() {
             </ConnectKitButton.Custom>
           </Panel>
         )}
-      </div>
-
-      <div className="px-4 py-4 sm:px-6">
-        <DeveloperChat activeLots={liveKeys} />
       </div>
 
       <div className="px-4 pb-4 sm:px-6">
