@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAccount, useReadContract, useSignTypedData } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import type { Address, Hex } from 'viem'
@@ -9,6 +9,7 @@ import { Badge, Panel, Segmented, Stat } from '~/components/ui'
 import { cn } from '~/lib/cn'
 import { compactUsd, pricePerM, tokens, truncAddr } from '~/lib/format'
 import { CHAIN, ROUTER_URL, VENUE_URL, useCatalog, type CatalogModel } from '~/lib/api'
+import { ProviderLogo } from '~/lib/logos'
 import {
   EIP712_DOMAIN,
   SETTLEMENT,
@@ -57,11 +58,17 @@ const PROFILE_PROMPTS: Record<AgentProfile, string> = {
   custom: 'Follow the agent profile below exactly where it is specific.',
 }
 
-const TOOL_OPTIONS: { key: ToolKey; label: string; prompt: string }[] = [
-  { key: 'market', label: 'Market', prompt: 'Can reason over Inference Bazaar lots, books, operators, prices, and spend state.' },
-  { key: 'chain', label: 'Chain', prompt: 'Can request on-chain evidence such as tx hashes, balances, lots, and settlement status.' },
-  { key: 'memory', label: 'Memory', prompt: 'Can maintain project context across turns when the caller provides it.' },
-  { key: 'mcp', label: 'MCP', prompt: 'Can call declared MCP servers when an external runtime provides those tools.' },
+const TOOL_OPTIONS: { key: ToolKey; label: string; icon: string; prompt: string }[] = [
+  { key: 'market', label: 'Market', icon: 'i-ph:chart-line-up', prompt: 'Can reason over Inference Bazaar lots, books, operators, prices, and spend state.' },
+  { key: 'chain', label: 'Chain', icon: 'i-ph:link-simple-horizontal', prompt: 'Can request on-chain evidence such as tx hashes, balances, lots, and settlement status.' },
+  { key: 'memory', label: 'Memory', icon: 'i-ph:database', prompt: 'Can maintain project context across turns when the caller provides it.' },
+  { key: 'mcp', label: 'MCP', icon: 'i-ph:plugs-connected', prompt: 'Can call declared MCP servers when an external runtime provides those tools.' },
+]
+
+const STARTER_PROMPTS = [
+  'Price this agent workflow against my lots',
+  'Draft a gateway client for a Next.js app',
+  'Check the settlement risk before I scale this',
 ]
 
 /** Three ways to spend credits over the API. Each tab is the real integration
@@ -74,9 +81,7 @@ const TABS: Record<Tab, { label: string; badge: { tone: 'emerald' | 'amber'; tex
     note: 'Zero trust — the gateway runs on your machine and holds the session key; the operator can never bill more than it signs.',
     code: `from openai import OpenAI
 
-# 1. mint a key below, then run the gateway with it:
-#    inference-bazaar-gateway
-# 2. point any OpenAI client at the local gateway — no wallet in the request path:
+# Run inference-bazaar-gateway with a minted lot key, then call:
 client = OpenAI(base_url="http://127.0.0.1:8088/v1", api_key="sk-inference-bazaar")
 
 resp = client.chat.completions.create(
@@ -142,22 +147,194 @@ function normalizeGatewayUrl(raw: string) {
 }
 
 function shortError(e: unknown) {
-  return e instanceof Error ? e.message.split('\n')[0]! : String(e)
+  const message = e instanceof Error ? e.message.split('\n')[0]! : String(e)
+  return message.includes('Failed to fetch') ? 'Local gateway offline' : message
 }
 
 function toModelOption(model: CatalogModel): ChatModelOption {
   return {
     id: model.id,
     name: model.name || model.id,
-    provider: model.provider,
+    provider: model.provider && model.provider !== 'unknown' ? model.provider : providerFromModelId(model.id),
     inputMicroPerM: model.inputMicroPerM,
     outputMicroPerM: model.outputMicroPerM,
   }
 }
 
+function providerFromModelId(id: string) {
+  if (id.includes('/')) return id.split('/')[0]!
+  const lower = id.toLowerCase()
+  if (lower.startsWith('gemini')) return 'google'
+  if (lower.startsWith('deepseek')) return 'deepseek'
+  if (lower.startsWith('gpt-')) return 'openai'
+  return 'gateway'
+}
+
 function fallbackModelOption(id: string): ChatModelOption {
-  const provider = id.includes('/') ? id.split('/')[0]! : 'gateway'
+  const provider = providerFromModelId(id)
   return { id, name: id, provider, inputMicroPerM: 0, outputMicroPerM: 0 }
+}
+
+function formatModelPrice(microPerM: number) {
+  return microPerM > 0 ? pricePerM(microPerM) : 'metered'
+}
+
+function gatewayStateLabel(state: 'idle' | 'checking' | 'ok' | 'error') {
+  if (state === 'ok') return 'Ready'
+  if (state === 'checking') return 'Checking'
+  if (state === 'error') return 'Offline'
+  return 'Local'
+}
+
+function useOutsideDismiss<T extends HTMLElement>(open: boolean, onDismiss: () => void) {
+  const ref = useRef<T | null>(null)
+  useEffect(() => {
+    if (!open) return
+    function onPointerDown(event: PointerEvent) {
+      if (ref.current && event.target instanceof Node && !ref.current.contains(event.target)) onDismiss()
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onDismiss()
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open, onDismiss])
+  return ref
+}
+
+function ProviderMark({ provider, size = 'md' }: { provider: string; size?: 'sm' | 'md' }) {
+  return <ProviderLogo provider={provider} size={size === 'sm' ? 28 : 36} />
+}
+
+function ChatModelPicker({
+  value,
+  models,
+  onChange,
+  loading,
+}: {
+  value: string
+  models: ChatModelOption[]
+  onChange: (id: string) => void
+  loading: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const ref = useOutsideDismiss<HTMLDivElement>(open, () => setOpen(false))
+  const selected = models.find((m) => m.id === value) ?? fallbackModelOption(value)
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return models
+    return models.filter((m) => `${m.provider} ${m.name} ${m.id}`.toLowerCase().includes(q))
+  }, [models, query])
+  const groups = useMemo(() => {
+    const byProvider = new Map<string, ChatModelOption[]>()
+    for (const model of filtered) {
+      const key = model.provider || 'Gateway'
+      byProvider.set(key, [...(byProvider.get(key) ?? []), model])
+    }
+    return [...byProvider.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [filtered])
+
+  useEffect(() => {
+    if (!open) setQuery('')
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative min-w-0">
+      <button
+        type="button"
+        data-testid="developer-model-picker"
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-[46px] w-full min-w-0 items-center gap-3 rounded-[9px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] outline-none transition-colors hover:border-[var(--s-accent)]/45 focus-visible:border-[var(--s-accent)]/70"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <ProviderMark provider={selected.provider} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-data text-[15px] font-semibold text-[var(--s-text)]">
+            {selected.name}
+          </span>
+          <span className="mt-0.5 flex min-w-0 items-center gap-2 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
+            <span className="truncate">{selected.provider}</span>
+            <span className="text-[var(--s-text-subtle)]">/</span>
+            <span>{formatModelPrice(selected.outputMicroPerM)} out</span>
+          </span>
+        </span>
+        <span className={cn(loading ? 'i-ph:circle-notch animate-spin' : open ? 'i-ph:caret-up' : 'i-ph:caret-down', 'shrink-0 text-[17px] text-[var(--s-text-muted)]')} />
+      </button>
+
+      {open && (
+        <div
+          data-testid="developer-model-picker-list"
+          className="absolute left-0 top-full z-40 mt-2 w-[min(92vw,560px)] overflow-hidden rounded-[10px] border border-[var(--s-border)] bg-[var(--s-panel)] shadow-[0_18px_60px_rgba(0,0,0,0.28)]"
+          role="listbox"
+        >
+          <div className="border-b border-[var(--s-divider)] p-2">
+            <div className="flex h-9 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-bg)]/45 px-2.5">
+              <span className="i-ph:magnifying-glass text-[15px] text-[var(--s-text-subtle)]" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                autoFocus
+                className="h-full min-w-0 flex-1 bg-transparent font-data text-[15px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)]"
+                placeholder="Search models"
+              />
+            </div>
+          </div>
+          <div className="max-h-[360px] overflow-y-auto py-1">
+            {groups.length === 0 ? (
+              <div className="px-3 py-8 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+                No models match.
+              </div>
+            ) : (
+              groups.map(([provider, items]) => (
+                <div key={provider} className="py-1">
+                  <div className="px-3 py-1 font-data text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--s-text-subtle)]">
+                    {provider}
+                  </div>
+                  {items.map((item) => {
+                    const active = item.id === value
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          onChange(item.id)
+                          setOpen(false)
+                        }}
+                        className={cn(
+                          'grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 text-left transition-colors',
+                          active
+                            ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
+                            : 'text-[var(--s-text-secondary)] hover:bg-[var(--s-surface)]',
+                        )}
+                        role="option"
+                        aria-selected={active}
+                      >
+                        <ProviderMark provider={item.provider} size="sm" />
+                        <span className="min-w-0">
+                          <span className="block truncate font-data text-[15px] font-semibold">{item.name}</span>
+                          <span className="block truncate font-data text-[12px] text-[var(--s-text-muted)]">{item.id}</span>
+                        </span>
+                        <span className="text-right font-data text-[12px] text-[var(--s-text-muted)]">
+                          <span className="block uppercase tracking-wide">out</span>
+                          <span className="block text-[var(--s-text-secondary)]">{formatModelPrice(item.outputMicroPerM)}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function lines(raw: string) {
@@ -333,11 +510,13 @@ function DeveloperChat({ activeLots }: { activeLots: CreditLot[] }) {
       setMessages([...nextMessages, assistant])
       setGatewayState('ok')
     } catch (e) {
+      const message = shortError(e)
       setMessages([
         ...nextMessages,
-        { id: `e-${Date.now()}`, role: 'assistant', content: shortError(e), error: true },
+        { id: `e-${Date.now()}`, role: 'assistant', content: message, error: true },
       ])
       setGatewayState('error')
+      setGatewayError(message)
     } finally {
       setBusy(false)
     }
@@ -345,54 +524,98 @@ function DeveloperChat({ activeLots }: { activeLots: CreditLot[] }) {
 
   const selected = modelOptions.find((m) => m.id === model) ?? fallbackModelOption(model)
   const statusTone = gatewayState === 'ok' ? 'emerald' : gatewayState === 'error' ? 'crimson' : 'neutral'
+  const activeToolLabels = TOOL_OPTIONS.filter((tool) => tools.has(tool.key))
 
   return (
-    <Panel className="overflow-visible" bodyClassName="grid gap-0 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <div className="flex min-h-[560px] flex-col border-b border-[var(--s-divider)] lg:border-b-0 lg:border-r">
-        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-[var(--s-divider)] px-4 py-3">
-          <select
+    <Panel className="overflow-visible" bodyClassName="grid gap-0 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="flex min-h-[620px] flex-col border-b border-[var(--s-divider)] lg:border-b-0 lg:border-r">
+        <div className="grid gap-3 border-b border-[var(--s-divider)] px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-4">
+          <ChatModelPicker
             value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className="h-9 w-full min-w-0 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 font-data text-[15px] text-[var(--s-text)] outline-none focus:border-[var(--s-accent)]/50"
-          >
-            {modelOptions.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-          <Badge tone={statusTone}>{gatewayState === 'checking' ? 'Checking' : gatewayState}</Badge>
-          <button
-            onClick={() => void refreshGatewayModels()}
-            className="btn-secondary h-9 w-9 !px-0"
-            title="Refresh gateway models"
-          >
-            <span className={cn(gatewayState === 'checking' ? 'i-ph:circle-notch animate-spin' : 'i-ph:arrow-clockwise', 'text-[16px]')} />
-          </button>
+            models={modelOptions}
+            onChange={setModel}
+            loading={gatewayState === 'checking'}
+          />
+          <div className="flex items-center justify-between gap-2 sm:justify-end">
+            <Badge tone={statusTone}>{gatewayStateLabel(gatewayState)}</Badge>
+            <button
+              onClick={() => void refreshGatewayModels()}
+              className="btn-secondary h-9 w-9 !px-0"
+              title="Refresh gateway models"
+            >
+              <span className={cn(gatewayState === 'checking' ? 'i-ph:circle-notch animate-spin' : 'i-ph:arrow-clockwise', 'text-[16px]')} />
+            </button>
+          </div>
         </div>
 
-        <div className="grid grid-cols-3 border-b border-[var(--s-divider)]">
+        <div className="grid grid-cols-2 border-b border-[var(--s-divider)] sm:grid-cols-4">
           <Stat label="Lots" value={activeLots.length} tone="accent" sub="wallet" />
-          <Stat label="Model" value={selected.provider} sub={selected.id} />
+          <Stat
+            label="Profile"
+            value={PROFILE_LABELS[profile]}
+            sub={thinking ? 'private scratchpad' : 'direct replies'}
+          />
+          <Stat label="Provider" value={selected.provider} sub={selected.id} />
           <Stat label="Output" value={selected.outputMicroPerM ? pricePerM(selected.outputMicroPerM) : '—'} sub="/1M tokens" />
         </div>
 
-        <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        <div data-testid="developer-chat-log" className="flex-1 space-y-3 overflow-y-auto px-3 py-4 sm:px-4">
           {messages.length === 0 ? (
-            <div className="flex h-full min-h-[220px] items-center justify-center text-center">
-              <div>
-                <span className="i-ph:chat-circle-dots mx-auto block text-[38px] text-[var(--s-text-subtle)]" />
-                <p className="mt-2 max-w-sm font-body text-[15px] text-[var(--s-text-muted)]">
-                  Chat through the local gateway after minting a lot-backed key.
-                </p>
+            <div className="flex h-full min-h-[280px] items-center justify-center">
+              <div className="w-full max-w-[560px]">
+                <div className="flex items-center gap-3">
+                  <ProviderMark provider={selected.provider} />
+                  <div className="min-w-0">
+                    <h2 className="font-display text-[22px] font-semibold leading-tight text-[var(--s-text)]">
+                      Lot-backed chat
+                    </h2>
+                    <p className="mt-1 font-body text-[15px] leading-relaxed text-[var(--s-text-muted)]">
+                      OpenAI-compatible requests, metered through the local gateway.
+                    </p>
+                  </div>
+                </div>
                 {gatewayError && (
-                  <p className="mt-2 max-w-md font-data text-[12px] text-[var(--s-crimson)]">{gatewayError}</p>
+                  <div className="mt-4 flex items-center gap-2 rounded-[8px] border border-[var(--s-crimson)]/25 bg-[var(--s-crimson-soft)] px-3 py-2 font-data text-[13px] text-[var(--s-crimson)]">
+                    <span className="i-ph:warning-circle shrink-0 text-[16px]" />
+                    <span className="min-w-0 truncate">{gatewayError}</span>
+                  </div>
                 )}
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {STARTER_PROMPTS.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={() => setInput(prompt)}
+                      className="rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 py-2 text-left font-data text-[13px] text-[var(--s-text-secondary)] transition-colors hover:border-[var(--s-accent)]/45 hover:text-[var(--s-accent)]"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-2 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
+                  <span>{PROFILE_LABELS[profile]}</span>
+                  <span className="text-[var(--s-text-subtle)]">/</span>
+                  <span>{activeToolLabels.length ? activeToolLabels.map((tool) => tool.label).join(', ') : 'no tools'}</span>
+                  <span className="text-[var(--s-text-subtle)]">/</span>
+                  <span>{maxTokens} max tokens</span>
+                </div>
               </div>
             </div>
           ) : (
             messages.map((m) => (
-              <div key={m.id} className={cn('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
+              <div key={m.id} className={cn('flex items-start gap-2', m.role === 'user' ? 'justify-end' : 'justify-start')}>
+                {m.role === 'assistant' && (
+                  <span
+                    className={cn(
+                      'mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] border',
+                      m.error
+                        ? 'border-[var(--s-crimson)]/35 bg-[var(--s-crimson-soft)] text-[var(--s-crimson)]'
+                        : 'border-[var(--s-brand)]/35 bg-[var(--s-brand-soft)] text-[var(--s-brand)]',
+                    )}
+                  >
+                    <span className={cn(m.error ? 'i-ph:warning-circle' : 'i-ph:sparkle', 'text-[15px]')} />
+                  </span>
+                )}
                 <div
                   className={cn(
                     'max-w-[86%] rounded-[10px] border px-3 py-2',
@@ -416,38 +639,94 @@ function DeveloperChat({ activeLots }: { activeLots: CreditLot[] }) {
         </div>
 
         <div className="border-t border-[var(--s-divider)] p-3">
-          <div className="flex gap-2">
+          <div className="overflow-hidden rounded-[12px] border border-[var(--s-border)] bg-[var(--s-surface)]">
             <textarea
+              data-testid="developer-chat-input"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              rows={2}
-              className="min-h-[72px] flex-1 resize-none rounded-[10px] border border-[var(--s-border)] bg-[var(--s-bg)]/40 px-3 py-2 font-body text-[15px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)] focus:border-[var(--s-accent)]/50"
-              placeholder="Message your lot-backed agent…"
+              rows={3}
+              className="min-h-[86px] w-full resize-none bg-transparent px-3 py-3 font-body text-[15px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)]"
+              placeholder="Message your lot-backed agent..."
             />
-            <button onClick={() => void send()} disabled={busy || !input.trim()} className="btn-primary w-12 !px-0" title="Send">
-              <span className={cn(busy ? 'i-ph:circle-notch animate-spin' : 'i-ph:paper-plane-tilt', 'text-[18px]')} />
-            </button>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--s-divider)] px-2 py-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <span className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--s-bg)]/60 px-2 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
+                  <span className="i-ph:user-focus text-[15px]" />
+                  {PROFILE_LABELS[profile]}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setThinking((v) => !v)}
+                  aria-pressed={thinking}
+                  className={cn(
+                    'inline-flex h-8 items-center gap-1.5 rounded-[7px] px-2 font-data text-[12px] font-semibold uppercase tracking-wide transition-colors',
+                    thinking
+                      ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
+                      : 'bg-[var(--s-bg)]/60 text-[var(--s-text-muted)] hover:text-[var(--s-text-secondary)]',
+                  )}
+                  title="Toggle private reasoning guidance"
+                >
+                  <span className="i-ph:brain text-[15px]" />
+                  Thinking
+                </button>
+                <label className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--s-bg)]/60 px-2 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
+                  Max
+                  <input
+                    aria-label="Max tokens"
+                    type="number"
+                    min={64}
+                    max={4096}
+                    step={64}
+                    value={maxTokens}
+                    onChange={(e) => setMaxTokens(Number(e.target.value))}
+                    className="h-6 w-[68px] bg-transparent text-right font-data text-[13px] text-[var(--s-text)] outline-none"
+                  />
+                </label>
+              </div>
+              <button
+                data-testid="developer-chat-send"
+                onClick={() => void send()}
+                disabled={busy || !input.trim()}
+                className="btn-primary h-9 w-11 !px-0"
+                title="Send"
+              >
+                <span className={cn(busy ? 'i-ph:circle-notch animate-spin' : 'i-ph:paper-plane-tilt', 'text-[18px]')} />
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="space-y-4 p-4">
-        <div>
-          <div className="mono-label mb-1.5">Gateway</div>
-          <input
-            value={gatewayUrl}
-            onChange={(e) => setGatewayUrl(e.target.value)}
-            className="h-9 w-full rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 font-data text-[15px] text-[var(--s-text)] outline-none focus:border-[var(--s-accent)]/50"
-          />
-          <input
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            className="mt-2 h-9 w-full rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 font-data text-[15px] text-[var(--s-text)] outline-none focus:border-[var(--s-accent)]/50"
-          />
-        </div>
+      <div className="divide-y divide-[var(--s-divider)] bg-[var(--s-bg)]/20 lg:bg-transparent">
+        <section className="p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="mono-label">Runtime</div>
+            <Badge tone={statusTone}>{gatewayStateLabel(gatewayState)}</Badge>
+          </div>
+          <div className="mt-3 grid gap-2">
+            <div className="flex h-9 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-2.5">
+              <span className="i-ph:terminal-window shrink-0 text-[15px] text-[var(--s-text-subtle)]" />
+              <input
+                aria-label="Gateway URL"
+                value={gatewayUrl}
+                onChange={(e) => setGatewayUrl(e.target.value)}
+                className="h-full min-w-0 flex-1 bg-transparent font-data text-[15px] text-[var(--s-text)] outline-none"
+              />
+            </div>
+            <div className="flex h-9 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-2.5">
+              <span className="i-ph:key shrink-0 text-[15px] text-[var(--s-text-subtle)]" />
+              <input
+                aria-label="Gateway API key"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                className="h-full min-w-0 flex-1 bg-transparent font-data text-[15px] text-[var(--s-text)] outline-none"
+              />
+            </div>
+          </div>
+        </section>
 
-        <div>
-          <div className="mono-label mb-1.5">Profile</div>
+        <section className="p-4">
+          <div className="mono-label mb-2">Agent</div>
           <Segmented
             size="sm"
             value={profile}
@@ -466,34 +745,10 @@ function DeveloperChat({ activeLots }: { activeLots: CreditLot[] }) {
               placeholder="Agent role, boundaries, style…"
             />
           )}
-        </div>
+        </section>
 
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={() => setThinking((v) => !v)}
-            aria-pressed={thinking}
-            className={cn(
-              'flex h-9 items-center justify-center gap-1.5 rounded-[8px] border font-data text-[15px] font-semibold uppercase tracking-wide',
-              thinking
-                ? 'border-[var(--s-accent)]/40 bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
-                : 'border-[var(--s-border)] bg-[var(--s-surface)] text-[var(--s-text-muted)]',
-            )}
-          >
-            <span className="i-ph:brain text-[16px]" /> Thinking
-          </button>
-          <input
-            type="number"
-            min={64}
-            max={4096}
-            step={64}
-            value={maxTokens}
-            onChange={(e) => setMaxTokens(Number(e.target.value))}
-            className="h-9 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 font-data text-[15px] text-[var(--s-text)] outline-none focus:border-[var(--s-accent)]/50"
-          />
-        </div>
-
-        <div>
-          <div className="mono-label mb-1.5">Tools</div>
+        <section className="p-4">
+          <div className="mono-label mb-2">Tools</div>
           <div className="grid grid-cols-2 gap-2">
             {TOOL_OPTIONS.map((tool) => {
               const active = tools.has(tool.key)
@@ -509,33 +764,30 @@ function DeveloperChat({ activeLots }: { activeLots: CreditLot[] }) {
                       : 'border-[var(--s-border)] bg-[var(--s-surface)] text-[var(--s-text-muted)] hover:text-[var(--s-text-secondary)]',
                   )}
                 >
-                  <span className={cn(active ? 'i-ph:check-square' : 'i-ph:square', 'text-[16px]')} />
+                  <span className={cn(active ? tool.icon : 'i-ph:square', 'text-[16px]')} />
                   {tool.label}
                 </button>
               )
             })}
           </div>
-        </div>
+        </section>
 
-        <div>
-          <div className="mono-label mb-1.5">Skills</div>
+        <section className="p-4">
+          <div className="mono-label mb-2">Skills</div>
           <textarea
             value={skills}
             onChange={(e) => setSkills(e.target.value)}
             rows={3}
             className="w-full resize-none rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 py-2 font-body text-[15px] text-[var(--s-text)] outline-none focus:border-[var(--s-accent)]/50"
           />
-        </div>
-
-        <div>
-          <div className="mono-label mb-1.5">MCP</div>
+          <div className="mono-label mb-2 mt-4">MCP</div>
           <textarea
             value={mcp}
             onChange={(e) => setMcp(e.target.value)}
             rows={3}
             className="w-full resize-none rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 py-2 font-body text-[15px] text-[var(--s-text)] outline-none focus:border-[var(--s-accent)]/50"
           />
-        </div>
+        </section>
       </div>
     </Panel>
   )
@@ -741,12 +993,12 @@ export default function DeveloperPage() {
         )}
       </div>
 
-      <div className="px-4 sm:px-6">
-        <Quickstart />
-      </div>
-
       <div className="px-4 py-4 sm:px-6">
         <DeveloperChat activeLots={liveKeys} />
+      </div>
+
+      <div className="px-4 pb-4 sm:px-6">
+        <Quickstart />
       </div>
 
       <div className="px-4 pb-4 sm:px-6">
