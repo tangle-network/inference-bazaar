@@ -186,7 +186,7 @@ function useOutsideDismiss<T extends HTMLElement>(open: boolean, onDismiss: () =
 }
 
 function ProviderMark({ provider, size = 'md' }: { provider: string; size?: 'sm' | 'md' }) {
-  return <ProviderLogo provider={provider} size={size === 'sm' ? 28 : 36} />
+  return <ProviderLogo provider={provider} size={size === 'sm' ? 30 : 36} />
 }
 
 function ChatModelPicker({
@@ -237,7 +237,7 @@ function ChatModelPicker({
         className={cn(
           'flex w-full min-w-0 items-center text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] outline-none transition-colors hover:border-[var(--s-accent)]/45 focus-visible:border-[var(--s-accent)]/70',
           compact
-            ? 'h-8 gap-2 rounded-[7px] border border-transparent bg-[var(--s-bg)]/60 px-2'
+            ? 'h-10 gap-2.5 rounded-[9px] border border-transparent bg-[var(--s-bg)]/60 px-2.5'
             : 'h-[46px] gap-3 rounded-[9px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3',
         )}
         aria-haspopup="listbox"
@@ -245,7 +245,7 @@ function ChatModelPicker({
       >
         <ProviderMark provider={selected.provider} size={compact ? 'sm' : 'md'} />
         <span className="min-w-0 flex-1">
-          <span className={cn('block truncate font-data font-semibold text-[var(--s-text)]', compact ? 'text-[12px]' : 'text-[15px]')}>
+          <span className={cn('block truncate font-data font-semibold text-[var(--s-text)]', compact ? 'text-[14px]' : 'text-[15px]')}>
             {selected.name}
           </span>
           <span className={cn('mt-0.5 min-w-0 items-center gap-2 font-data uppercase tracking-wide text-[var(--s-text-muted)]', compact ? 'hidden' : 'flex text-[12px]')}>
@@ -267,16 +267,16 @@ function ChatModelPicker({
           role="listbox"
         >
           <div className="border-b border-[var(--s-divider)] p-2">
-            <div className="flex h-9 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-bg)]/45 px-2.5">
+            <label className="flex h-10 items-center gap-2 rounded-[10px] border border-[var(--s-border)] bg-[var(--s-bg)]/45 px-3 transition-[border-color,box-shadow,background-color] focus-within:border-[var(--s-accent)]/70 focus-within:bg-[var(--s-bg)]/70 focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--s-accent)_18%,transparent)]">
               <span className="i-ph:magnifying-glass text-[15px] text-[var(--s-text-subtle)]" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 autoFocus
-                className="h-full min-w-0 flex-1 bg-transparent font-data text-[15px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)]"
+                className="h-full min-w-0 flex-1 rounded-[9px] bg-transparent font-data text-[15px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)] focus:outline-none focus-visible:outline-none"
                 placeholder="Search models"
               />
-            </div>
+            </label>
           </div>
           <div className="max-h-[360px] overflow-y-auto py-1">
             {groups.length === 0 ? (
@@ -336,25 +336,12 @@ function supportsNativeThinking(modelId: string) {
 }
 
 function thinkingOptionsFor(modelId: string): { value: ThinkingLevel; label: string }[] {
-  const id = modelId.toLowerCase()
-  if (supportsNativeThinking(id)) {
-    return [
-      { value: 'off', label: 'Off' },
-      { value: 'low', label: 'Low' },
-      { value: 'medium', label: 'Med' },
-      { value: 'high', label: 'High' },
-    ]
-  }
-  if (id.includes('gemini') || id.includes('deepseek')) {
-    return [
-      { value: 'off', label: 'Off' },
-      { value: 'low', label: 'Low' },
-      { value: 'medium', label: 'Med' },
-    ]
-  }
+  void modelId
   return [
     { value: 'off', label: 'Off' },
     { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Med' },
+    { value: 'high', label: 'High' },
   ]
 }
 
@@ -384,7 +371,7 @@ function CoherencePicker({
   onChange: (value: ThinkingLevel) => void
 }) {
   return (
-    <div className="inline-flex h-8 rounded-[7px] bg-[var(--s-bg)]/60 p-0.5" role="radiogroup" aria-label="Thinking">
+    <div className="inline-flex h-10 rounded-[9px] bg-[var(--s-bg)]/60 p-1" role="radiogroup" aria-label="Thinking">
       {options.map((option) => {
         const active = option.value === value
         return (
@@ -394,7 +381,7 @@ function CoherencePicker({
             onClick={() => onChange(option.value)}
             aria-pressed={active}
             className={cn(
-              'h-7 rounded-[6px] px-2 font-data text-[12px] font-semibold uppercase tracking-wide transition-colors',
+              'h-8 rounded-[7px] px-2.5 font-data text-[12px] font-semibold uppercase tracking-wide transition-colors',
               active
                 ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
                 : 'text-[var(--s-text-muted)] hover:text-[var(--s-text-secondary)]',
@@ -739,12 +726,12 @@ export function DeveloperChatPage() {
                 placement="top"
                 className="w-[min(100%,360px)]"
               />
-              <span className="inline-flex h-8 items-center gap-1 rounded-[7px] bg-[var(--s-bg)]/60 px-2 font-data text-[12px] font-semibold uppercase tracking-wide text-[var(--s-text-muted)]">
+              <span className="inline-flex h-10 items-center gap-1.5 rounded-[9px] bg-[var(--s-bg)]/60 px-2.5 font-data text-[12px] font-semibold uppercase tracking-wide text-[var(--s-text-muted)]">
                 <span className="i-ph:brain text-[15px]" />
                 Think
               </span>
               <CoherencePicker value={thinking} options={thinkingOptions} onChange={setThinking} />
-              <label className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--s-bg)]/60 px-2 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
+              <label className="inline-flex h-10 items-center gap-1.5 rounded-[9px] bg-[var(--s-bg)]/60 px-2.5 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
                 Max
                 <input
                   aria-label="Max tokens"
