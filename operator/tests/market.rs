@@ -258,3 +258,38 @@ async fn signed_clob_orders_cross_and_pair() {
     assert_eq!(crossed["fills"][0]["qty"], 25_000);
     assert_eq!(venue.outbox_json()["count"], 1);
 }
+
+/// The operator-control jobs (configure / start_making / stop_making): a stopped
+/// market refuses to quote BEFORE touching the sidecar, and configure retunes
+/// the live knobs. Mirrors the blueprint job handlers that call these.
+#[tokio::test]
+async fn jobs_configure_start_stop_making() {
+    let venue = Arc::new(venue_with(spawn_stub_sidecar().await));
+    venue.set_ref(INSTRUMENT, 15_000_000.0).unwrap();
+
+    // configure (job 1): the supplied knobs become the effective values.
+    let cfg = venue.configure(Some(123_000.0), Some(900_000.0), Some(7.0));
+    assert_eq!(cfg["size"].as_f64().unwrap(), 123_000.0);
+    assert_eq!(cfg["maxInventory"].as_f64().unwrap(), 900_000.0);
+    assert_eq!(cfg["minSpreadBps"].as_f64().unwrap(), 7.0);
+    // omitted knobs are preserved on a later partial configure.
+    let cfg2 = venue.configure(Some(50_000.0), None, None);
+    assert_eq!(cfg2["size"].as_f64().unwrap(), 50_000.0);
+    assert_eq!(
+        cfg2["maxInventory"].as_f64().unwrap(),
+        900_000.0,
+        "max inventory kept"
+    );
+
+    // stop_making (job 3): mm_tick short-circuits to "stopped" before the sidecar.
+    venue.stop_making(INSTRUMENT).unwrap();
+    let stopped = venue.mm_tick(INSTRUMENT).await.unwrap();
+    assert_eq!(stopped["quoting"], false);
+    assert_eq!(stopped["reasons"][0], "stopped");
+
+    // start_making (job 2): quoting re-enabled — mm_tick reaches the sidecar and
+    // quotes (the stub returns a valid two-sided quote), so it's no longer "stopped".
+    venue.start_making(INSTRUMENT).unwrap();
+    let resumed = venue.mm_tick(INSTRUMENT).await.unwrap();
+    assert_ne!(resumed["reasons"][0], "stopped", "no longer stopped");
+}

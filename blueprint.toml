@@ -45,9 +45,8 @@ http_port = 9100
 # IMPORTANT — positional indexing: in compact-definition deployments the runtime
 # assigns positional job indices in declaration order, so workflow_tick (the 6th
 # entry) lands at index 5 (operator/src/bin/blueprint.rs WORKFLOW_TICK_JOB_COMPACT).
-# Jobs 1/2/3 are therefore reserved placeholders that hold those positions; they
-# are NOT yet implemented (no handler — a call to them is unserved). Do not remove
-# them without also fixing the compact index.
+# Jobs 0-4 have ids == declaration positions, so they need no compact remap; only
+# workflow_tick (id 30 at position 5) is routed at both ids. Keep the 0-4 order.
 [[blueprint.jobs]]
 id = 0
 name = "list_instrument"
@@ -56,17 +55,17 @@ description = "List a (model, tokenKind) credit market with tick size + min qty.
 [[blueprint.jobs]]
 id = 1
 name = "configure"
-description = "RESERVED placeholder (not implemented): set quoting params + risk limits."
+description = "Retune operator-wide quoting params (size, max inventory, min spread) at runtime. [implemented]"
 
 [[blueprint.jobs]]
 id = 2
 name = "start_making"
-description = "RESERVED placeholder (not implemented): begin making a market (enable the tick)."
+description = "Begin making a market: enable quoting for an instrument. [implemented]"
 
 [[blueprint.jobs]]
 id = 3
 name = "stop_making"
-description = "RESERVED placeholder (not implemented): stop making a market (pull quotes)."
+description = "Stop making a market: disable quoting and pull resting quotes. [implemented]"
 
 [[blueprint.jobs]]
 id = 4

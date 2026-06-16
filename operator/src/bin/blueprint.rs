@@ -27,6 +27,9 @@ use inference_bazaar_operator::{http, Venue};
 
 // --- Job IDs (mirror blueprint.toml) ---
 pub const LIST_INSTRUMENT_JOB: u8 = 0;
+pub const CONFIGURE_JOB: u8 = 1;
+pub const START_MAKING_JOB: u8 = 2;
+pub const STOP_MAKING_JOB: u8 = 3;
 pub const STATUS_JOB: u8 = 4;
 pub const WORKFLOW_TICK_JOB: u8 = 30;
 /// Compact-definition deployments (live chains, where 25 reserved filler jobs
@@ -66,6 +69,27 @@ sol! {
     #[derive(Debug, serde::Serialize, serde::Deserialize)]
     struct StatusResult {
         string json;
+    }
+
+    // configure (job 1): each knob is 0 = leave unchanged, >0 = set.
+    #[derive(Debug, serde::Serialize, serde::Deserialize)]
+    struct ConfigureRequest {
+        int64 size;
+        int64 maxInventory;
+        int64 minSpreadBps;
+    }
+
+    #[derive(Debug, serde::Serialize, serde::Deserialize)]
+    struct ConfigureResult {
+        int64 size;
+        int64 maxInventory;
+        int64 minSpreadBps;
+    }
+
+    // start_making (job 2) / stop_making (job 3).
+    #[derive(Debug, serde::Serialize, serde::Deserialize)]
+    struct MakeRequest {
+        string instrumentId;
     }
 }
 
@@ -144,6 +168,50 @@ fn load_instruments() -> Vec<Instrument> {
         .unwrap_or_default()
 }
 
+/// Retune quoting knobs at runtime (job 1). Each field is 0 = leave unchanged.
+#[debug_job]
+pub async fn configure(
+    TangleArg(req): TangleArg<ConfigureRequest>,
+) -> Result<TangleResult<ConfigureResult>, RunnerError> {
+    let v = venue()?;
+    let opt = |x: i64| if x > 0 { Some(x as f64) } else { None };
+    let out = v.configure(opt(req.size), opt(req.maxInventory), opt(req.minSpreadBps));
+    let as_i64 = |k: &str| out.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0) as i64;
+    Ok(TangleResult(ConfigureResult {
+        size: as_i64("size"),
+        maxInventory: as_i64("maxInventory"),
+        minSpreadBps: as_i64("minSpreadBps"),
+    }))
+}
+
+/// Begin making a market (job 2): enable quoting for the instrument.
+#[debug_job]
+pub async fn start_making(
+    TangleArg(req): TangleArg<MakeRequest>,
+) -> Result<TangleResult<Ack>, RunnerError> {
+    let v = venue()?;
+    v.start_making(&req.instrumentId)
+        .map_err(|e| RunnerError::Other(e.to_string().into()))?;
+    Ok(TangleResult(Ack {
+        ok: true,
+        instrumentId: req.instrumentId,
+    }))
+}
+
+/// Stop making a market (job 3): disable quoting and pull resting quotes now.
+#[debug_job]
+pub async fn stop_making(
+    TangleArg(req): TangleArg<MakeRequest>,
+) -> Result<TangleResult<Ack>, RunnerError> {
+    let v = venue()?;
+    v.stop_making(&req.instrumentId)
+        .map_err(|e| RunnerError::Other(e.to_string().into()))?;
+    Ok(TangleResult(Ack {
+        ok: true,
+        instrumentId: req.instrumentId,
+    }))
+}
+
 /// Operator status (job 4).
 #[debug_job]
 pub async fn status() -> Result<TangleResult<StatusResult>, RunnerError> {
@@ -184,6 +252,9 @@ pub async fn workflow_tick(
 pub fn router() -> Router {
     Router::new()
         .route(LIST_INSTRUMENT_JOB, list_instrument.layer(TangleLayer))
+        .route(CONFIGURE_JOB, configure.layer(TangleLayer))
+        .route(START_MAKING_JOB, start_making.layer(TangleLayer))
+        .route(STOP_MAKING_JOB, stop_making.layer(TangleLayer))
         .route(STATUS_JOB, status.layer(TangleLayer))
         .route(WORKFLOW_TICK_JOB, workflow_tick.layer(TangleLayer))
         .route(WORKFLOW_TICK_JOB_COMPACT, workflow_tick.layer(TangleLayer))
