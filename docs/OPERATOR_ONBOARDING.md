@@ -169,20 +169,39 @@ A ready-to-edit template lives at [`.env.operator.example`](../.env.operator.exa
 
 ## 7. Run
 
-**Standalone bonded issuer (HTTP venue + on-chain settlement):**
+### Local testing only — run the binary directly
+
+For kicking the tires on your own box, run the lite venue directly. It goes
+on-chain the moment `CHAIN_ID` + `SETTLEMENT_ADDR` are set:
 
 ```bash
 cargo run -p inference-bazaar-operator --bin inference-bazaar-operator-lite
-# (same lite binary; it goes on-chain the moment CHAIN_ID + SETTLEMENT_ADDR are set)
 ```
 
-**Full blueprint runner (registered on Tangle, multi-operator CLOB):**
+> ⛔ **Do NOT do this in production.** Running `inference-bazaar-operator run`
+> directly (with a hardcoded `SERVICE_ID` / `TEST_MODE=true`) bypasses the entire
+> on-chain lifecycle. It's a dev shortcut only.
+
+### Production — run the Blueprint Manager (it spawns the instance)
+
+Each production operator box runs the **Blueprint Manager daemon**. The manager
+watches the chain and **spawns the `inference-bazaar-operator run` instance itself**
+when a user's service request is approved — you never `ExecStart` the instance binary:
 
 ```bash
-cargo run -p inference-bazaar-operator --bin inference-bazaar-operator --features blueprint -- run
+cargo-tangle blueprint run --protocol tangle \
+  --http-rpc-url <HTTP_RPC> --ws-rpc-url <WS_RPC> \
+  --keystore-uri <KEYSTORE> --data-dir <DATA>/bpm-data \
+  --chain testnet --settings-file <DATA>/settings.env
+# systemd SyslogIdentifier=blueprint-manager
 ```
 
-Kick a quote cycle (or let the tick-keeper do it every ~5 min):
+Your operator config (the env in §6 / `.env.operator`) goes in `settings.env`,
+which the manager passes to the instance it spawns. The full register → request →
+approve → spawn flow is §8. `deploy/gen-resell-operator.sh` generates this unit +
+settings file for a resell operator. Reference: `ai-trading-blueprint/deploy/go-live.sh`.
+
+Once an instance is live, kick a quote cycle (or let the tick-keeper do it every ~5 min):
 
 ```bash
 curl -X POST http://127.0.0.1:9100/mm-tick \
@@ -206,15 +225,18 @@ local command — it's the Tangle service lifecycle:
 deploy/base-sepolia.sh                      # cargo tangle blueprint deploy tangle …
 
 # Then, as the operator:
-cargo tangle blueprint register   --blueprint-id <ID> …
+cargo tangle blueprint register   --blueprint-id <ID> --keystore-uri <KEYSTORE>
+# A USER requests a service selecting registered operators:
 cargo tangle blueprint request-service --blueprint-id <ID> …
-# An approver (governance/Safe) calls approve on-chain; once approved you appear
-# in the service's operator set and the runner above serves under SERVICE_ID.
+# An approver (governance/Safe) approves on-chain; once approved, the Blueprint
+# Manager you started in §7 SPAWNS your instance with the assigned SERVICE_ID.
+# You never run the instance binary yourself — the manager does.
 ```
 
-The production runtime unit (`deploy/hetzner/inference-bazaar-blueprint-runtime.service`)
-shows the full env a registered operator runs with (`BLUEPRINT_ID`,
-`SERVICE_ID`, `TANGLE_CONTRACT`, `STAKING_CONTRACT`, keystore, data dir).
+The production unit is the **Blueprint Manager** (§7; `deploy/gen-resell-operator.sh`
+generates one). The older `deploy/hetzner/inference-bazaar-blueprint-runtime.service`
+runs the instance binary directly with `TEST_MODE=true` + a hardcoded `SERVICE_ID`
+— that is a **test/dev** config, not the production pattern.
 
 ---
 
