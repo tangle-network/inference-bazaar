@@ -25,7 +25,8 @@ contract SolvencyInvariant is Test {
 
     function setUp() public {
         usd = new MockUSD();
-        settlement = new InferenceBazaarSettlement(IERC20(address(usd)), 30 days, 6 hours, 1 hours, 500, 200, feeRecipient);
+        settlement =
+            new InferenceBazaarSettlement(IERC20(address(usd)), 30 days, 6 hours, 1 hours, 500, 200, feeRecipient);
         // A registered book so the attested path exists (the handler uses the
         // trustless fill path, but registration keeps the surface realistic).
         address[] memory atts = new address[](1);

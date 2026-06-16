@@ -59,7 +59,9 @@ contract ErrorPathsTest is SettlementTestBase {
         // The issuer claims it served MORE than the holder requested.
         uint64 over = 20_001;
         (uint8 v, bytes32 r, bytes32 ss) = vm.sign(buyerKey, settlement.receiptDigest(rid, over, WORK));
-        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.ServedExceedsRequested.selector, over, uint64(20_000)));
+        vm.expectRevert(
+            abi.encodeWithSelector(InferenceBazaarSettlement.ServedExceedsRequested.selector, over, uint64(20_000))
+        );
         settlement.settleRedemption(rid, over, WORK, abi.encodePacked(r, ss, v));
     }
 

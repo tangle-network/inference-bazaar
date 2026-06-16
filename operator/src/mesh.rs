@@ -26,10 +26,10 @@ use blueprint_crypto::BytesEncoding;
 use blueprint_networking::service_handle::NetworkServiceHandle;
 use blueprint_networking::types::MessageRouting;
 use blueprint_networking::{AllowedKeys, NetworkConfig, NetworkService};
-use serde::{Deserialize, Serialize};
 use inference_bazaar_matcher::Attestation;
 use inference_bazaar_settlement::core::alloy_primitives::{Address, B256};
 use inference_bazaar_settlement::core::batch_digest;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use crate::clob::{
@@ -180,9 +180,9 @@ pub fn spawn_mesh_loop(clob: SharedClob, net: Arc<MeshNet>, mut reader: MeshHand
                     }
                 }
                 MeshWire::Attestation(a) => {
-                    let Ok(signature) =
-                        inference_bazaar_settlement::core::hex::decode(a.signature.trim_start_matches("0x"))
-                    else {
+                    let Ok(signature) = inference_bazaar_settlement::core::hex::decode(
+                        a.signature.trim_start_matches("0x"),
+                    ) else {
                         continue;
                     };
                     let digest =
@@ -229,7 +229,8 @@ pub fn start(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<(SharedClob, 
         .map(|s| s.parse().map_err(|e| anyhow::anyhow!("bootnode {s}: {e}")))
         .collect::<anyhow::Result<_>>()?;
 
-    let key_bytes = inference_bazaar_settlement::core::hex::decode(operator_key.trim_start_matches("0x"))?;
+    let key_bytes =
+        inference_bazaar_settlement::core::hex::decode(operator_key.trim_start_matches("0x"))?;
     let instance_key_pair = blueprint_crypto::k256::K256SigningKey::from_bytes(&key_bytes)
         .map_err(|e| anyhow::anyhow!("operator key as K256 secret: {e}"))?;
 

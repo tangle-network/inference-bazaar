@@ -225,7 +225,9 @@ impl BackgroundService for MarketVenueService {
         }
         // Spend channel: lots consumed via a delegated session key over the OpenAI
         // surface (the gateway signs vouchers; see docs/specs/spend-rail.md).
-        let spend = Arc::new(inference_bazaar_operator::spend::SpendSvc::new(self.venue.clone()));
+        let spend = Arc::new(inference_bazaar_operator::spend::SpendSvc::new(
+            self.venue.clone(),
+        ));
         inference_bazaar_operator::spend::spawn_spend_flush(spend.clone());
         app = app.merge(inference_bazaar_operator::spend::router(spend));
         // Rate limiting wraps the MERGED app — `merge` does not propagate layers.
@@ -234,7 +236,9 @@ impl BackgroundService for MarketVenueService {
         tokio::spawn(async move {
             match tokio::net::TcpListener::bind(&addr).await {
                 Ok(listener) => {
-                    tracing::info!("inference-bazaar venue (blueprint background) on http://{addr}");
+                    tracing::info!(
+                        "inference-bazaar venue (blueprint background) on http://{addr}"
+                    );
                     if let Err(e) = axum::serve(listener, app).await {
                         let _ = tx.send(Err(RunnerError::Other(e.to_string().into())));
                     }
@@ -287,7 +291,8 @@ async fn main() -> Result<(), blueprint_sdk::Error> {
     for inst in load_instruments() {
         venue.register_instrument(inst);
     }
-    let addr = std::env::var("INFERENCE_BAZAAR_OPERATOR_ADDR").unwrap_or_else(|_| "127.0.0.1:9100".into());
+    let addr =
+        std::env::var("INFERENCE_BAZAAR_OPERATOR_ADDR").unwrap_or_else(|_| "127.0.0.1:9100".into());
 
     let env = BlueprintEnvironment::load()?;
 

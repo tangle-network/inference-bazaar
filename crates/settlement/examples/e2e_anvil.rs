@@ -145,7 +145,9 @@ async fn main() -> anyhow::Result<()> {
     // ── 2. Redemption happy path: holder receipt (with work commitment) ──────
     let redemption = buyer_client.request_redemption(lot1, 50_000).await?;
     let work = inference_bazaar_settlement::work_commitment(
-        inference_bazaar_settlement::core::alloy_primitives::keccak256(b"anthropic/claude-opus-4-8:output"),
+        inference_bazaar_settlement::core::alloy_primitives::keccak256(
+            b"anthropic/claude-opus-4-8:output",
+        ),
         inference_bazaar_settlement::core::alloy_primitives::keccak256(
             br#"[{"role":"user","content":"hi"}]"#,
         ),

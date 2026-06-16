@@ -45,9 +45,9 @@ impl ClobConfig {
             "INFERENCE_BAZAAR_CLOB_OPERATORS is set but lists no operators"
         );
         let threshold = match std::env::var("INFERENCE_BAZAAR_CLOB_THRESHOLD") {
-            Ok(v) => v
-                .parse()
-                .map_err(|_| anyhow::anyhow!("INFERENCE_BAZAAR_CLOB_THRESHOLD '{v}' is not a number"))?,
+            Ok(v) => v.parse().map_err(|_| {
+                anyhow::anyhow!("INFERENCE_BAZAAR_CLOB_THRESHOLD '{v}' is not a number")
+            })?,
             Err(_) => 2,
         };
         let epoch_secs = match std::env::var("INFERENCE_BAZAAR_CLOB_EPOCH_SECS") {
@@ -64,9 +64,9 @@ impl ClobConfig {
             Err(_) => 10,
         };
         let book_id = match std::env::var("INFERENCE_BAZAAR_CLOB_BOOK") {
-            Ok(v) => v
-                .parse()
-                .map_err(|_| anyhow::anyhow!("INFERENCE_BAZAAR_CLOB_BOOK '{v}' is not bytes32 hex"))?,
+            Ok(v) => v.parse().map_err(|_| {
+                anyhow::anyhow!("INFERENCE_BAZAAR_CLOB_BOOK '{v}' is not bytes32 hex")
+            })?,
             Err(_) => B256::ZERO,
         };
         Ok(Some(ClobConfig {

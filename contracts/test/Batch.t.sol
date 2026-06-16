@@ -10,8 +10,10 @@ contract BatchTest is SettlementTestBase {
         fills = new InferenceBazaarSettlement.BatchFill[](2);
         InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
         InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
-        fills[0] = InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 30_000, execPriceMicroPerM: 15_000_000 });
-        fills[1] = InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 20_000, execPriceMicroPerM: 14_500_000 });
+        fills[0] =
+            InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 30_000, execPriceMicroPerM: 15_000_000 });
+        fills[1] =
+            InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 20_000, execPriceMicroPerM: 14_500_000 });
     }
 
     function attestBatch(InferenceBazaarSettlement.BatchFill[] memory fills) internal view returns (bytes[] memory) {
@@ -90,7 +92,8 @@ contract BatchTest is SettlementTestBase {
         InferenceBazaarSettlement.BatchFill[] memory fills = new InferenceBazaarSettlement.BatchFill[](1);
         InferenceBazaarSettlement.Order memory b = buyOrder(15_000_000, 50_000);
         InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
-        fills[0] = InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 60_000, execPriceMicroPerM: 15_000_000 });
+        fills[0] =
+            InferenceBazaarSettlement.BatchFill({ buy: b, sell: s, qtyTokens: 60_000, execPriceMicroPerM: 15_000_000 });
         bytes[] memory sigs = attestBatch(fills);
         vm.expectRevert(
             abi.encodeWithSelector(InferenceBazaarSettlement.Overfill.selector, settlement.hashOrder(b), 50_000, 60_000)

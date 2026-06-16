@@ -12,9 +12,9 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use inference_bazaar_orderbook::Side;
 use serde::Deserialize;
 use std::sync::Arc;
-use inference_bazaar_orderbook::Side;
 
 pub type Shared = Arc<Venue>;
 
@@ -146,7 +146,10 @@ fn onion_url() -> Option<String> {
             Some(format!("http://{s}"))
         }
     };
-    if let Some(u) = std::env::var("INFERENCE_BAZAAR_ONION_URL").ok().and_then(&normalize) {
+    if let Some(u) = std::env::var("INFERENCE_BAZAAR_ONION_URL")
+        .ok()
+        .and_then(&normalize)
+    {
         return Some(u);
     }
     std::env::var("INFERENCE_BAZAAR_ONION_FILE")

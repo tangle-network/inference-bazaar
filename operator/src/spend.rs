@@ -25,10 +25,10 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::{Deserialize, Serialize};
-use serde_json::{json, value::RawValue, Value};
 use inference_bazaar_settlement::core::alloy_primitives::{keccak256, Address, B256, U256};
 use inference_bazaar_settlement::core::hex;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, value::RawValue, Value};
 
 use crate::venue::{Venue, VenueError};
 
@@ -254,10 +254,13 @@ impl SpendSvc {
         let signer = recover_signer(digest, &sig)
             .ok_or_else(|| VenueError::Rejected("unrecoverable holder signature".into()))?;
 
-        let client =
-            inference_bazaar_settlement::chain::SettlementClient::connect(rpc, op_key, ctx.contract)
-                .await
-                .map_err(|e| VenueError::Chain(e.to_string()))?;
+        let client = inference_bazaar_settlement::chain::SettlementClient::connect(
+            rpc,
+            op_key,
+            ctx.contract,
+        )
+        .await
+        .map_err(|e| VenueError::Chain(e.to_string()))?;
         let lot = client
             .get_lot(body.lot_id)
             .await
@@ -376,7 +379,9 @@ impl SpendSvc {
             permit.session_key,
             voucher.cumulative,
         );
-        if inference_bazaar_settlement::core::recover_signer(vdigest, &vsig) != Some(permit.session_key) {
+        if inference_bazaar_settlement::core::recover_signer(vdigest, &vsig)
+            != Some(permit.session_key)
+        {
             return Err((
                 StatusCode::UNAUTHORIZED,
                 oai_err("bad_voucher", "voucher not signed by the session key"),
@@ -541,7 +546,8 @@ impl SpendSvc {
                         Some("[DONE]") => {
                             let u = used.min(remaining);
                             svc.record_served(session, already_served + u, u);
-                            let _ = tx.unbounded_send(Ok(inference_bazaar_event(u, already_served + u)));
+                            let _ = tx
+                                .unbounded_send(Ok(inference_bazaar_event(u, already_served + u)));
                             let _ =
                                 tx.unbounded_send(Ok(axum::body::Bytes::from_static(DONE_EVENT)));
                             finalized = true;
@@ -626,7 +632,9 @@ impl SpendSvc {
             permit.session_key,
             voucher.cumulative,
         );
-        if inference_bazaar_settlement::core::recover_signer(vdigest, &vsig) != Some(permit.session_key) {
+        if inference_bazaar_settlement::core::recover_signer(vdigest, &vsig)
+            != Some(permit.session_key)
+        {
             return Err((
                 StatusCode::UNAUTHORIZED,
                 oai_err("bad_voucher", "voucher not signed by the session key"),
@@ -692,10 +700,13 @@ impl SpendSvc {
         if !has_channels {
             return Ok(json!({ "mode": "noop", "settled": 0 }));
         }
-        let client =
-            inference_bazaar_settlement::chain::SettlementClient::connect(rpc, op_key, ctx.contract)
-                .await
-                .map_err(|e| VenueError::Chain(e.to_string()))?;
+        let client = inference_bazaar_settlement::chain::SettlementClient::connect(
+            rpc,
+            op_key,
+            ctx.contract,
+        )
+        .await
+        .map_err(|e| VenueError::Chain(e.to_string()))?;
         // Verify the on-chain domain separator once before settling — a wrong chain
         // id / contract address would make every settleSpend digest unverifiable.
         if !self
@@ -889,8 +900,12 @@ impl SpendSvc {
                 oai_err("bad_query", "usage query expiry is too far out"),
             ));
         }
-        let sig = hex::decode(sig_hex.trim_start_matches("0x"))
-            .map_err(|_| (StatusCode::BAD_REQUEST, oai_err("bad_sig", "signature is not hex")))?;
+        let sig = hex::decode(sig_hex.trim_start_matches("0x")).map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                oai_err("bad_sig", "signature is not hex"),
+            )
+        })?;
         let chain_id = ctx.domain.chain_id.unwrap_or_default();
         let digest = usage_query_digest(chain_id, ctx.contract, holder, expiry);
         if inference_bazaar_settlement::core::recover_signer(digest, &sig) != Some(holder) {
@@ -1211,11 +1226,21 @@ mod tests {
     /// in-flight = served − settled.
     #[test]
     fn usage_rows_are_per_holder_and_report_inflight() {
-        let me: Address = "0x1111111111111111111111111111111111111111".parse().unwrap();
-        let other: Address = "0x2222222222222222222222222222222222222222".parse().unwrap();
-        let s_a: Address = "0xaaaa000000000000000000000000000000000000".parse().unwrap();
-        let s_b: Address = "0xbbbb000000000000000000000000000000000000".parse().unwrap();
-        let s_c: Address = "0xcccc000000000000000000000000000000000000".parse().unwrap();
+        let me: Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        let other: Address = "0x2222222222222222222222222222222222222222"
+            .parse()
+            .unwrap();
+        let s_a: Address = "0xaaaa000000000000000000000000000000000000"
+            .parse()
+            .unwrap();
+        let s_b: Address = "0xbbbb000000000000000000000000000000000000"
+            .parse()
+            .unwrap();
+        let s_c: Address = "0xcccc000000000000000000000000000000000000"
+            .parse()
+            .unwrap();
 
         let mut j = SpendJournal::default();
         j.permits.insert(s_a, permit_for(me, s_a, 1_000));
@@ -1245,8 +1270,12 @@ mod tests {
     /// over the same domain, so signatures can't be cross-used.
     #[test]
     fn usage_query_digest_is_distinct() {
-        let settlement: Address = "0x1111111111111111111111111111111111111111".parse().unwrap();
-        let holder: Address = "0x3333333333333333333333333333333333333333".parse().unwrap();
+        let settlement: Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        let holder: Address = "0x3333333333333333333333333333333333333333"
+            .parse()
+            .unwrap();
         let d = usage_query_digest(U256::from(3799u64), settlement, holder, 1_800_000_000);
         let permit = spend_permit_digest(
             U256::from(3799u64),
@@ -1256,6 +1285,9 @@ mod tests {
             1_000_000,
             1_800_000_000,
         );
-        assert_ne!(d, permit, "usage digest must not collide with permit digest");
+        assert_ne!(
+            d, permit,
+            "usage digest must not collide with permit digest"
+        );
     }
 }

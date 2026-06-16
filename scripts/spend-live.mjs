@@ -90,7 +90,7 @@ const out = await post(
   await voucherHeaders(acked),
 )
 const served = out.usage.completion_tokens
-acked = out.inference-bazaar.nextCumulative
+acked = out['inference-bazaar'].nextCumulative
 await post(`${VENUE}/v1/spend/ack`, {}, await voucherHeaders(acked)) // makes this request settleable
 console.log(`REAL completion (${served} tokens): "${out.choices[0].message.content.trim()}"`)
 

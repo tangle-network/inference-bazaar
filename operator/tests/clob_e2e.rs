@@ -297,8 +297,10 @@ async fn forged_and_impersonated_proposals_rejected() {
 
     let to_signed = |w: &WireOrder| inference_bazaar_settlement::SignedOrder {
         order: w.order.clone(),
-        signature: inference_bazaar_settlement::core::hex::decode(w.signature.trim_start_matches("0x"))
-            .unwrap(),
+        signature: inference_bazaar_settlement::core::hex::decode(
+            w.signature.trim_start_matches("0x"),
+        )
+        .unwrap(),
     };
     let orders = vec![to_signed(&honest_sell), to_signed(&forged_buy)];
     let inner: Vec<Order> = orders.iter().map(|s| s.order.clone()).collect();
@@ -330,9 +332,14 @@ async fn forged_and_impersonated_proposals_rejected() {
 
     // Impersonation: correct content, wrong proposer for the epoch → refused
     // even with that party's own valid signature.
-    let solo_hash =
-        inference_bazaar_matcher::match_epoch(INSTRUMENT, 1000, 1000, &dom, &[honest_sell.order.clone()])
-            .fills_hash;
+    let solo_hash = inference_bazaar_matcher::match_epoch(
+        INSTRUMENT,
+        1000,
+        1000,
+        &dom,
+        &[honest_sell.order.clone()],
+    )
+    .fills_hash;
     let impostor = WireProposal {
         epoch,
         book_id: B256::ZERO,
@@ -387,8 +394,10 @@ async fn tampered_fills_hash_rejected() {
     let buy = signed_wire(SIDE_BUY, 15_000_000, 10_000, BUYER_KEY, 2);
     let to_signed = |w: &WireOrder| inference_bazaar_settlement::SignedOrder {
         order: w.order.clone(),
-        signature: inference_bazaar_settlement::core::hex::decode(w.signature.trim_start_matches("0x"))
-            .unwrap(),
+        signature: inference_bazaar_settlement::core::hex::decode(
+            w.signature.trim_start_matches("0x"),
+        )
+        .unwrap(),
     };
 
     // The proposer lies about the result (e.g., claims a different exec price).

@@ -31,12 +31,12 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::Deserialize;
-use serde_json::{json, Value};
 use inference_bazaar_operator::spend::spend_voucher_digest;
 use inference_bazaar_settlement::core::alloy_primitives::{Address, B256, U256};
 use inference_bazaar_settlement::core::hex;
 use inference_bazaar_settlement::Signer;
+use serde::Deserialize;
+use serde_json::{json, Value};
 
 /// Never route to a lot within this margin of its expiry — settlement must still
 /// land before the lot expires.
@@ -480,8 +480,8 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()))
         .init();
 
-    let listen =
-        std::env::var("INFERENCE_BAZAAR_GATEWAY_LISTEN").unwrap_or_else(|_| "127.0.0.1:8088".into());
+    let listen = std::env::var("INFERENCE_BAZAAR_GATEWAY_LISTEN")
+        .unwrap_or_else(|_| "127.0.0.1:8088".into());
     // Seed each channel's acked from the journal so a restart resumes where it
     // left off (an un-seeded restart would re-sign cum=0 and brick the channel on
     // the operator's stale-voucher check).

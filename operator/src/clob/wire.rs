@@ -2,10 +2,10 @@
 //! co-signatures. All `camelCase` so the same body a client posts flows on to
 //! peers unchanged.
 
-use serde::{Deserialize, Serialize};
 use inference_bazaar_settlement::core::alloy_primitives::{Address, B256};
 use inference_bazaar_settlement::core::Order;
 use inference_bazaar_settlement::SignedOrder;
+use serde::{Deserialize, Serialize};
 
 use crate::market::SignedOrderBody;
 

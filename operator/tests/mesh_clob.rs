@@ -124,7 +124,8 @@ async fn three_nodes_gossip_cosign_over_pki_mesh() {
     blueprint_networking::test_utils::setup_log();
     // Three whitelisted mesh nodes: every node's handshake is verified against
     // the shared key set — the PKI gate the HTTP transport never had.
-    let mut nodes = create_whitelisted_nodes::<K256Ecdsa>(3, "inference-bazaar-clob", "test", false);
+    let mut nodes =
+        create_whitelisted_nodes::<K256Ecdsa>(3, "inference-bazaar-clob", "test", false);
     let mut handles = Vec::new();
     for n in &mut nodes {
         handles.push(n.start().await.expect("mesh node starts"));

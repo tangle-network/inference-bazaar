@@ -60,7 +60,9 @@ contract SettlementTest is SettlementTestBase {
         InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
         InferenceBazaarSettlement.FillInput[] memory fills = fillInput(b, s, 50_000, 15_000_000);
         fills[0].buySig = sign(sellerKey, b); // wrong signer
-        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.BadSignature.selector, settlement.hashOrder(b)));
+        vm.expectRevert(
+            abi.encodeWithSelector(InferenceBazaarSettlement.BadSignature.selector, settlement.hashOrder(b))
+        );
         settlement.settleFills(fills);
     }
 
@@ -78,7 +80,9 @@ contract SettlementTest is SettlementTestBase {
         InferenceBazaarSettlement.Order memory s = sellOrder(14_000_000, 50_000);
         InferenceBazaarSettlement.FillInput[] memory fills = fillInput(b, s, 50_000, 15_000_000);
         vm.warp(block.timestamp + 301);
-        vm.expectRevert(abi.encodeWithSelector(InferenceBazaarSettlement.OrderExpired.selector, settlement.hashOrder(b)));
+        vm.expectRevert(
+            abi.encodeWithSelector(InferenceBazaarSettlement.OrderExpired.selector, settlement.hashOrder(b))
+        );
         settlement.settleFills(fills);
     }
 
@@ -105,11 +109,15 @@ contract SettlementTest is SettlementTestBase {
         InferenceBazaarSettlement.FillInput[] memory above = fillInput(b, s, 50_000, 15_000_001);
         InferenceBazaarSettlement.FillInput[] memory below = fillInput(b, s, 50_000, 13_999_999);
         vm.expectRevert(
-            abi.encodeWithSelector(InferenceBazaarSettlement.PriceOutsideLimits.selector, 15_000_001, 15_000_000, 14_000_000)
+            abi.encodeWithSelector(
+                InferenceBazaarSettlement.PriceOutsideLimits.selector, 15_000_001, 15_000_000, 14_000_000
+            )
         );
         settlement.settleFills(above);
         vm.expectRevert(
-            abi.encodeWithSelector(InferenceBazaarSettlement.PriceOutsideLimits.selector, 13_999_999, 15_000_000, 14_000_000)
+            abi.encodeWithSelector(
+                InferenceBazaarSettlement.PriceOutsideLimits.selector, 13_999_999, 15_000_000, 14_000_000
+            )
         );
         settlement.settleFills(below);
     }

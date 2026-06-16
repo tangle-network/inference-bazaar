@@ -1,7 +1,6 @@
 //! Venue-level integration of the firm-quote market: RFQ quoting against a
 //! stub sidecar, countersign + fill, signed CLOB crossing, and the outbox.
 
-use std::sync::Arc;
 use inference_bazaar_operator::config::{
     Instrument, OperatorConfig, QuoteParams, RiskLimits, SettlementConfig,
 };
@@ -9,6 +8,7 @@ use inference_bazaar_operator::market::{RfqFillBody, SignedOrderBody};
 use inference_bazaar_operator::Venue;
 use inference_bazaar_settlement::core::alloy_primitives::B256;
 use inference_bazaar_settlement::{domain, instrument_hash, Order, Signer, SIDE_BUY};
+use std::sync::Arc;
 
 const INSTRUMENT: &str = "anthropic/claude-opus-4-8:output";
 const CONTRACT: &str = "0x1111111111111111111111111111111111111111";
@@ -108,7 +108,8 @@ async fn rfq_quote_countersign_fill_outbox() {
     // The signature is real and verifies under the settlement domain.
     let dom = domain(31_337, CONTRACT.parse().unwrap());
     let sig = quote["signature"].as_str().unwrap();
-    let sig_bytes = inference_bazaar_settlement::core::hex::decode(sig.trim_start_matches("0x")).unwrap();
+    let sig_bytes =
+        inference_bazaar_settlement::core::hex::decode(sig.trim_start_matches("0x")).unwrap();
     assert!(inference_bazaar_settlement::verify_order(
         &maker_order,
         &sig_bytes,
@@ -140,7 +141,9 @@ async fn rfq_quote_countersign_fill_outbox() {
             taker: SignedOrderBody {
                 instrument_id: INSTRUMENT.into(),
                 order: taker.order.clone(),
-                signature: inference_bazaar_settlement::core::hex::encode_prefixed(&taker.signature),
+                signature: inference_bazaar_settlement::core::hex::encode_prefixed(
+                    &taker.signature,
+                ),
             },
         })
         .unwrap();

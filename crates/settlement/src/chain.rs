@@ -319,7 +319,10 @@ impl SettlementClient {
         Ok(self.contract.redemptions(redemption_id).call().await?)
     }
 
-    pub async fn get_lot(&self, lot_id: B256) -> anyhow::Result<IInferenceBazaarSettlement::lotsReturn> {
+    pub async fn get_lot(
+        &self,
+        lot_id: B256,
+    ) -> anyhow::Result<IInferenceBazaarSettlement::lotsReturn> {
         Ok(self.contract.lots(lot_id).call().await?)
     }
 

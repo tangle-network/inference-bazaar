@@ -5,9 +5,9 @@
 //! read through these entry points.
 
 use axum::http::StatusCode;
-use serde_json::{json, Value};
 use inference_bazaar_settlement::core::alloy_primitives::B256;
 use inference_bazaar_settlement::core::{order_digest, recover_signer, BatchFill};
+use serde_json::{json, Value};
 
 use super::{
     cancel_digest, Clob, FinalityJournal, PoolEntry, WireCancel, WireOrder, CANCEL_TTL_SECS,
@@ -93,13 +93,14 @@ impl Clob {
     /// drop the order from the pool if held. Idempotent. A cancel for an order
     /// not yet seen is remembered so the order is refused on arrival.
     pub(crate) fn admit_cancel(&self, c: WireCancel) -> Result<Value, (StatusCode, String)> {
-        let sig = inference_bazaar_settlement::core::hex::decode(c.signature.trim_start_matches("0x"))
-            .map_err(|_| {
-                (
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "signature is not hex".into(),
-                )
-            })?;
+        let sig =
+            inference_bazaar_settlement::core::hex::decode(c.signature.trim_start_matches("0x"))
+                .map_err(|_| {
+                    (
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "signature is not hex".into(),
+                    )
+                })?;
         let (chain_id, contract) = self.cancel_ctx();
         let digest = cancel_digest(chain_id, contract, c.order_hash);
         let signer = recover_signer(digest, &sig).ok_or((

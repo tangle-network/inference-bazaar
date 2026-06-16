@@ -7,16 +7,16 @@
 
 use crate::config::SettlementConfig;
 use crate::venue::{apply_inventory, Venue, VenueError};
-use serde::Deserialize;
-use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 use inference_bazaar_orderbook::{Fill, MatchingEngine, Order as BookOrder, Side};
 use inference_bazaar_settlement::core::alloy_primitives::{keccak256, Address, B256};
 use inference_bazaar_settlement::{
     domain, instrument_hash, Batch, Eip712Domain, Order, SignedFill, SignedOrder, Signer, SIDE_BUY,
     SIDE_SELL,
 };
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) fn now_unix() -> u64 {
     SystemTime::now()
@@ -589,17 +589,20 @@ impl Venue {
 
         #[cfg(feature = "chain")]
         if let (Some(rpc), Some(key)) = (_ctx.rpc_url.as_deref(), _ctx.submitter_key()) {
-            let client =
-                match inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, _ctx.contract)
-                    .await
-                {
-                    Ok(c) => c,
-                    Err(e) => {
-                        // Couldn't even connect: re-queue everything (transient).
-                        self.requeue(fills);
-                        return Err(VenueError::Chain(e.to_string()));
-                    }
-                };
+            let client = match inference_bazaar_settlement::chain::SettlementClient::connect(
+                rpc,
+                key,
+                _ctx.contract,
+            )
+            .await
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    // Couldn't even connect: re-queue everything (transient).
+                    self.requeue(fills);
+                    return Err(VenueError::Chain(e.to_string()));
+                }
+            };
             if let Err(e) = client.assert_domain().await {
                 self.requeue(fills);
                 return Err(VenueError::Chain(e.to_string()));
@@ -702,10 +705,13 @@ impl Venue {
                 return Ok(());
             };
             let op = signer.address();
-            let client =
-                inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
-                    .await
-                    .map_err(|e| VenueError::Chain(e.to_string()))?;
+            let client = inference_bazaar_settlement::chain::SettlementClient::connect(
+                rpc,
+                key,
+                ctx.contract,
+            )
+            .await
+            .map_err(|e| VenueError::Chain(e.to_string()))?;
             let free = client
                 .free_collateral(op)
                 .await
@@ -752,8 +758,8 @@ impl Venue {
             if remaining == 0 {
                 continue;
             }
-            let cost =
-                inference_bazaar_settlement::core::cost_micro(o.priceMicroPerM, remaining).to::<u128>();
+            let cost = inference_bazaar_settlement::core::cost_micro(o.priceMicroPerM, remaining)
+                .to::<u128>();
             if o.side == SIDE_SELL {
                 sell += cost;
             } else {

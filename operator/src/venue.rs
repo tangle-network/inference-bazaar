@@ -6,11 +6,11 @@
 use crate::config::{Instrument, OperatorConfig};
 use crate::market::{SettleCtx, SignedState};
 use crate::sidecar::SidecarClient;
+use inference_bazaar_orderbook::{Fill, MatchingEngine, NativeBook, Order, Side};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use inference_bazaar_orderbook::{Fill, MatchingEngine, NativeBook, Order, Side};
 
 /// The operator's own market-making orders carry this owner so it can
 /// cancel-replace them each tick and attribute fills to its inventory. When a
