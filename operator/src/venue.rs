@@ -54,6 +54,10 @@ pub(crate) struct InstrumentVenue {
     pub(crate) ref_mid: f64,
     pub(crate) inventory_tokens: i64,
     pub(crate) drawdown_micro: f64,
+    /// Whether the operator is actively quoting this market. Defaults ON (a
+    /// listed market quotes on the next tick); `stop_making` (job 3) sets it
+    /// off and pulls quotes, `start_making` (job 2) turns it back on.
+    pub(crate) making: bool,
 }
 
 pub struct Venue {
@@ -83,6 +87,21 @@ pub struct Venue {
     /// own model" rule does not apply to it (it serves nothing). This is the
     /// honest model for an independent-DC quorum member like op5.
     pub(crate) attester_only: bool,
+    /// Runtime quoting overrides set by the `configure` job (job 1). `None`
+    /// fields fall back to the boot config; mm_tick applies them per tick.
+    pub(crate) overrides: Mutex<ParamOverride>,
+}
+
+/// Operator-wide quoting knobs the `configure` job can retune at runtime
+/// without a restart. Each `None` keeps the boot-config value.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct ParamOverride {
+    /// Quote size per level, tokens.
+    pub size: Option<f64>,
+    /// Inventory cap, tokens (caps both the quoter's target and the risk gate).
+    pub max_inventory: Option<f64>,
+    /// Minimum spread the risk gate will quote, bps.
+    pub min_spread_bps: Option<f64>,
 }
 
 /// Serve-side state of one open redemption: how much has been served (pending
@@ -174,6 +193,7 @@ impl Venue {
             chain_cache: Mutex::new(ChainCache::default()),
             inference,
             attester_only,
+            overrides: Mutex::new(ParamOverride::default()),
         };
         venue.load_outbox();
         venue.load_refs();
@@ -329,6 +349,93 @@ impl Venue {
         json!({ "ok": true, "instruments": instruments, "inference": self.inference.target() })
     }
 
+    /// `configure` (job 1): retune operator-wide quoting knobs at runtime. Each
+    /// supplied field overrides the boot config; omitted fields are left as-is.
+    /// Returns the effective values so the caller sees what's now live.
+    pub fn configure(
+        &self,
+        size: Option<f64>,
+        max_inventory: Option<f64>,
+        min_spread_bps: Option<f64>,
+    ) -> Value {
+        {
+            let mut ov = self.overrides.lock().unwrap();
+            if size.is_some() {
+                ov.size = size;
+            }
+            if max_inventory.is_some() {
+                ov.max_inventory = max_inventory;
+            }
+            if min_spread_bps.is_some() {
+                ov.min_spread_bps = min_spread_bps;
+            }
+        }
+        let cfg = self.effective_cfg();
+        json!({
+            "ok": true,
+            "size": cfg.params.size,
+            "maxInventory": cfg.params.max_inventory,
+            "minSpreadBps": cfg.limits.min_spread_bps,
+        })
+    }
+
+    /// `start_making` (job 2): enable quoting for a market (it quotes next tick).
+    pub fn start_making(&self, instrument_id: &str) -> Result<Value, VenueError> {
+        let mut venues = self.venues.lock().unwrap();
+        let v = venues
+            .get_mut(instrument_id)
+            .ok_or_else(|| VenueError::NotFound(instrument_id.to_string()))?;
+        v.making = true;
+        Ok(json!({ "ok": true, "instrumentId": instrument_id, "making": true }))
+    }
+
+    /// `stop_making` (job 3): disable quoting AND pull resting quotes now, so the
+    /// operator stops making the market immediately rather than next tick.
+    pub fn stop_making(&self, instrument_id: &str) -> Result<Value, VenueError> {
+        {
+            let mut venues = self.venues.lock().unwrap();
+            let v = venues
+                .get_mut(instrument_id)
+                .ok_or_else(|| VenueError::NotFound(instrument_id.to_string()))?;
+            v.making = false;
+        }
+        self.cancel_quotes(instrument_id);
+        Ok(json!({ "ok": true, "instrumentId": instrument_id, "making": false }))
+    }
+
+    /// Boot config with the live `configure` overrides applied — what mm_tick
+    /// actually quotes with.
+    fn effective_cfg(&self) -> OperatorConfig {
+        let ov = *self.overrides.lock().unwrap();
+        let mut cfg = self.cfg.clone();
+        if let Some(s) = ov.size {
+            cfg.params.size = s;
+        }
+        if let Some(mi) = ov.max_inventory {
+            cfg.params.max_inventory = mi;
+            cfg.limits.max_inventory = mi;
+        }
+        if let Some(sp) = ov.min_spread_bps {
+            cfg.limits.min_spread_bps = sp;
+        }
+        cfg
+    }
+
+    /// Cancel the operator's own resting quotes for one instrument and drop them
+    /// from the signed-order state. Used by `stop_making` and the stopped-tick path.
+    fn cancel_quotes(&self, instrument_id: &str) {
+        let mut venues = self.venues.lock().unwrap();
+        let Some(v) = venues.get_mut(instrument_id) else {
+            return;
+        };
+        let mut signed = self.signed.lock().unwrap();
+        for o in v.book.open_orders(&self.mm_owner) {
+            v.book.cancel(&o.id);
+            signed.orders.remove(&o.id);
+            signed.filled.remove(&o.id);
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn place(
         &self,
@@ -380,25 +487,25 @@ impl Venue {
     /// current inventory + reference, cancel the operator's stale quotes, and
     /// post the new bid/ask. The sidecar's verdict is the safety boundary.
     pub async fn mm_tick(&self, instrument_id: &str) -> Result<Value, VenueError> {
-        let (ref_mid, inventory, drawdown) = {
+        let (ref_mid, inventory, drawdown, making) = {
             let venues = self.venues.lock().unwrap();
             let v = venues
                 .get(instrument_id)
                 .ok_or_else(|| VenueError::NotFound(instrument_id.to_string()))?;
-            (v.ref_mid, v.inventory_tokens, v.drawdown_micro)
+            (v.ref_mid, v.inventory_tokens, v.drawdown_micro, v.making)
         };
+        // stop_making (job 3) pulls this market: cancel resting quotes, don't requote.
+        if !making {
+            self.cancel_quotes(instrument_id);
+            return Ok(json!({ "quoting": false, "reasons": ["stopped"] }));
+        }
         if ref_mid <= 0.0 {
             return Err(VenueError::NoReference);
         }
+        let cfg = self.effective_cfg();
         let quote = self
             .sidecar
-            .quote(
-                &self.cfg,
-                instrument_id,
-                ref_mid,
-                inventory as f64,
-                drawdown,
-            )
+            .quote(&cfg, instrument_id, ref_mid, inventory as f64, drawdown)
             .await
             .map_err(|e| VenueError::Sidecar(e.to_string()))?;
 
@@ -544,6 +651,7 @@ impl InstrumentVenue {
             ref_mid: 0.0,
             inventory_tokens: 0,
             drawdown_micro: 0.0,
+            making: true,
         }
     }
 }
