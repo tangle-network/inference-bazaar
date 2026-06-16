@@ -226,7 +226,7 @@ contract InferenceBazaarSettlement is EIP712, Ownable2Step, ReentrancyGuard {
     mapping(bytes32 => Redemption) public redemptions;
     mapping(bytes32 => bytes32) public openRedemptionOf; // lotId => open redemption id
 
-    mapping(bytes32 => uint64) public spendSettled; // permit digest => cumulative tokens settled
+    mapping(bytes32 => uint64) public spendSettled; // lotId => cumulative tokens settled on this lot (per-LOT; see settleSpend)
     mapping(bytes32 => bool) public spendRevoked; // permit digest => holder killed the channel
 
     /// Sentinel issuing-book for lots minted outside any book (the `settleFills`
@@ -844,12 +844,19 @@ contract InferenceBazaarSettlement is EIP712, Ownable2Step, ReentrancyGuard {
         bytes32 vd = spendVoucherDigest(permit.lotId, permit.sessionKey, servedCumulative);
         if (ECDSA.recover(vd, voucherSig) != permit.sessionKey) revert BadSpendAuth(pd);
         if (servedCumulative > permit.maxTokens) revert SpendCapExceeded(permit.maxTokens, servedCumulative);
-        uint64 settled = spendSettled[pd];
+        // The cumulative replay guard is keyed by the LOT, not the permit digest.
+        // A SpendVoucher commits only (lotId, sessionKey, servedCumulative), so the
+        // same voucher is valid under every permit that shares this lot+sessionKey
+        // (e.g. a cap raise or renewal). A per-permit counter would give each its
+        // own tally and let that one acknowledgement be settled once PER permit —
+        // draining the lot for a multiple of what the session key actually signed.
+        // Per-lot makes "total settled on this lot" the single source of truth.
+        uint64 settled = spendSettled[permit.lotId];
         if (servedCumulative <= settled) revert NothingToSettle(pd);
         uint64 delta = servedCumulative - settled;
         uint64 avail = lot.qtyTokens - lot.lockedTokens;
         if (delta > avail) revert LotQtyUnavailable(avail, delta);
-        spendSettled[pd] = servedCumulative;
+        spendSettled[permit.lotId] = servedCumulative;
         uint256 debit = (uint256(lot.notionalMicro) * delta) / lot.qtyTokens;
         lot.qtyTokens -= delta;
         lot.notionalMicro -= uint128(debit);
