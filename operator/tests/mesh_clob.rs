@@ -71,6 +71,7 @@ fn venue_with(operator_key: &str) -> Venue {
             submitter_key: None,
             rpc_url: None, // dry submit — the consensus round still runs fully
             rfq_ttl_secs: 120,
+            from_block: 0,
         }),
     })
 }

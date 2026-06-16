@@ -64,6 +64,10 @@ pub struct SettlementConfig {
     pub rpc_url: Option<String>,
     /// Firm-quote TTL: how long an RFQ response stays settleable on-chain.
     pub rfq_ttl_secs: u64,
+    /// Block to start scanning `FillSettled` from for credit-lot discovery
+    /// (`/credits`). Set to the deploy block in prod; 0 scans from genesis.
+    #[serde(default)]
+    pub from_block: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -109,6 +113,10 @@ impl OperatorConfig {
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(120),
+                from_block: std::env::var("INFERENCE_BAZAAR_FROM_BLOCK")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0),
             }),
             _ => None,
         };

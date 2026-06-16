@@ -47,6 +47,8 @@ pub(crate) struct SettleCtx {
     /// Falls back to `operator_key` only when unset (dev convenience).
     pub submitter_key: Option<String>,
     pub rfq_ttl_secs: u64,
+    /// FillSettled scan start for credit discovery (`/credits`).
+    pub from_block: u64,
 }
 
 impl SettleCtx {
@@ -72,6 +74,7 @@ impl SettleCtx {
             operator_key: cfg.operator_key.clone(),
             submitter_key: cfg.submitter_key.clone(),
             rfq_ttl_secs: cfg.rfq_ttl_secs,
+            from_block: cfg.from_block,
         })
     }
 
