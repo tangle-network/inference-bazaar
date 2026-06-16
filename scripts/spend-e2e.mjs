@@ -22,7 +22,7 @@ const settlementAbi = parseAbi([
   'function deposit(uint256 amount)',
   'function depositCollateral(uint256 amount)',
   'function lots(bytes32) view returns (address holder, address issuer, bytes32 instrument, uint64 qtyTokens, uint64 lockedTokens, uint64 expiry, uint128 notionalMicro)',
-  'function spendSettled(bytes32 permitDigest) view returns (uint64)',
+  'function spendSettled(bytes32 lotId) view returns (uint64)',
   'function spendPermitDigest((bytes32 lotId, address sessionKey, uint64 maxTokens, uint64 expiry) p) view returns (bytes32)',
   'function revokeSpendKey((bytes32 lotId, address sessionKey, uint64 maxTokens, uint64 expiry) permit)',
 ])
@@ -194,7 +194,7 @@ const digest = await pub.readContract({
   address: SETTLEMENT, abi: settlementAbi, functionName: 'spendPermitDigest',
   args: [{ lotId, sessionKey: session.address, maxTokens, expiry }],
 })
-const settled = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [digest] })
+const settled = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [lotId] })
 const lot1 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'lots', args: [lotId] })
 if (Number(settled) !== served1) throw new Error(`on-chain settled ${settled}, served ${served1}`)
 if (Number(lot0[3]) - Number(lot1[3]) !== served1) throw new Error('lot quantity did not debit by served tokens')
@@ -205,7 +205,7 @@ const served2 = c2.usage.completion_tokens
 acked = c2['inference-bazaar'].nextCumulative
 await ack(acked)
 await post(`${VENUE}/v1/spend/flush`, {})
-const settledCum = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [digest] })
+const settledCum = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [lotId] })
 const lot2 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'lots', args: [lotId] })
 if (Number(settledCum) !== served1 + served2) throw new Error(`cumulative settled ${settledCum} != ${served1 + served2}`)
 
@@ -244,7 +244,7 @@ if (acked !== served1 + served2 + served3)
   throw new Error(`stream nextCumulative ${acked} != ${served1 + served2 + served3}`)
 await ack(acked)
 await post(`${VENUE}/v1/spend/flush`, {})
-const settledStream = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [digest] })
+const settledStream = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [lotId] })
 const lot3 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'lots', args: [lotId] })
 if (Number(settledStream) !== served1 + served2 + served3)
   throw new Error(`stream settled ${settledStream} != ${served1 + served2 + served3}`)
@@ -269,7 +269,7 @@ const afterRevoke = await fetch(`${VENUE}/v1/chat/completions`, {
   body: JSON.stringify({ model: reg.model, messages: [{ role: 'user', content: 'after revoke' }], max_tokens: 256 }),
 })
 if (afterRevoke.status !== 401) throw new Error(`post-revocation serve returned ${afterRevoke.status}, want 401 (channel dropped)`)
-const settledAfterRevoke = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [digest] })
+const settledAfterRevoke = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [lotId] })
 if (Number(settledAfterRevoke) !== Number(settledStream)) throw new Error('revoked channel must not bill further')
 
 console.log('')

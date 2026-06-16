@@ -106,7 +106,7 @@ const digest = await pub.readContract({
 let settled = 0n, lotAfter = lot
 for (let i = 0; i < 20 && Number(settled) === 0; i++) {
   await new Promise((r) => setTimeout(r, 3000))
-  settled = await pub.readContract({ address: SETTLEMENT, abi, functionName: 'spendSettled', args: [digest] })
+  settled = await pub.readContract({ address: SETTLEMENT, abi, functionName: 'spendSettled', args: [lotId] })
   lotAfter = await pub.readContract({ address: SETTLEMENT, abi, functionName: 'lots', args: [lotId] })
 }
 if (Number(settled) !== served) throw new Error(`settled ${settled} != served ${served}`)
