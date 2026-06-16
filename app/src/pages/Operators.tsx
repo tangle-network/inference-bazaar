@@ -52,9 +52,9 @@ export default function OperatorsPage() {
   const instruments = useInstruments()
   // Which operators actually serve a live venue (vs merely registered on-chain).
   const venueByOp = useMemo(() => {
-    const m = new Map<string, { url: string; healthy: boolean }>()
+    const m = new Map<string, { url: string; healthy: boolean; latencyMs: number | null; onion: string | null }>()
     for (const v of registry.data ?? []) {
-      m.set(v.operator.toLowerCase(), { url: v.url, healthy: v.healthy })
+      m.set(v.operator.toLowerCase(), { url: v.url, healthy: v.healthy, latencyMs: v.latencyMs, onion: v.onion })
     }
     return m
   }, [registry.data])
@@ -107,59 +107,93 @@ export default function OperatorsPage() {
               Discovering operators across instances…
             </div>
           )}
-          {addrs.map((addr, i) => {
-            const bond = bonds.data?.[i]?.result as bigint | undefined
-            const venue = venueByOp.get(addr.toLowerCase())
-            const serving = venue?.healthy ?? false
-            return (
-              <div
-                key={addr}
-                className="flex flex-wrap items-center gap-4 border-b border-[var(--s-divider)] px-4 py-4 last:border-0"
-              >
-                <span className="overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
-                  <Identicon address={addr} size={36} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <a
-                      href={`${CHAIN.explorer}/address/${addr}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-data text-[15px] font-semibold text-[var(--s-text)] hover:text-[var(--s-accent)]"
-                    >
-                      {truncAddr(addr)}
-                    </a>
-                    <Badge tone="emerald" icon="i-ph:shield-check-fill">bonded</Badge>
-                    {serving && <Badge tone="accent">quoting</Badge>}
+          {addrs
+            .map((addr, i) => ({
+              addr,
+              bond: bonds.data?.[i]?.result as bigint | undefined,
+              venue: venueByOp.get(addr.toLowerCase()),
+              collateral: issuerFunds.data?.[i * 2]?.result as bigint | undefined,
+              liability: issuerFunds.data?.[i * 2 + 1]?.result as bigint | undefined,
+            }))
+            // Best-first: serving operators, then lowest latency, then biggest bond.
+            .sort((a, b) => {
+              const sa = a.venue?.healthy ? 1 : 0
+              const sb = b.venue?.healthy ? 1 : 0
+              if (sa !== sb) return sb - sa
+              const la = a.venue?.latencyMs ?? Infinity
+              const lb = b.venue?.latencyMs ?? Infinity
+              if (la !== lb) return la - lb
+              const ba = a.bond ?? 0n
+              const bb = b.bond ?? 0n
+              return bb > ba ? 1 : bb < ba ? -1 : 0
+            })
+            .map(({ addr, bond, venue, collateral, liability }) => {
+              const serving = venue?.healthy ?? false
+              const fast = (venue?.latencyMs ?? Infinity) < 400
+              return (
+                <div
+                  key={addr}
+                  className="flex flex-wrap items-center gap-4 border-b border-[var(--s-divider)] px-4 py-4 last:border-0"
+                >
+                  <span className="relative overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
+                    <Identicon address={addr} size={36} />
+                    <span
+                      className={cn(
+                        'absolute -bottom-0 -right-0 h-3 w-3 rounded-full ring-2 ring-[var(--s-panel)]',
+                        serving ? 'bg-[var(--s-emerald)]' : 'bg-[var(--s-text-subtle)]',
+                      )}
+                      title={serving ? 'serving' : 'on-chain only'}
+                    />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <a
+                        href={`${CHAIN.explorer}/address/${addr}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-data text-[15px] font-semibold text-[var(--s-text)] hover:text-[var(--s-accent)]"
+                      >
+                        {truncAddr(addr)}
+                      </a>
+                      <Badge tone="emerald" icon="i-ph:shield-check-fill">bonded</Badge>
+                      {serving && <Badge tone="accent">quoting</Badge>}
+                      {venue?.onion && (
+                        <Badge tone="neutral" icon="i-ph:shield">.onion</Badge>
+                      )}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 font-data text-[15px] text-[var(--s-text-muted)]">
+                      {serving ? (
+                        <>
+                          <span>{venue!.url.replace('https://', '')}</span>
+                          {venue?.latencyMs != null && (
+                            <span className={fast ? 'text-[var(--s-emerald)]' : undefined}>
+                              · {venue.latencyMs}ms
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        'joined the operator set on-chain'
+                      )}
+                    </div>
                   </div>
-                  <div className="mt-0.5 font-data text-[15px] text-[var(--s-text-muted)]">
-                    {serving
-                      ? `serves the venue API · ${venue!.url.replace('https://', '')}`
-                      : 'joined the operator set on-chain'}
+                  <div className="text-right">
+                    <div className="mono-label">Restake bond</div>
+                    <div className="font-data text-[15px] font-bold tabular-nums text-[var(--s-text)]">
+                      {bond !== undefined ? `${Number(formatUnits(bond, 18)).toLocaleString()} TNT` : '…'}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="mono-label">Issuance collateral</div>
+                    <div className="font-data text-[15px] font-bold tabular-nums text-[var(--s-emerald)]">
+                      {collateral !== undefined ? compactUsd(Number(collateral)) : '…'}
+                    </div>
+                    <div className="font-data text-[12px] tabular-nums text-[var(--s-text-muted)]">
+                      {liability !== undefined ? `liability ${compactUsd(Number(liability))}` : ''}
+                    </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="mono-label">Restake bond</div>
-                  <div className="font-data text-[15px] font-bold tabular-nums text-[var(--s-text)]">
-                    {bond !== undefined ? `${Number(formatUnits(bond, 18)).toLocaleString()} TNT` : '…'}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="mono-label">Issuance collateral</div>
-                  <div className="font-data text-[15px] font-bold tabular-nums text-[var(--s-emerald)]">
-                    {issuerFunds.data?.[i * 2]?.result !== undefined
-                      ? compactUsd(Number(issuerFunds.data[i * 2]!.result))
-                      : '…'}
-                  </div>
-                  <div className="font-data text-[12px] tabular-nums text-[var(--s-text-muted)]">
-                    {issuerFunds.data?.[i * 2 + 1]?.result !== undefined
-                      ? `liability ${compactUsd(Number(issuerFunds.data[i * 2 + 1]!.result))}`
-                      : ''}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+              )
+            })}
         </Panel>
 
         <div className={cn('panel mt-4 px-4 py-3 font-data text-[15px] text-[var(--s-text-muted)]')}>
