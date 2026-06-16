@@ -4,9 +4,10 @@ import { ConnectKitButton } from 'connectkit'
 import type { Address, Hex } from 'viem'
 import { PageHeader } from '~/components/PageHeader'
 import { ApiKeyMint } from '~/components/ApiKeyMint'
-import { Panel, Stat } from '~/components/ui'
+import { CodeBlock } from '~/components/CodeBlock'
+import { Badge, Panel, Segmented, Stat } from '~/components/ui'
 import { compactUsd, tokens, truncAddr } from '~/lib/format'
-import { CHAIN, VENUE_URL } from '~/lib/api'
+import { CHAIN, ROUTER_URL, VENUE_URL } from '~/lib/api'
 import {
   EIP712_DOMAIN,
   SETTLEMENT,
@@ -20,15 +21,76 @@ import {
 import { useVenueRegistry, endpointFor, type Venue } from '~/lib/venues'
 import { privacyOn } from '~/lib/privacy'
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
+type Tab = 'gateway' | 'router' | 'tcloud'
+
+/** Three ways to spend credits over the API. Each tab is the real integration
+ * for that path; availability is tagged honestly — the router credit-debit and
+ * the tcloud SDK surface are still rolling out, so they're marked, not faked. */
+const TABS: Record<Tab, { label: string; badge: { tone: 'emerald' | 'amber'; text: string }; note: string; code: string }> = {
+  gateway: {
+    label: 'Gateway',
+    badge: { tone: 'emerald', text: 'Live' },
+    note: 'Zero trust — the gateway runs on your machine and holds the session key; the operator can never bill more than it signs.',
+    code: `from openai import OpenAI
+
+# 1. mint a key below, then run the gateway with it:
+#    inference-bazaar-gateway
+# 2. point any OpenAI client at the local gateway — no wallet in the request path:
+client = OpenAI(base_url="http://127.0.0.1:8088/v1", api_key="sk-inference-bazaar")
+
+resp = client.chat.completions.create(
+    model="anthropic/claude-opus-4-8",
+    messages=[{"role": "user", "content": "hello"}],
+)`,
+  },
+  router: {
+    label: 'Router',
+    badge: { tone: 'amber', text: 'Credits rolling out' },
+    note: 'One endpoint for every model on Tangle. The endpoint is live; auto-spending your held credit lots through it is rolling out — today route via your platform balance or shielded credits.',
+    code: `from openai import OpenAI
+
+# The Tangle Router — one base URL for every model, routed to a bonded operator.
+client = OpenAI(base_url="${ROUTER_URL}/v1", api_key="tngl-...")
+
+resp = client.chat.completions.create(
+    model="anthropic/claude-opus-4-8",
+    messages=[{"role": "user", "content": "hello"}],
+)`,
+  },
+  tcloud: {
+    label: 'tcloud',
+    badge: { tone: 'amber', text: 'Preview · tcloud#41' },
+    note: 'The tcloud buyer SDK: `pricing` picks how you pay. credits spends your discounted lots soonest-expiry-first; market/limit cap the price you accept.',
+    code: `import { chat } from "@tangle-network/tcloud"
+
+const res = await chat({
+  model: "anthropic/claude-opus-4-8",
+  messages: [{ role: "user", content: "hello" }],
+  pricing: { credits: true, mode: "market" },
+})`,
+  },
+}
+
+function Quickstart() {
+  const [tab, setTab] = useState<Tab>('gateway')
+  const t = TABS[tab]
   return (
-    <button
-      onClick={() => { void navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
-      className="font-data text-[15px] font-semibold text-[var(--s-accent)] hover:underline"
-    >
-      {copied ? 'copied ✓' : 'copy'}
-    </button>
+    <Panel className="p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-display text-[17px] font-semibold text-[var(--s-text)]">Connect your app</h2>
+        <Segmented
+          size="sm"
+          value={tab}
+          onChange={setTab}
+          options={(Object.keys(TABS) as Tab[]).map((k) => ({ value: k, label: TABS[k].label }))}
+        />
+      </div>
+      <div className="mt-2 flex items-baseline gap-2">
+        <Badge tone={t.badge.tone}>{t.badge.text}</Badge>
+        <span className="font-body text-[15px] text-[var(--s-text-muted)]">{t.note}</span>
+      </div>
+      <CodeBlock code={t.code} className="mt-3" />
+    </Panel>
   )
 }
 
@@ -100,14 +162,6 @@ function LotKey({ lot, venueUrl, live }: { lot: CreditLot; venueUrl: string; liv
     </Panel>
   )
 }
-
-const QUICKSTART = `from openai import OpenAI
-
-client = OpenAI(base_url="http://127.0.0.1:8088/v1", api_key="sk-inference-bazaar")
-resp = client.chat.completions.create(
-    model="anthropic/claude-opus-4-8",
-    messages=[{"role": "user", "content": "hello"}],
-)`
 
 /**
  * Holder-signed read of live spend across every venue the holder has lots with.
@@ -242,18 +296,7 @@ export default function DeveloperPage() {
       </div>
 
       <div className="px-4 sm:px-6">
-        <Panel className="p-4">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="font-display text-[17px] font-semibold text-[var(--s-text)]">Quickstart</h2>
-            <CopyButton text={QUICKSTART} />
-          </div>
-          <p className="mt-1 font-body text-[15px] text-[var(--s-text-muted)]">
-            Mint a key below, run the gateway with it, then call it like any OpenAI endpoint.
-          </p>
-          <pre className="mt-3 overflow-x-auto rounded-[8px] bg-[var(--s-bg)]/60 px-4 py-3 font-data text-[15px] leading-relaxed text-[var(--s-text)]">
-            {QUICKSTART}
-          </pre>
-        </Panel>
+        <Quickstart />
       </div>
 
       <div className="px-4 py-4 sm:px-6">
