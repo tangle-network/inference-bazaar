@@ -326,6 +326,39 @@ impl SettlementClient {
         Ok(self.contract.lots(lot_id).call().await?)
     }
 
+    /// Every credit lot `issuer` minted that is CURRENTLY held by `holder`,
+    /// read from on-chain state — not an off-chain index. Lots are minted in
+    /// `FillSettled`, so we scan that event from `from_block`, dedup by lotId,
+    /// and read each lot, keeping only those whose live `holder`/`issuer` match
+    /// (a resold lot drops out because its holder changed). The returned lots
+    /// are the raw on-chain tuples; the caller filters by instrument/expiry.
+    pub async fn lots_issued_to(
+        &self,
+        issuer: Address,
+        holder: Address,
+        from_block: u64,
+    ) -> anyhow::Result<Vec<(B256, IInferenceBazaarSettlement::lotsReturn)>> {
+        let logs = self
+            .contract
+            .FillSettled_filter()
+            .from_block(from_block)
+            .query()
+            .await?;
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for (ev, _log) in logs {
+            let lot_id = ev.lotId;
+            if lot_id == B256::ZERO || !seen.insert(lot_id) {
+                continue;
+            }
+            let lot = self.contract.lots(lot_id).call().await?;
+            if lot.holder == holder && lot.issuer == issuer {
+                out.push((lot_id, lot));
+            }
+        }
+        Ok(out)
+    }
+
     pub async fn receipt_digest(
         &self,
         redemption_id: B256,

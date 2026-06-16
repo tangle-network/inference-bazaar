@@ -73,6 +73,7 @@ fn venue_with(sidecar_url: String) -> Venue {
             submitter_key: None,
             rpc_url: None,
             rfq_ttl_secs: 120,
+            from_block: 0,
         }),
     })
 }

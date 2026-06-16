@@ -6,7 +6,7 @@
 use crate::market::{RfqFillBody, RfqRequestBody, SignedOrderBody};
 use crate::venue::{Venue, VenueError};
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -32,6 +32,8 @@ pub fn router(venue: Shared) -> Router {
         .route("/order-signed", post(place_signed))
         .route("/rfq", post(rfq_quote))
         .route("/rfq/fill", post(rfq_fill))
+        // Credit discovery: which lots this holder can spend on a model here.
+        .route("/credits", get(credits))
         // Redemption: spend a credit lot on real inference (gate G1).
         .route("/redeem", post(redeem_serve))
         .route("/redeem/receipt", post(redeem_receipt))
@@ -83,6 +85,23 @@ pub fn spawn_auto_flush(venue: Shared) {
             }
         }
     });
+}
+
+#[derive(Deserialize)]
+struct CreditsQuery {
+    owner: String,
+    model: String,
+    kind: String,
+}
+
+/// `GET /credits?owner=&model=&kind=` — the holder's spendable lots this
+/// operator issued for that instrument, soonest-expiry first. A read of
+/// on-chain state; the router uses it to decide whether to route here.
+async fn credits(State(v): State<Shared>, Query(q): Query<CreditsQuery>) -> impl IntoResponse {
+    match v.credits(&q.owner, &q.model, &q.kind).await {
+        Ok(val) => Json(val).into_response(),
+        Err(e) => (err_status(&e), e.to_string()).into_response(),
+    }
 }
 
 async fn redeem_serve(

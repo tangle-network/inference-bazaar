@@ -620,3 +620,81 @@ fn settlement_intents(fills: &[Fill], rail: &str, mm_owner: &str) -> Vec<Value> 
         })
         .collect()
 }
+
+#[cfg(feature = "chain")]
+impl Venue {
+    /// Discover the holder's spendable credit lots for `model:kind` that THIS
+    /// operator issued — a real on-chain read (scan `FillSettled` → read each
+    /// `lots()`), so a resold or drawn-down lot is reflected. The router calls
+    /// this pre-flight to decide whether the holder can pay with a held credit
+    /// (spent via the existing SpendAuth/spend-key rail) before routing here.
+    pub async fn credits(&self, owner: &str, model: &str, kind: &str) -> Result<Value, VenueError> {
+        use inference_bazaar_settlement::core::alloy_primitives::Address;
+
+        let ctx = self.settle_ctx_pub()?;
+        let (rpc, key) = match (ctx.rpc_url.as_deref(), ctx.submitter_key()) {
+            (Some(r), Some(k)) => (r, k),
+            _ => return Err(VenueError::SettlementUnconfigured("rpc + operator key")),
+        };
+        let owner_addr: Address = owner
+            .parse()
+            .map_err(|_| VenueError::Rejected("owner is not an address".into()))?;
+        let me = ctx
+            .operator_address_hex()
+            .ok_or(VenueError::SettlementUnconfigured("operator key"))?;
+        let issuer: Address = me
+            .parse()
+            .map_err(|_| VenueError::Rejected("operator address unparseable".into()))?;
+        let instrument_id = format!("{model}:{kind}");
+        let want = inference_bazaar_settlement::instrument_hash(&instrument_id);
+
+        let client =
+            inference_bazaar_settlement::chain::SettlementClient::connect(rpc, key, ctx.contract)
+                .await
+                .map_err(|e| VenueError::Chain(e.to_string()))?;
+        let lots = client
+            .lots_issued_to(issuer, owner_addr, ctx.from_block)
+            .await
+            .map_err(|e| VenueError::Chain(e.to_string()))?;
+
+        let views: Vec<_> = lots
+            .into_iter()
+            .map(|(id, lot)| {
+                (
+                    id,
+                    crate::credits::LotView {
+                        instrument: lot.instrument,
+                        qty_tokens: lot.qtyTokens,
+                        locked_tokens: lot.lockedTokens,
+                        expiry: lot.expiry,
+                        notional_micro: lot.notionalMicro,
+                    },
+                )
+            })
+            .collect();
+        let now = crate::market::now_unix();
+        let credits = crate::credits::select_credits(&views, want, now);
+        let best = credits.first().map(|c| c.lot_id.clone());
+        Ok(json!({
+            "owner": format!("{owner_addr:#x}"),
+            "issuer": format!("{issuer:#x}"),
+            "instrument": instrument_id,
+            "best": best,
+            "credits": credits,
+        }))
+    }
+}
+
+#[cfg(not(feature = "chain"))]
+impl Venue {
+    pub async fn credits(
+        &self,
+        _owner: &str,
+        _model: &str,
+        _kind: &str,
+    ) -> Result<Value, VenueError> {
+        Err(VenueError::SettlementUnconfigured(
+            "build with --features chain",
+        ))
+    }
+}

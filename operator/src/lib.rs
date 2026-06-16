@@ -9,6 +9,7 @@
 
 pub mod clob;
 pub mod config;
+pub mod credits;
 pub mod http;
 pub mod inference;
 pub mod market;
