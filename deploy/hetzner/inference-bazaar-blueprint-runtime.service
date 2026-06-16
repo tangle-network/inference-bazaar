@@ -1,5 +1,9 @@
+# ⛔ TEST/DEV ONLY — this runs the instance binary directly (TEST_MODE + hardcoded
+# SERVICE_ID), bypassing the on-chain lifecycle. PRODUCTION runs the Blueprint
+# Manager (cargo-tangle blueprint run), which spawns the instance on an approved
+# service request — see ../gen-resell-operator.sh and ../../CLAUDE.md.
 [Unit]
-Description=InferenceBazaar blueprint runtime (Base Sepolia blueprint 17 service 3)
+Description=InferenceBazaar blueprint runtime — TEST_MODE direct-run (Base Sepolia blueprint 17 service 3)
 After=network.target inference-bazaar-mm-sidecar.service inference-bazaar-arti.service
 Wants=inference-bazaar-mm-sidecar.service inference-bazaar-arti.service
 
