@@ -14,7 +14,7 @@ import { ApiKeyMint } from '~/components/ApiKeyMint'
 import { CodeBlock } from '~/components/CodeBlock'
 import { Badge, Panel, Segmented, Stat } from '~/components/ui'
 import { cn } from '~/lib/cn'
-import { compactUsd, pricePerM, tokens, truncAddr } from '~/lib/format'
+import { compactUsd, formatNumber, pricePerM, tokens, truncAddr } from '~/lib/format'
 import { CHAIN, ROUTER_URL, VENUE_URL, useCatalog, type CatalogModel } from '~/lib/api'
 import { ProviderLogo } from '~/lib/logos'
 import {
@@ -46,10 +46,17 @@ interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
-  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+  usage?: ChatUsage
   spend?: ChatSpend
   ms?: number
   error?: boolean
+  streaming?: boolean
+}
+
+interface ChatUsage {
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
 }
 
 interface ChatSpend {
@@ -59,6 +66,12 @@ interface ChatSpend {
   billedTokens: number
   remainingTokens: number
   costMicro: number | null
+}
+
+interface ChatStreamResult {
+  content: string
+  usage?: ChatUsage
+  inferenceBazaar?: { servedTokens?: number; nextCumulative?: number }
 }
 
 interface ChatModelOption {
@@ -234,13 +247,26 @@ function ChatSpendLine({ spend, ms }: { spend?: ChatSpend; ms?: number }) {
   if (!spend) {
     return ms !== undefined ? <span>{ms} ms</span> : null
   }
-  const cost = spend.costMicro !== null ? compactUsd(spend.costMicro) : 'metered'
+  const cost = spend.costMicro !== null ? chatCost(spend.costMicro) : 'metered'
   return (
     <span>
-      {tokens(spend.promptTokens)} in · {tokens(spend.completionTokens)} out · {tokens(spend.billedTokens)} billed · {cost} · {tokens(spend.remainingTokens)} left
+      {chatTokenCount(spend.promptTokens)} in · {chatTokenCount(spend.completionTokens)} out · {chatTokenCount(spend.billedTokens)} billed · {cost} · {chatTokenCount(spend.remainingTokens)} left
       {ms !== undefined ? ` · ${ms} ms` : ''}
     </span>
   )
+}
+
+function chatTokenCount(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return '—'
+  return formatNumber(Math.floor(value), 0)
+}
+
+function chatCost(microUsd: number): string {
+  if (!Number.isFinite(microUsd) || microUsd <= 0) return '—'
+  const usd = microUsd / 1_000_000
+  if (usd >= 1) return `$${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  if (usd >= 0.0001) return `$${usd.toFixed(4)}`
+  return `$${usd.toFixed(6)}`
 }
 
 /** Three ways to spend credits over the API. Each tab is the real integration
@@ -323,6 +349,127 @@ function shortError(e: unknown) {
   return message.includes('Failed to fetch') ? 'Local gateway offline' : message
 }
 
+function finiteNumber(value: unknown): number | undefined {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : undefined
+}
+
+function normalizeUsage(value: unknown): ChatUsage | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  const usage: ChatUsage = {}
+  const prompt = finiteNumber(record.prompt_tokens)
+  const completion = finiteNumber(record.completion_tokens)
+  const total = finiteNumber(record.total_tokens)
+  if (prompt !== undefined) usage.prompt_tokens = prompt
+  if (completion !== undefined) usage.completion_tokens = completion
+  if (total !== undefined) usage.total_tokens = total
+  return Object.keys(usage).length > 0 ? usage : undefined
+}
+
+function normalizeInferenceBazaar(value: unknown): ChatStreamResult['inferenceBazaar'] {
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  const servedTokens = finiteNumber(record.servedTokens)
+  const nextCumulative = finiteNumber(record.nextCumulative)
+  return servedTokens !== undefined || nextCumulative !== undefined ? { servedTokens, nextCumulative } : undefined
+}
+
+function chatResultFromJson(json: unknown): ChatStreamResult {
+  const record = (json && typeof json === 'object' ? json : {}) as Record<string, any>
+  return {
+    content: String(record.choices?.[0]?.message?.content ?? '').trim(),
+    usage: normalizeUsage(record.usage),
+    inferenceBazaar: normalizeInferenceBazaar(record['inference-bazaar']),
+  }
+}
+
+function dataLines(event: string): string {
+  return event
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('\n')
+    .trim()
+}
+
+async function streamChat(
+  base: string,
+  body: Record<string, unknown>,
+  headers: Record<string, string>,
+  onDelta: (delta: string) => void,
+): Promise<ChatStreamResult> {
+  const res = await fetch(`${base}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: JSON.stringify({ ...body, stream: true, stream_options: { include_usage: true } }),
+  })
+  const contentType = res.headers.get('content-type') ?? ''
+  if (!res.ok) {
+    const text = await res.text()
+    let json: any = null
+    try {
+      json = JSON.parse(text)
+    } catch {
+      // Plain-text gateway/operator errors are still useful as-is.
+    }
+    const msg = json?.error?.message ?? text
+    throw new Error(`${res.status}: ${msg}`)
+  }
+  if (!contentType.includes('text/event-stream')) {
+    return chatResultFromJson(await res.json())
+  }
+  if (!res.body) throw new Error('stream body missing')
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let content = ''
+  let usage: ChatUsage | undefined
+  let inferenceBazaar: ChatStreamResult['inferenceBazaar']
+
+  const consume = (event: string): boolean => {
+    const data = dataLines(event)
+    if (!data) return false
+    if (data === '[DONE]') return true
+    let json: any
+    try {
+      json = JSON.parse(data)
+    } catch {
+      throw new Error('invalid stream event')
+    }
+    const nextInference = normalizeInferenceBazaar(json?.['inference-bazaar'])
+    if (nextInference) inferenceBazaar = nextInference
+    const nextUsage = normalizeUsage(json?.usage)
+    if (nextUsage) usage = nextUsage
+    const delta = String(json?.choices?.[0]?.delta?.content ?? '')
+    if (delta) {
+      content += delta
+      onDelta(delta)
+    }
+    return false
+  }
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+    let idx = buffer.indexOf('\n\n')
+    while (idx !== -1) {
+      const event = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      if (consume(event)) {
+        await reader.cancel().catch(() => undefined)
+        return { content: content.trim(), usage, inferenceBazaar }
+      }
+      idx = buffer.indexOf('\n\n')
+    }
+  }
+  if (buffer.trim()) consume(buffer)
+  return { content: content.trim(), usage, inferenceBazaar }
+}
+
 function toModelOption(model: CatalogModel): ChatModelOption {
   return {
     id: model.id,
@@ -349,6 +496,25 @@ function fallbackModelOption(id: string): ChatModelOption {
 
 function formatModelPrice(microPerM: number) {
   return microPerM > 0 ? pricePerM(microPerM) : 'metered'
+}
+
+function lotUnitPriceMicroPerM(lot: CreditLot): number | undefined {
+  const filled = Number(lot.filledTokens)
+  if (!Number.isFinite(filled) || filled <= 0) return undefined
+  return Math.round((Number(lot.notionalMicro) * 1_000_000) / filled)
+}
+
+function priceMicroPerMForKey(
+  key: StoredSpendKey,
+  lots: CreditLot[] | undefined,
+  selected: ChatModelOption,
+): number | undefined {
+  if (Number.isFinite(key.priceMicroPerM) && key.priceMicroPerM! > 0) return key.priceMicroPerM
+  const lot = lots?.find((l) => l.lotId.toLowerCase() === key.lotId.toLowerCase())
+  const lotPrice = lot ? lotUnitPriceMicroPerM(lot) : undefined
+  if (lotPrice !== undefined && lotPrice > 0) return lotPrice
+  const catalogPrice = key.instrumentId.endsWith(':input') ? selected.inputMicroPerM : selected.outputMicroPerM
+  return catalogPrice > 0 ? catalogPrice : undefined
 }
 
 function gatewayStateLabel(state: 'idle' | 'checking' | 'ok' | 'error') {
@@ -688,6 +854,7 @@ export function DeveloperChatPage() {
   const activeLots = (lots.data ?? []).filter(
     (l) => l.qtyTokens - l.lockedTokens > 0n && Number(l.expiry) * 1000 > Date.now(),
   )
+  const lastMessageLength = messages[messages.length - 1]?.content.length ?? 0
 
   useEffect(() => {
     if (messages.length === 0) return
@@ -705,7 +872,7 @@ export function DeveloperChatPage() {
       cancelAnimationFrame(frame)
       cancelAnimationFrame(secondFrame)
     }
-  }, [busy, messages.length])
+  }, [busy, messages.length, lastMessageLength])
 
   useEffect(() => {
     const refresh = () => setSpendKey(getActiveSpendKey())
@@ -773,27 +940,13 @@ export function DeveloperChatPage() {
     }
   }
 
-  async function postChat(base: string, body: Record<string, unknown>, headers: Record<string, string>) {
-    const res = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...headers },
-      body: JSON.stringify(body),
-    })
-    const text = await res.text()
-    let json: any
-    try {
-      json = JSON.parse(text)
-    } catch {
-      json = null
-    }
-    if (!res.ok) {
-      const msg = json?.error?.message ?? text
-      throw new Error(`${res.status}: ${msg}`)
-    }
-    return json
+  function appendAssistantDelta(id: string, delta: string) {
+    setMessages((current) =>
+      current.map((m) => (m.id === id ? { ...m, content: `${m.content}${delta}`, streaming: true } : m)),
+    )
   }
 
-  async function sendWithSpendKey(key: StoredSpendKey, nextMessages: ChatMessage[]) {
+  async function sendWithSpendKey(key: StoredSpendKey, nextMessages: ChatMessage[], assistantId: string) {
     const base = normalizeGatewayUrl(key.venueUrl)
     if (!base) throw new Error('operator URL missing')
     const body = {
@@ -805,11 +958,17 @@ export function DeveloperChatPage() {
       ],
     }
     const started = performance.now()
-    const json = await postChat(base, body, await spendVoucherHeaders(key, key.ackedTokens))
-    const nextCumulative = Number(json?.['inference-bazaar']?.nextCumulative)
-    const promptTokens = Number(json?.usage?.prompt_tokens ?? 0)
-    const completionTokens = Number(json?.usage?.completion_tokens ?? 0)
-    const totalTokens = Number(json?.usage?.total_tokens ?? promptTokens + completionTokens)
+    const result = await streamChat(
+      base,
+      body,
+      await spendVoucherHeaders(key, key.ackedTokens),
+      (delta) => appendAssistantDelta(assistantId, delta),
+    )
+    const nextCumulative = Number(result.inferenceBazaar?.nextCumulative)
+    const servedTokens = Number(result.inferenceBazaar?.servedTokens)
+    const promptTokens = Number(result.usage?.prompt_tokens ?? (key.instrumentId.endsWith(':input') && Number.isFinite(servedTokens) ? servedTokens : 0))
+    const completionTokens = Number(result.usage?.completion_tokens ?? (!key.instrumentId.endsWith(':input') && Number.isFinite(servedTokens) ? servedTokens : 0))
+    const totalTokens = Number(result.usage?.total_tokens ?? promptTokens + completionTokens)
     let billedTokens = key.instrumentId.endsWith(':input') ? promptTokens : completionTokens
     let remainingTokens = Math.max(0, key.maxTokens - key.ackedTokens - billedTokens)
     if (Number.isFinite(nextCumulative) && nextCumulative >= key.ackedTokens) {
@@ -827,12 +986,13 @@ export function DeveloperChatPage() {
         setGatewayError(`Ack pending: ${shortError(e)}`)
       }
     }
-    const costMicro = key.priceMicroPerM !== undefined ? Math.round((key.priceMicroPerM * billedTokens) / 1_000_000) : null
+    const priceMicroPerM = priceMicroPerMForKey(key, lots.data, selected)
+    const costMicro = priceMicroPerM !== undefined ? Math.round((priceMicroPerM * billedTokens) / 1_000_000) : null
     return {
-      id: `a-${Date.now()}`,
+      id: assistantId,
       role: 'assistant' as const,
-      content: json?.choices?.[0]?.message?.content?.trim() || '',
-      usage: json?.usage,
+      content: result.content,
+      usage: result.usage,
       spend: {
         promptTokens,
         completionTokens,
@@ -842,10 +1002,11 @@ export function DeveloperChatPage() {
         costMicro,
       },
       ms: Math.round(performance.now() - started),
+      streaming: false,
     }
   }
 
-  async function sendWithGateway(nextMessages: ChatMessage[]) {
+  async function sendWithGateway(nextMessages: ChatMessage[], assistantId: string) {
     const base = normalizeGatewayUrl(gatewayUrl)
     if (!base) throw new Error('gateway URL missing')
     const body: {
@@ -865,13 +1026,19 @@ export function DeveloperChatPage() {
       body.reasoning_effort = thinking
     }
     const started = performance.now()
-    const json = await postChat(base, body, { authorization: `Bearer ${apiKey || 'sk-inference-bazaar'}` })
+    const result = await streamChat(
+      base,
+      body,
+      { authorization: `Bearer ${apiKey || 'sk-inference-bazaar'}` },
+      (delta) => appendAssistantDelta(assistantId, delta),
+    )
     return {
-      id: `a-${Date.now()}`,
+      id: assistantId,
       role: 'assistant' as const,
-      content: json?.choices?.[0]?.message?.content?.trim() || '',
-      usage: json?.usage,
+      content: result.content,
+      usage: result.usage,
       ms: Math.round(performance.now() - started),
+      streaming: false,
     }
   }
 
@@ -879,22 +1046,26 @@ export function DeveloperChatPage() {
     const prompt = input.trim()
     if (!prompt || busy) return
     const user: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: prompt }
+    const assistantId = `a-${Date.now()}`
     const nextMessages = [...messages, user]
-    setMessages(nextMessages)
+    setMessages([...nextMessages, { id: assistantId, role: 'assistant', content: '', streaming: true }])
     setInput('')
     setBusy(true)
     try {
       const assistant = activeSpendKey
-        ? await sendWithSpendKey(activeSpendKey, nextMessages)
-        : await sendWithGateway(nextMessages)
-      setMessages([...nextMessages, assistant])
+        ? await sendWithSpendKey(activeSpendKey, nextMessages, assistantId)
+        : await sendWithGateway(nextMessages, assistantId)
+      setMessages((current) => current.map((m) => (m.id === assistantId ? assistant : m)))
       setGatewayState('ok')
     } catch (e) {
       const message = shortError(e)
-      setMessages([
-        ...nextMessages,
-        { id: `e-${Date.now()}`, role: 'assistant', content: message, error: true },
-      ])
+      setMessages((current) =>
+        current.map((m) =>
+          m.id === assistantId
+            ? { id: assistantId, role: 'assistant', content: message, error: true, streaming: false }
+            : m,
+        ),
+      )
       setGatewayState('error')
       setGatewayError(message)
     } finally {
@@ -918,11 +1089,11 @@ export function DeveloperChatPage() {
               <span className="text-[var(--s-text-subtle)]">/</span>
               <span>{selected.outputMicroPerM ? pricePerM(selected.outputMicroPerM) : 'metered'} out</span>
               <span className="text-[var(--s-text-subtle)]">/</span>
-              <span>
-                {activeSpendKey
-                  ? `${tokens(Math.max(0, activeSpendKey.maxTokens - activeSpendKey.ackedTokens))} key left`
+                <span>
+                  {activeSpendKey
+                  ? `${chatTokenCount(Math.max(0, activeSpendKey.maxTokens - activeSpendKey.ackedTokens))} key left`
                   : `${lots.isLoading ? '...' : activeLots.length} active lots`}
-              </span>
+                </span>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -1063,6 +1234,9 @@ export function DeveloperChatPage() {
                     <ChatMarkdown content={m.content} />
                   ) : (
                     <div className="whitespace-pre-wrap font-body text-[15px] leading-relaxed">{m.content}</div>
+                  )}
+                  {m.streaming && !m.error && (
+                    <span className="mt-1 inline-block h-4 w-1 animate-pulse rounded-full bg-[var(--s-accent)] align-middle" />
                   )}
                   {(m.spend || m.usage || m.ms !== undefined) && (
                     <div className="mt-2 border-t border-[var(--s-divider)] pt-2 font-data text-[12px] leading-relaxed text-[var(--s-text-muted)]">
