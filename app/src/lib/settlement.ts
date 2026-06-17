@@ -7,7 +7,8 @@
  * lot on-chain, atomically. Supply is provable (issuer collateral ≥ liability,
  * contract-enforced); demand is provable (the lot + the balance debit).
  */
-import { keccak256, toHex, type Address, type Hex } from 'viem'
+import { keccak256, toHex, type Address, type Hex, type PublicClient } from 'viem'
+import type { GetContractEventsReturnType } from 'viem/actions'
 import { useQuery } from '@tanstack/react-query'
 import { usePublicClient } from 'wagmi'
 import { CHAIN, VENUE_URL } from './api'
@@ -18,6 +19,9 @@ export const SETTLEMENT = {
   /** Block the contracts deployed at — event scans start here. */
   fromBlock: 42887343n,
 }
+
+const LOG_SCAN_BLOCKS = 1_900n
+const ZERO_LOT_ID = `0x${'0'.repeat(64)}` as Hex
 
 export const EIP712_DOMAIN = {
   name: 'InferenceBazaarSettlement',
@@ -185,6 +189,8 @@ export const SETTLEMENT_ABI = [
   },
 ] as const
 
+type FillSettledLog = GetContractEventsReturnType<typeof SETTLEMENT_ABI, 'FillSettled'>[number]
+
 export const USD_ABI = [
   { type: 'function', name: 'mint', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [], stateMutability: 'nonpayable' },
   { type: 'function', name: 'approve', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ name: '', type: 'bool' }], stateMutability: 'nonpayable' },
@@ -266,6 +272,57 @@ export interface CreditLot {
   txHash: Hex
 }
 
+async function fetchFillSettledLogs(client: PublicClient): Promise<FillSettledLog[]> {
+  const latestBlock = await client.getBlockNumber()
+  const logs: FillSettledLog[] = []
+
+  for (let fromBlock = SETTLEMENT.fromBlock; fromBlock <= latestBlock; fromBlock += LOG_SCAN_BLOCKS) {
+    const endBlock = fromBlock + LOG_SCAN_BLOCKS - 1n
+    const toBlock = endBlock > latestBlock ? latestBlock : endBlock
+    const page = await client.getContractEvents({
+      address: SETTLEMENT.address,
+      abi: SETTLEMENT_ABI,
+      eventName: 'FillSettled',
+      fromBlock,
+      toBlock,
+    })
+    logs.push(...page)
+  }
+
+  return logs
+}
+
+export async function fetchMyLots(client: PublicClient, holderAddress: Address): Promise<CreditLot[]> {
+  const logs = await fetchFillSettledLogs(client)
+  const out: CreditLot[] = []
+
+  for (const log of [...logs].reverse()) {
+    const lotId = log.args.lotId as Hex | undefined
+    if (!lotId || lotId === ZERO_LOT_ID) continue
+    const lot = await client.readContract({
+      address: SETTLEMENT.address,
+      abi: SETTLEMENT_ABI,
+      functionName: 'lots',
+      args: [lotId],
+    })
+    const [holder, issuer, instrument, qtyTokens, lockedTokens, expiry, notionalMicro] = lot
+    if (holder.toLowerCase() !== holderAddress.toLowerCase()) continue
+    out.push({
+      lotId,
+      instrument,
+      qtyTokens,
+      lockedTokens,
+      filledTokens: (log.args.qtyTokens as bigint | undefined) ?? qtyTokens,
+      expiry,
+      notionalMicro,
+      issuer,
+      txHash: log.transactionHash,
+    })
+  }
+
+  return out
+}
+
 /** The connected wallet's credit lots — FillSettled events → lots() reads. */
 export function useMyLots(address: Address | undefined) {
   const client = usePublicClient({ chainId: CHAIN.id })
@@ -273,40 +330,6 @@ export function useMyLots(address: Address | undefined) {
     queryKey: ['lots', address],
     enabled: !!address && !!client,
     refetchInterval: 30_000,
-    queryFn: async (): Promise<CreditLot[]> => {
-      const logs = await client!.getContractEvents({
-        address: SETTLEMENT.address,
-        abi: SETTLEMENT_ABI,
-        eventName: 'FillSettled',
-        fromBlock: SETTLEMENT.fromBlock,
-        toBlock: 'latest',
-      })
-      const out: CreditLot[] = []
-      for (const log of logs) {
-        const lotId = log.args.lotId as Hex | undefined
-        if (!lotId || lotId === `0x${'0'.repeat(64)}`) continue
-        const lot = await client!.readContract({
-          address: SETTLEMENT.address,
-          abi: SETTLEMENT_ABI,
-          functionName: 'lots',
-          args: [lotId],
-        })
-        const [holder, issuer, instrument, qtyTokens, lockedTokens, expiry, notionalMicro] = lot
-        if (holder.toLowerCase() !== address!.toLowerCase()) continue
-        out.push({
-          lotId,
-          instrument,
-          qtyTokens,
-          lockedTokens,
-          // The fill that minted this lot — its size is the spend denominator.
-          filledTokens: (log.args.qtyTokens as bigint | undefined) ?? qtyTokens,
-          expiry,
-          notionalMicro,
-          issuer,
-          txHash: log.transactionHash,
-        })
-      }
-      return out
-    },
+    queryFn: () => fetchMyLots(client!, address!),
   })
 }
