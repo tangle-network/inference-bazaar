@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useAccount, useReadContract, useSignTypedData } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
@@ -47,8 +47,18 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+  spend?: ChatSpend
   ms?: number
   error?: boolean
+}
+
+interface ChatSpend {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  billedTokens: number
+  remainingTokens: number
+  costMicro: number | null
 }
 
 interface ChatModelOption {
@@ -72,6 +82,166 @@ const STARTER_PROMPTS = [
 ]
 
 const DEFAULT_CHAT_MAX_TOKENS = 600
+
+function markdownBlocks(input: string) {
+  const lines = input.replace(/\r\n/g, '\n').split('\n')
+  const blocks: Array<
+    | { type: 'p'; text: string }
+    | { type: 'h'; level: number; text: string }
+    | { type: 'ul'; items: string[] }
+    | { type: 'ol'; items: string[] }
+    | { type: 'code'; lang: string; text: string }
+  > = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i] ?? ''
+    if (!line.trim()) {
+      i += 1
+      continue
+    }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/)
+    if (heading) {
+      blocks.push({ type: 'h', level: heading[1]!.length, text: heading[2]! })
+      i += 1
+      continue
+    }
+    const fence = line.match(/^```(\w+)?\s*$/)
+    if (fence) {
+      const code: string[] = []
+      i += 1
+      while (i < lines.length && !/^```\s*$/.test(lines[i] ?? '')) {
+        code.push(lines[i] ?? '')
+        i += 1
+      }
+      i += 1
+      blocks.push({ type: 'code', lang: fence[1] ?? '', text: code.join('\n') })
+      continue
+    }
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items: string[] = []
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i] ?? '')) {
+        items.push((lines[i] ?? '').replace(/^\s*[-*]\s+/, ''))
+        i += 1
+      }
+      blocks.push({ type: 'ul', items })
+      continue
+    }
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items: string[] = []
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i] ?? '')) {
+        items.push((lines[i] ?? '').replace(/^\s*\d+\.\s+/, ''))
+        i += 1
+      }
+      blocks.push({ type: 'ol', items })
+      continue
+    }
+
+    const paragraph: string[] = [line]
+    i += 1
+    while (
+      i < lines.length &&
+      (lines[i] ?? '').trim() &&
+      !/^```/.test(lines[i] ?? '') &&
+      !/^(#{1,3})\s+/.test(lines[i] ?? '') &&
+      !/^\s*[-*]\s+/.test(lines[i] ?? '') &&
+      !/^\s*\d+\.\s+/.test(lines[i] ?? '')
+    ) {
+      paragraph.push(lines[i] ?? '')
+      i += 1
+    }
+    blocks.push({ type: 'p', text: paragraph.join('\n') })
+  }
+
+  return blocks
+}
+
+function inlineMarkdown(text: string): ReactNode[] {
+  const out: ReactNode[] = []
+  const re = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g
+  let last = 0
+  let match: RegExpExecArray | null
+  while ((match = re.exec(text))) {
+    if (match.index > last) out.push(text.slice(last, match.index))
+    const token = match[0]
+    if (token.startsWith('`')) {
+      out.push(
+        <code key={out.length} className="rounded-[4px] bg-[var(--s-bg)]/70 px-1 py-0.5 font-data text-[0.92em] text-[var(--s-text)]">
+          {token.slice(1, -1)}
+        </code>,
+      )
+    } else if (token.startsWith('**')) {
+      out.push(<strong key={out.length} className="font-semibold text-[var(--s-text)]">{token.slice(2, -2)}</strong>)
+    } else {
+      const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/)
+      const href = link?.[2] ?? ''
+      const safeHref = /^https?:\/\//.test(href) ? href : undefined
+      out.push(
+        safeHref ? (
+          <a key={out.length} href={safeHref} target="_blank" rel="noreferrer" className="text-[var(--s-accent)] underline underline-offset-2">
+            {link?.[1] ?? href}
+          </a>
+        ) : (
+          token
+        ),
+      )
+    }
+    last = match.index + token.length
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return out
+}
+
+function ChatMarkdown({ content }: { content: string }) {
+  const blocks = markdownBlocks(content)
+  if (blocks.length === 0) return null
+  return (
+    <div className="chat-markdown font-body text-[15px] leading-relaxed">
+      {blocks.map((block, index) => {
+        if (block.type === 'h') {
+          return (
+            <div key={index} className={cn('mb-1 mt-3 font-display font-semibold text-[var(--s-text)] first:mt-0', block.level === 1 ? 'text-[18px]' : 'text-[16px]')}>
+              {inlineMarkdown(block.text)}
+            </div>
+          )
+        }
+        if (block.type === 'code') {
+          return (
+            <pre key={index} className="my-2 max-w-full overflow-x-auto rounded-[8px] border border-[var(--s-border)] bg-[var(--s-bg)]/70 p-3 font-data text-[13px] leading-relaxed text-[var(--s-text)]">
+              <code>{block.text}</code>
+            </pre>
+          )
+        }
+        if (block.type === 'ul' || block.type === 'ol') {
+          const Tag = block.type === 'ul' ? 'ul' : 'ol'
+          return (
+            <Tag key={index} className={cn('my-2 space-y-1 pl-5', block.type === 'ul' ? 'list-disc' : 'list-decimal')}>
+              {block.items.map((item, itemIndex) => <li key={itemIndex}>{inlineMarkdown(item)}</li>)}
+            </Tag>
+          )
+        }
+        return (
+          <p key={index} className="my-2 whitespace-pre-wrap first:mt-0 last:mb-0">
+            {inlineMarkdown(block.text)}
+          </p>
+        )
+      })}
+    </div>
+  )
+}
+
+function ChatSpendLine({ spend, ms }: { spend?: ChatSpend; ms?: number }) {
+  if (!spend) {
+    return ms !== undefined ? <span>{ms} ms</span> : null
+  }
+  const cost = spend.costMicro !== null ? compactUsd(spend.costMicro) : 'metered'
+  return (
+    <span>
+      {tokens(spend.promptTokens)} in · {tokens(spend.completionTokens)} out · {tokens(spend.billedTokens)} billed · {cost} · {tokens(spend.remainingTokens)} left
+      {ms !== undefined ? ` · ${ms} ms` : ''}
+    </span>
+  )
+}
 
 /** Three ways to spend credits over the API. Each tab is the real integration
  * for that path; availability is tagged honestly — the router credit-debit and
@@ -495,6 +665,7 @@ function useDeveloperModels(gatewayModels: string[]) {
 export function DeveloperChatPage() {
   const { address } = useAccount()
   const lots = useMyLots(address)
+  const logRef = useRef<HTMLElement | null>(null)
   const [spendKey, setSpendKey] = useState<StoredSpendKey | null>(() => getActiveSpendKey())
   const [gatewayUrl, setGatewayUrl] = useState('http://127.0.0.1:8088/v1')
   const [apiKey, setApiKey] = useState('sk-inference-bazaar')
@@ -517,6 +688,24 @@ export function DeveloperChatPage() {
   const activeLots = (lots.data ?? []).filter(
     (l) => l.qtyTokens - l.lockedTokens > 0n && Number(l.expiry) * 1000 > Date.now(),
   )
+
+  useEffect(() => {
+    if (messages.length === 0) return
+    let secondFrame = 0
+    const frame = requestAnimationFrame(() => {
+      const log = logRef.current
+      if (!log) return
+      log.scrollTop = log.scrollHeight
+      secondFrame = requestAnimationFrame(() => {
+        const nextLog = logRef.current
+        if (nextLog) nextLog.scrollTop = nextLog.scrollHeight
+      })
+    })
+    return () => {
+      cancelAnimationFrame(frame)
+      cancelAnimationFrame(secondFrame)
+    }
+  }, [busy, messages.length])
 
   useEffect(() => {
     const refresh = () => setSpendKey(getActiveSpendKey())
@@ -618,7 +807,14 @@ export function DeveloperChatPage() {
     const started = performance.now()
     const json = await postChat(base, body, await spendVoucherHeaders(key, key.ackedTokens))
     const nextCumulative = Number(json?.['inference-bazaar']?.nextCumulative)
+    const promptTokens = Number(json?.usage?.prompt_tokens ?? 0)
+    const completionTokens = Number(json?.usage?.completion_tokens ?? 0)
+    const totalTokens = Number(json?.usage?.total_tokens ?? promptTokens + completionTokens)
+    let billedTokens = key.instrumentId.endsWith(':input') ? promptTokens : completionTokens
+    let remainingTokens = Math.max(0, key.maxTokens - key.ackedTokens - billedTokens)
     if (Number.isFinite(nextCumulative) && nextCumulative >= key.ackedTokens) {
+      billedTokens = Math.max(0, nextCumulative - key.ackedTokens)
+      remainingTokens = Math.max(0, key.maxTokens - nextCumulative)
       const updated = updateSpendKey(key.id, { ackedTokens: nextCumulative })
       if (updated) setSpendKey(updated)
       try {
@@ -631,11 +827,20 @@ export function DeveloperChatPage() {
         setGatewayError(`Ack pending: ${shortError(e)}`)
       }
     }
+    const costMicro = key.priceMicroPerM !== undefined ? Math.round((key.priceMicroPerM * billedTokens) / 1_000_000) : null
     return {
       id: `a-${Date.now()}`,
       role: 'assistant' as const,
       content: json?.choices?.[0]?.message?.content?.trim() || '',
       usage: json?.usage,
+      spend: {
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        billedTokens,
+        remainingTokens,
+        costMicro,
+      },
       ms: Math.round(performance.now() - started),
     }
   }
@@ -793,10 +998,10 @@ export function DeveloperChatPage() {
         )}
       </header>
 
-      <section data-testid="developer-chat-log" className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6">
-        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col justify-end gap-3">
+      <section ref={logRef} data-testid="developer-chat-log" className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6">
+        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col gap-3">
           {messages.length === 0 ? (
-            <div className="my-auto w-full max-w-[680px] self-center py-8">
+            <div className="w-full max-w-[680px] self-center pt-[clamp(32px,12dvh,112px)]">
               <div className="flex items-center gap-3">
                 <ProviderMark provider={selected.provider} />
                 <div className="min-w-0">
@@ -854,10 +1059,18 @@ export function DeveloperChatPage() {
                         : 'border-[var(--s-border)] bg-[var(--s-surface)] text-[var(--s-text-secondary)]',
                   )}
                 >
-                  <div className="whitespace-pre-wrap font-body text-[15px] leading-relaxed">{m.content}</div>
-                  {m.usage && (
-                    <div className="mt-2 font-data text-[12px] text-[var(--s-text-muted)]">
-                      {m.usage.total_tokens ?? '...'} tokens · {m.ms ?? '...'} ms
+                  {m.role === 'assistant' && !m.error ? (
+                    <ChatMarkdown content={m.content} />
+                  ) : (
+                    <div className="whitespace-pre-wrap font-body text-[15px] leading-relaxed">{m.content}</div>
+                  )}
+                  {(m.spend || m.usage || m.ms !== undefined) && (
+                    <div className="mt-2 border-t border-[var(--s-divider)] pt-2 font-data text-[12px] leading-relaxed text-[var(--s-text-muted)]">
+                      {m.spend ? (
+                        <ChatSpendLine spend={m.spend} ms={m.ms} />
+                      ) : (
+                        <span>{m.usage?.total_tokens ?? '...'} tokens{m.ms !== undefined ? ` · ${m.ms} ms` : ''}</span>
+                      )}
                     </div>
                   )}
                 </div>

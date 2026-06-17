@@ -69,6 +69,9 @@ export function ApiKeyMint({ lot, venueUrl }: { lot: CreditLot; venueUrl: string
         venueUrl,
         model: reg.model ?? '',
         instrumentId: reg.instrumentId ?? '',
+        priceMicroPerM: Number(lot.filledTokens) > 0
+          ? Math.round((Number(lot.notionalMicro) * 1_000_000) / Number(lot.filledTokens))
+          : undefined,
         maxTokens: reg.maxTokens ?? Number(maxTokens),
         expiry: reg.expiry ?? Number(expiry),
         ackedTokens: 0,

@@ -15,6 +15,7 @@ export interface StoredSpendKey {
   venueUrl: string
   model: string
   instrumentId: string
+  priceMicroPerM?: number
   maxTokens: number
   expiry: number
   ackedTokens: number
@@ -50,6 +51,7 @@ function isStoredSpendKey(value: unknown): value is StoredSpendKey {
     typeof key.venueUrl === 'string' &&
     typeof key.model === 'string' &&
     typeof key.instrumentId === 'string' &&
+    (key.priceMicroPerM === undefined || typeof key.priceMicroPerM === 'number') &&
     typeof key.maxTokens === 'number' &&
     typeof key.expiry === 'number' &&
     typeof key.ackedTokens === 'number' &&
