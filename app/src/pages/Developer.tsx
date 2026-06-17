@@ -2,6 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAccount, useReadContract, useSignTypedData } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@tangle-network/sandbox-ui/primitives'
 import type { Address, Hex } from 'viem'
 import { PageHeader } from '~/components/PageHeader'
 import { ApiKeyMint } from '~/components/ApiKeyMint'
@@ -44,11 +51,19 @@ interface ChatModelOption {
   outputMicroPerM: number
 }
 
+interface ThinkingOption {
+  value: ThinkingLevel
+  label: string
+  detail: string
+}
+
 const STARTER_PROMPTS = [
   'Show me a minimal OpenAI client for my lot-backed key',
   'Compare cheap models for a coding assistant',
   'What should I verify before routing this through production?',
 ]
+
+const DEFAULT_CHAT_MAX_TOKENS = 600
 
 /** Three ways to spend credits over the API. Each tab is the real integration
  * for that path; availability is tagged honestly — the router credit-debit and
@@ -300,7 +315,7 @@ function ChatModelPicker({
                           setOpen(false)
                         }}
                         className={cn(
-                          'grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 text-left transition-colors',
+                          'mx-1 grid w-[calc(100%-0.5rem)] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[8px] px-2 py-2.5 text-left transition-colors focus:bg-[var(--s-surface)]',
                           active
                             ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
                             : 'text-[var(--s-text-secondary)] hover:bg-[var(--s-surface)]',
@@ -335,13 +350,25 @@ function supportsNativeThinking(modelId: string) {
   return id.includes('openai/') || id.startsWith('gpt-') || /\bo[134]\b/.test(id)
 }
 
-function thinkingOptionsFor(modelId: string): { value: ThinkingLevel; label: string }[] {
-  void modelId
+function thinkingOptionsFor(modelId: string): ThinkingOption[] {
+  const native = supportsNativeThinking(modelId)
   return [
-    { value: 'off', label: 'Off' },
-    { value: 'low', label: 'Low' },
-    { value: 'medium', label: 'Med' },
-    { value: 'high', label: 'High' },
+    { value: 'off', label: 'Off', detail: 'No extra reasoning instruction' },
+    {
+      value: 'low',
+      label: 'Low',
+      detail: native ? 'Sends native light reasoning' : 'Adds a brief private check',
+    },
+    {
+      value: 'medium',
+      label: 'Medium',
+      detail: native ? 'Sends native balanced reasoning' : 'Adds careful problem solving',
+    },
+    {
+      value: 'high',
+      label: 'High',
+      detail: native ? 'Sends native deep reasoning' : 'Adds deeper tradeoff analysis',
+    },
   ]
 }
 
@@ -361,37 +388,72 @@ function buildSystemPrompt(thinking: ThinkingLevel) {
     .join('\n\n')
 }
 
-function CoherencePicker({
+function EffortPicker({
   value,
   options,
   onChange,
 }: {
   value: ThinkingLevel
-  options: { value: ThinkingLevel; label: string }[]
+  options: ThinkingOption[]
   onChange: (value: ThinkingLevel) => void
 }) {
+  const selected = options.find((option) => option.value === value) ?? options[0]
   return (
-    <div className="inline-flex h-10 rounded-[9px] bg-[var(--s-bg)]/60 p-1" role="radiogroup" aria-label="Thinking">
-      {options.map((option) => {
-        const active = option.value === value
-        return (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onChange(option.value)}
-            aria-pressed={active}
-            className={cn(
-              'h-8 rounded-[7px] px-2.5 font-data text-[12px] font-semibold uppercase tracking-wide transition-colors',
-              active
-                ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
-                : 'text-[var(--s-text-muted)] hover:text-[var(--s-text-secondary)]',
-            )}
-          >
-            {option.label}
-          </button>
-        )
-      })}
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          data-testid="developer-effort-picker"
+          aria-label="Reasoning effort"
+          className="inline-flex h-10 min-w-[144px] items-center gap-1.5 rounded-[9px] border border-transparent bg-[var(--s-bg)]/60 px-2.5 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] outline-none transition-colors hover:border-[var(--s-accent)]/45 focus-visible:border-[var(--s-accent)]/70 data-[state=open]:border-[var(--s-accent)]/45"
+        >
+          <span className="i-ph:brain shrink-0 text-[15px] text-[var(--s-text-muted)]" />
+          <span className="shrink-0 font-data text-[12px] font-semibold uppercase tracking-wide text-[var(--s-text-muted)]">
+            Effort
+          </span>
+          <span className="min-w-0 flex-1 truncate font-data text-[13px] font-semibold text-[var(--s-text)]">
+            {selected?.label ?? 'Off'}
+          </span>
+          <span className="i-ph:caret-down shrink-0 text-[14px] text-[var(--s-text-muted)]" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        data-testid="developer-effort-picker-list"
+        side="top"
+        align="start"
+        sideOffset={8}
+        className="z-50 w-[288px] max-w-[calc(100vw-24px)] rounded-[10px] border border-[var(--s-border)] bg-[var(--s-panel)] p-1 text-[var(--s-text)] shadow-[0_18px_60px_rgba(0,0,0,0.28)]"
+      >
+        <DropdownMenuRadioGroup
+          value={value}
+          onValueChange={(next) => onChange(next as ThinkingLevel)}
+        >
+          {options.map((option) => {
+            const active = option.value === value
+            return (
+              <DropdownMenuRadioItem
+                key={option.value}
+                value={option.value}
+                data-testid={`developer-effort-option-${option.value}`}
+                className={cn(
+                  'rounded-[8px] py-2 pl-8 pr-2.5 font-data outline-none transition-colors focus:bg-[var(--s-surface)]',
+                  active
+                    ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
+                    : 'text-[var(--s-text-secondary)]',
+                )}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-[14px] font-semibold">{option.label}</span>
+                  <span className={cn('mt-0.5 block text-[12px] leading-snug', active ? 'text-[var(--s-accent)] opacity-80' : 'text-[var(--s-text-muted)]')}>
+                    {option.detail}
+                  </span>
+                </span>
+              </DropdownMenuRadioItem>
+            )
+          })}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -437,7 +499,6 @@ export function DeveloperChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [thinking, setThinking] = useState<ThinkingLevel>('low')
-  const [maxTokens, setMaxTokens] = useState(600)
   const [busy, setBusy] = useState(false)
   const [gatewayOpen, setGatewayOpen] = useState(false)
   const [gatewayState, setGatewayState] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
@@ -511,7 +572,7 @@ export function DeveloperChatPage() {
         reasoning_effort?: Exclude<ThinkingLevel, 'off'>
       } = {
         model,
-        max_tokens: maxTokens,
+        max_tokens: DEFAULT_CHAT_MAX_TOKENS,
         messages: [
           { role: 'system', content: buildSystemPrompt(thinking) },
           ...nextMessages.map((m) => ({ role: m.role, content: m.content })),
@@ -726,24 +787,7 @@ export function DeveloperChatPage() {
                 placement="top"
                 className="w-[min(100%,360px)]"
               />
-              <span className="inline-flex h-10 items-center gap-1.5 rounded-[9px] bg-[var(--s-bg)]/60 px-2.5 font-data text-[12px] font-semibold uppercase tracking-wide text-[var(--s-text-muted)]">
-                <span className="i-ph:brain text-[15px]" />
-                Think
-              </span>
-              <CoherencePicker value={thinking} options={thinkingOptions} onChange={setThinking} />
-              <label className="inline-flex h-10 items-center gap-1.5 rounded-[9px] bg-[var(--s-bg)]/60 px-2.5 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
-                Max
-                <input
-                  aria-label="Max tokens"
-                  type="number"
-                  min={64}
-                  max={4096}
-                  step={64}
-                  value={maxTokens}
-                  onChange={(e) => setMaxTokens(Number(e.target.value))}
-                  className="h-6 w-[68px] bg-transparent text-right font-data text-[13px] text-[var(--s-text)] outline-none"
-                />
-              </label>
+              <EffortPicker value={thinking} options={thinkingOptions} onChange={setThinking} />
             </div>
             <button
               data-testid="developer-chat-send"

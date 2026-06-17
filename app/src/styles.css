@@ -188,8 +188,13 @@ button {
   cursor: pointer;
 }
 :focus-visible {
-  outline: 2px solid var(--s-focus);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--s-focus) 24%, transparent);
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  box-shadow: none;
 }
 
 /* Range slider — themed track + thumb, used by the usage/discount sliders. */
