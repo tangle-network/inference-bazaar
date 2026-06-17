@@ -299,12 +299,12 @@ export default function OperatorsPage() {
                 ))}
               </div>
               <div className="hidden overflow-x-auto md:block">
-                <table className="w-full border-collapse">
+                <table className="w-full min-w-[1060px] border-collapse">
                   <thead>
                     <tr className="border-b border-[var(--s-divider)] text-left">
                       <th className="mono-label px-4 py-3">Operator</th>
                       <th className="mono-label px-3 py-3">Status</th>
-                      <th className="mono-label px-3 py-3">Venue</th>
+                      <th className="mono-label min-w-[340px] px-3 py-3">Venue</th>
                       <th className="mono-label px-3 py-3 text-right">Restake bond</th>
                       <th className="mono-label px-4 py-3 text-right">Issuance collateral</th>
                     </tr>
@@ -334,12 +334,19 @@ export default function OperatorsPage() {
                             {row.venue?.onion && <Badge tone="neutral" icon="i-ph:shield">.onion</Badge>}
                           </div>
                         </td>
-                        <td className="max-w-[280px] px-3 py-3.5">
-                          <div className="truncate font-data text-[13px] text-[var(--s-text-muted)]">
-                            {row.serving ? displayVenueUrl(row.venue?.url) : 'joined on-chain'}
+                        <td className="min-w-[340px] px-3 py-3.5">
+                          <div className="flex min-w-0 items-center gap-1.5 font-data text-[13px] text-[var(--s-text-muted)]">
+                            <span className="min-w-0 truncate">
+                              {row.serving ? displayVenueUrl(row.venue?.url) : 'joined on-chain'}
+                            </span>
                             {row.venue?.latencyMs != null && (
-                              <span className={row.venue.latencyMs < 400 ? 'text-[var(--s-emerald)]' : undefined}>
-                                {' '}· {row.venue.latencyMs}ms
+                              <span
+                                className={cn(
+                                  'shrink-0',
+                                  row.venue.latencyMs < 400 && 'text-[var(--s-emerald)]',
+                                )}
+                              >
+                                · {row.venue.latencyMs}ms
                               </span>
                             )}
                           </div>
