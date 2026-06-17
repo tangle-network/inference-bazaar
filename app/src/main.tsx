@@ -15,7 +15,7 @@ import OperatorsPage from '~/pages/Operators'
 import OperatorRegisterPage from '~/pages/OperatorRegister'
 import ActivityPage from '~/pages/Activity'
 import PortfolioPage from '~/pages/Portfolio'
-import DeveloperPage from '~/pages/Developer'
+import DeveloperPage, { DeveloperChatPage } from '~/pages/Developer'
 
 function withShell(node: React.ReactNode) {
   return <Shell>{node}</Shell>
@@ -40,6 +40,7 @@ const router = createBrowserRouter([
   route('/activity', <ActivityPage />),
   route('/portfolio', <PortfolioPage />),
   route('/developer', <DeveloperPage />),
+  route('/developer/chat', <DeveloperChatPage />),
 ])
 
 createRoot(document.getElementById('root')!).render(

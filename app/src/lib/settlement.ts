@@ -7,10 +7,12 @@
  * lot on-chain, atomically. Supply is provable (issuer collateral ≥ liability,
  * contract-enforced); demand is provable (the lot + the balance debit).
  */
-import { keccak256, toHex, type Address, type Hex } from 'viem'
+import { keccak256, toHex, type Address, type Hex, type PublicClient } from 'viem'
+import type { GetContractEventsReturnType } from 'viem/actions'
 import { useQuery } from '@tanstack/react-query'
 import { usePublicClient } from 'wagmi'
 import { CHAIN, VENUE_URL } from './api'
+import { cacheKey, readBrowserCache, writeBrowserCache } from './browser-cache'
 
 export const SETTLEMENT = {
   address: '0x31D0215d77A06ff97Cb61BbBe4b931Ac0D1da8aA' as Address,
@@ -18,6 +20,10 @@ export const SETTLEMENT = {
   /** Block the contracts deployed at — event scans start here. */
   fromBlock: 42887343n,
 }
+
+const LOG_SCAN_BLOCKS = 1_900n
+const ZERO_LOT_ID = `0x${'0'.repeat(64)}` as Hex
+const LOT_CACHE_MS = 10 * 60_000
 
 export const EIP712_DOMAIN = {
   name: 'InferenceBazaarSettlement',
@@ -53,6 +59,14 @@ export const SPEND_PERMIT_TYPES = {
     { name: 'sessionKey', type: 'address' },
     { name: 'maxTokens', type: 'uint64' },
     { name: 'expiry', type: 'uint64' },
+  ],
+} as const
+
+export const SPEND_VOUCHER_TYPES = {
+  SpendVoucher: [
+    { name: 'lotId', type: 'bytes32' },
+    { name: 'sessionKey', type: 'address' },
+    { name: 'servedCumulative', type: 'uint64' },
   ],
 } as const
 
@@ -185,6 +199,8 @@ export const SETTLEMENT_ABI = [
   },
 ] as const
 
+type FillSettledLog = GetContractEventsReturnType<typeof SETTLEMENT_ABI, 'FillSettled'>[number]
+
 export const USD_ABI = [
   { type: 'function', name: 'mint', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [], stateMutability: 'nonpayable' },
   { type: 'function', name: 'approve', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ name: '', type: 'bool' }], stateMutability: 'nonpayable' },
@@ -266,47 +282,134 @@ export interface CreditLot {
   txHash: Hex
 }
 
+interface CachedCreditLot {
+  lotId: Hex
+  instrument: Hex
+  qtyTokens: string
+  lockedTokens: string
+  filledTokens: string
+  expiry: string
+  notionalMicro: string
+  issuer: Address
+  txHash: Hex
+}
+
+function myLotsCacheKey(holderAddress: Address): string {
+  return cacheKey('my-lots', CHAIN.id, SETTLEMENT.address, holderAddress.toLowerCase())
+}
+
+function toCachedCreditLot(lot: CreditLot): CachedCreditLot {
+  return {
+    lotId: lot.lotId,
+    instrument: lot.instrument,
+    qtyTokens: lot.qtyTokens.toString(),
+    lockedTokens: lot.lockedTokens.toString(),
+    filledTokens: lot.filledTokens.toString(),
+    expiry: lot.expiry.toString(),
+    notionalMicro: lot.notionalMicro.toString(),
+    issuer: lot.issuer,
+    txHash: lot.txHash,
+  }
+}
+
+function fromCachedCreditLot(lot: CachedCreditLot): CreditLot {
+  return {
+    lotId: lot.lotId,
+    instrument: lot.instrument,
+    qtyTokens: BigInt(lot.qtyTokens),
+    lockedTokens: BigInt(lot.lockedTokens),
+    filledTokens: BigInt(lot.filledTokens),
+    expiry: BigInt(lot.expiry),
+    notionalMicro: BigInt(lot.notionalMicro),
+    issuer: lot.issuer,
+    txHash: lot.txHash,
+  }
+}
+
+export function readCachedMyLots(holderAddress: Address, maxAgeMs = LOT_CACHE_MS): CreditLot[] | undefined {
+  return readBrowserCache<CachedCreditLot[], CreditLot[]>(myLotsCacheKey(holderAddress), {
+    maxAgeMs,
+    revive: (lots) => lots.map(fromCachedCreditLot),
+  })
+}
+
+export function writeCachedMyLots(holderAddress: Address, lots: CreditLot[]): void {
+  writeBrowserCache(myLotsCacheKey(holderAddress), lots, {
+    serialize: (value) => value.map(toCachedCreditLot),
+  })
+}
+
+async function fetchFillSettledLogs(client: PublicClient): Promise<FillSettledLog[]> {
+  const latestBlock = await client.getBlockNumber()
+  const logs: FillSettledLog[] = []
+
+  for (let fromBlock = SETTLEMENT.fromBlock; fromBlock <= latestBlock; fromBlock += LOG_SCAN_BLOCKS) {
+    const endBlock = fromBlock + LOG_SCAN_BLOCKS - 1n
+    const toBlock = endBlock > latestBlock ? latestBlock : endBlock
+    const page = await client.getContractEvents({
+      address: SETTLEMENT.address,
+      abi: SETTLEMENT_ABI,
+      eventName: 'FillSettled',
+      fromBlock,
+      toBlock,
+    })
+    logs.push(...page)
+  }
+
+  return logs
+}
+
+export async function fetchMyLots(client: PublicClient, holderAddress: Address): Promise<CreditLot[]> {
+  const logs = await fetchFillSettledLogs(client)
+  const out: CreditLot[] = []
+
+  for (const log of [...logs].reverse()) {
+    const lotId = log.args.lotId as Hex | undefined
+    if (!lotId || lotId === ZERO_LOT_ID) continue
+    const lot = await client.readContract({
+      address: SETTLEMENT.address,
+      abi: SETTLEMENT_ABI,
+      functionName: 'lots',
+      args: [lotId],
+    })
+    const [holder, issuer, instrument, qtyTokens, lockedTokens, expiry, notionalMicro] = lot
+    if (holder.toLowerCase() !== holderAddress.toLowerCase()) continue
+    out.push({
+      lotId,
+      instrument,
+      qtyTokens,
+      lockedTokens,
+      filledTokens: (log.args.qtyTokens as bigint | undefined) ?? qtyTokens,
+      expiry,
+      notionalMicro,
+      issuer,
+      txHash: log.transactionHash,
+    })
+  }
+
+  return out
+}
+
 /** The connected wallet's credit lots — FillSettled events → lots() reads. */
 export function useMyLots(address: Address | undefined) {
   const client = usePublicClient({ chainId: CHAIN.id })
   return useQuery({
     queryKey: ['lots', address],
     enabled: !!address && !!client,
+    initialData: () => (address ? readCachedMyLots(address) : undefined),
+    staleTime: 30_000,
+    gcTime: 30 * 60_000,
     refetchInterval: 30_000,
-    queryFn: async (): Promise<CreditLot[]> => {
-      const logs = await client!.getContractEvents({
-        address: SETTLEMENT.address,
-        abi: SETTLEMENT_ABI,
-        eventName: 'FillSettled',
-        fromBlock: SETTLEMENT.fromBlock,
-        toBlock: 'latest',
-      })
-      const out: CreditLot[] = []
-      for (const log of logs) {
-        const lotId = log.args.lotId as Hex | undefined
-        if (!lotId || lotId === `0x${'0'.repeat(64)}`) continue
-        const lot = await client!.readContract({
-          address: SETTLEMENT.address,
-          abi: SETTLEMENT_ABI,
-          functionName: 'lots',
-          args: [lotId],
-        })
-        const [holder, issuer, instrument, qtyTokens, lockedTokens, expiry, notionalMicro] = lot
-        if (holder.toLowerCase() !== address!.toLowerCase()) continue
-        out.push({
-          lotId,
-          instrument,
-          qtyTokens,
-          lockedTokens,
-          // The fill that minted this lot — its size is the spend denominator.
-          filledTokens: (log.args.qtyTokens as bigint | undefined) ?? qtyTokens,
-          expiry,
-          notionalMicro,
-          issuer,
-          txHash: log.transactionHash,
-        })
+    queryFn: async () => {
+      try {
+        const lots = await fetchMyLots(client!, address!)
+        writeCachedMyLots(address!, lots)
+        return lots
+      } catch (error) {
+        const cached = readCachedMyLots(address!)
+        if (cached) return cached
+        throw error
       }
-      return out
     },
   })
 }

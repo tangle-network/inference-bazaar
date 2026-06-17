@@ -1,13 +1,22 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { useAccount, useReadContract, useSignTypedData } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@tangle-network/sandbox-ui/primitives'
 import type { Address, Hex } from 'viem'
 import { PageHeader } from '~/components/PageHeader'
 import { ApiKeyMint } from '~/components/ApiKeyMint'
 import { CodeBlock } from '~/components/CodeBlock'
 import { Badge, Panel, Segmented, Stat } from '~/components/ui'
-import { compactUsd, tokens, truncAddr } from '~/lib/format'
-import { CHAIN, ROUTER_URL, VENUE_URL } from '~/lib/api'
+import { cn } from '~/lib/cn'
+import { compactUsd, formatNumber, pricePerM, tokens, truncAddr } from '~/lib/format'
+import { CHAIN, ROUTER_URL, VENUE_URL, useCatalog, type CatalogModel } from '~/lib/api'
+import { ProviderLogo } from '~/lib/logos'
 import {
   EIP712_DOMAIN,
   SETTLEMENT,
@@ -18,10 +27,250 @@ import {
   type CreditLot,
   type MeterRow,
 } from '~/lib/settlement'
+import {
+  getActiveSpendKey,
+  isSpendKeyUsable,
+  spendKeyLabel,
+  spendVoucherHeaders,
+  SPEND_KEY_EVENT,
+  updateSpendKey,
+  type StoredSpendKey,
+} from '~/lib/spend-key'
 import { useVenueRegistry, endpointFor, type Venue } from '~/lib/venues'
 import { privacyOn } from '~/lib/privacy'
 
 type Tab = 'gateway' | 'router' | 'tcloud'
+type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
+
+interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  usage?: ChatUsage
+  spend?: ChatSpend
+  ms?: number
+  finishReason?: string
+  error?: boolean
+  streaming?: boolean
+}
+
+interface ChatUsage {
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
+}
+
+interface ChatSpend {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  billedTokens: number
+  remainingTokens: number
+  costMicro: number | null
+}
+
+interface ChatStreamResult {
+  content: string
+  usage?: ChatUsage
+  inferenceBazaar?: { servedTokens?: number; nextCumulative?: number }
+  finishReason?: string
+}
+
+interface ChatModelOption {
+  id: string
+  name: string
+  provider: string
+  inputMicroPerM: number
+  outputMicroPerM: number
+}
+
+interface ThinkingOption {
+  value: ThinkingLevel
+  label: string
+  detail: string
+}
+
+const STARTER_PROMPTS = [
+  'Show me a minimal OpenAI client for my lot-backed key',
+  'Compare cheap models for a coding assistant',
+  'What should I verify before routing this through production?',
+]
+
+const DEFAULT_CHAT_MAX_TOKENS = 2048
+
+function markdownBlocks(input: string) {
+  const lines = input.replace(/\r\n/g, '\n').split('\n')
+  const blocks: Array<
+    | { type: 'p'; text: string }
+    | { type: 'h'; level: number; text: string }
+    | { type: 'ul'; items: string[] }
+    | { type: 'ol'; items: string[] }
+    | { type: 'code'; lang: string; text: string }
+  > = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i] ?? ''
+    if (!line.trim()) {
+      i += 1
+      continue
+    }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/)
+    if (heading) {
+      blocks.push({ type: 'h', level: heading[1]!.length, text: heading[2]! })
+      i += 1
+      continue
+    }
+    const fence = line.match(/^```(\w+)?\s*$/)
+    if (fence) {
+      const code: string[] = []
+      i += 1
+      while (i < lines.length && !/^```\s*$/.test(lines[i] ?? '')) {
+        code.push(lines[i] ?? '')
+        i += 1
+      }
+      i += 1
+      blocks.push({ type: 'code', lang: fence[1] ?? '', text: code.join('\n') })
+      continue
+    }
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items: string[] = []
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i] ?? '')) {
+        items.push((lines[i] ?? '').replace(/^\s*[-*]\s+/, ''))
+        i += 1
+      }
+      blocks.push({ type: 'ul', items })
+      continue
+    }
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items: string[] = []
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i] ?? '')) {
+        items.push((lines[i] ?? '').replace(/^\s*\d+\.\s+/, ''))
+        i += 1
+      }
+      blocks.push({ type: 'ol', items })
+      continue
+    }
+
+    const paragraph: string[] = [line]
+    i += 1
+    while (
+      i < lines.length &&
+      (lines[i] ?? '').trim() &&
+      !/^```/.test(lines[i] ?? '') &&
+      !/^(#{1,3})\s+/.test(lines[i] ?? '') &&
+      !/^\s*[-*]\s+/.test(lines[i] ?? '') &&
+      !/^\s*\d+\.\s+/.test(lines[i] ?? '')
+    ) {
+      paragraph.push(lines[i] ?? '')
+      i += 1
+    }
+    blocks.push({ type: 'p', text: paragraph.join('\n') })
+  }
+
+  return blocks
+}
+
+function inlineMarkdown(text: string): ReactNode[] {
+  const out: ReactNode[] = []
+  const re = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g
+  let last = 0
+  let match: RegExpExecArray | null
+  while ((match = re.exec(text))) {
+    if (match.index > last) out.push(text.slice(last, match.index))
+    const token = match[0]
+    if (token.startsWith('`')) {
+      out.push(
+        <code key={out.length} className="break-words rounded-[4px] bg-[var(--s-bg)]/70 px-1 py-0.5 font-data text-[0.92em] text-[var(--s-text)]">
+          {token.slice(1, -1)}
+        </code>,
+      )
+    } else if (token.startsWith('**')) {
+      out.push(<strong key={out.length} className="font-semibold text-[var(--s-text)]">{token.slice(2, -2)}</strong>)
+    } else {
+      const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/)
+      const href = link?.[2] ?? ''
+      const safeHref = /^https?:\/\//.test(href) ? href : undefined
+      out.push(
+        safeHref ? (
+          <a key={out.length} href={safeHref} target="_blank" rel="noreferrer" className="text-[var(--s-accent)] underline underline-offset-2">
+            {link?.[1] ?? href}
+          </a>
+        ) : (
+          token
+        ),
+      )
+    }
+    last = match.index + token.length
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return out
+}
+
+function ChatMarkdown({ content }: { content: string }) {
+  const blocks = markdownBlocks(content)
+  if (blocks.length === 0) return null
+  return (
+    <div className="chat-markdown min-w-0 break-words font-body text-[15px] leading-relaxed">
+      {blocks.map((block, index) => {
+        if (block.type === 'h') {
+          return (
+            <div key={index} className={cn('mb-1 mt-3 font-display font-semibold text-[var(--s-text)] first:mt-0', block.level === 1 ? 'text-[18px]' : 'text-[16px]')}>
+              {inlineMarkdown(block.text)}
+            </div>
+          )
+        }
+        if (block.type === 'code') {
+          return (
+            <pre key={index} className="my-2 max-w-full overflow-hidden whitespace-pre-wrap break-words rounded-[8px] border border-[var(--s-border)] bg-[var(--s-bg)]/70 p-3 font-data text-[13px] leading-relaxed text-[var(--s-text)]">
+              <code className="break-words whitespace-pre-wrap">{block.text}</code>
+            </pre>
+          )
+        }
+        if (block.type === 'ul' || block.type === 'ol') {
+          const Tag = block.type === 'ul' ? 'ul' : 'ol'
+          return (
+            <Tag key={index} className={cn('my-2 space-y-1 break-words pl-5', block.type === 'ul' ? 'list-disc' : 'list-decimal')}>
+              {block.items.map((item, itemIndex) => <li key={itemIndex}>{inlineMarkdown(item)}</li>)}
+            </Tag>
+          )
+        }
+        return (
+          <p key={index} className="my-2 whitespace-pre-wrap break-words first:mt-0 last:mb-0">
+            {inlineMarkdown(block.text)}
+          </p>
+        )
+      })}
+    </div>
+  )
+}
+
+function ChatSpendLine({ spend, ms, finishReason }: { spend?: ChatSpend; ms?: number; finishReason?: string }) {
+  const stop = finishReason === 'length' ? 'hit limit' : ''
+  if (!spend) {
+    return ms !== undefined || stop ? <span>{[ms !== undefined ? `${ms} ms` : '', stop].filter(Boolean).join(' · ')}</span> : null
+  }
+  const cost = spend.costMicro !== null ? chatCost(spend.costMicro) : 'metered'
+  return (
+    <span>
+      {chatTokenCount(spend.promptTokens)} in · {chatTokenCount(spend.completionTokens)} out · {chatTokenCount(spend.billedTokens)} billed · {cost} · {chatTokenCount(spend.remainingTokens)} left
+      {ms !== undefined ? ` · ${ms} ms` : ''}{stop ? ` · ${stop}` : ''}
+    </span>
+  )
+}
+
+function chatTokenCount(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return '—'
+  return formatNumber(Math.floor(value), 0)
+}
+
+function chatCost(microUsd: number): string {
+  if (!Number.isFinite(microUsd) || microUsd <= 0) return '—'
+  const usd = microUsd / 1_000_000
+  if (usd >= 1) return `$${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  if (usd >= 0.0001) return `$${usd.toFixed(4)}`
+  return `$${usd.toFixed(6)}`
+}
 
 /** Three ways to spend credits over the API. Each tab is the real integration
  * for that path; availability is tagged honestly — the router credit-debit and
@@ -30,41 +279,39 @@ const TABS: Record<Tab, { label: string; badge: { tone: 'emerald' | 'amber'; tex
   gateway: {
     label: 'Gateway',
     badge: { tone: 'emerald', text: 'Live' },
-    note: 'Zero trust — the gateway runs on your machine and holds the session key; the operator can never bill more than it signs.',
+    note: 'Local gateway for lot-backed API keys. Your app talks OpenAI-compatible HTTP; the gateway signs spend vouchers.',
     code: `from openai import OpenAI
 
-# 1. mint a key below, then run the gateway with it:
-#    inference-bazaar-gateway
-# 2. point any OpenAI client at the local gateway — no wallet in the request path:
+# Run inference-bazaar-gateway with a minted lot key, then call:
 client = OpenAI(base_url="http://127.0.0.1:8088/v1", api_key="sk-inference-bazaar")
 
 resp = client.chat.completions.create(
-    model="anthropic/claude-opus-4-8",
+    model="groq/llama-3.1-8b-instant",
     messages=[{"role": "user", "content": "hello"}],
 )`,
   },
   router: {
     label: 'Router',
     badge: { tone: 'amber', text: 'Credits rolling out' },
-    note: 'One endpoint for every model on Tangle. The endpoint is live; auto-spending your held credit lots through it is rolling out — today route via your platform balance or shielded credits.',
+    note: 'Live model router. Auto-spending Bazaar lots through the router is not the default path yet.',
     code: `from openai import OpenAI
 
 # The Tangle Router — one base URL for every model, routed to a bonded operator.
 client = OpenAI(base_url="${ROUTER_URL}/v1", api_key="tngl-...")
 
 resp = client.chat.completions.create(
-    model="anthropic/claude-opus-4-8",
+    model="groq/llama-3.1-8b-instant",
     messages=[{"role": "user", "content": "hello"}],
 )`,
   },
   tcloud: {
     label: 'tcloud',
     badge: { tone: 'amber', text: 'Preview · tcloud#41' },
-    note: 'The tcloud buyer SDK: `pricing` picks how you pay. credits spends your discounted lots soonest-expiry-first; market/limit cap the price you accept.',
+    note: 'SDK preview for cloud apps. Credit-lot pricing is still behind the preview surface.',
     code: `import { chat } from "@tangle-network/tcloud"
 
 const res = await chat({
-  model: "anthropic/claude-opus-4-8",
+  model: "groq/llama-3.1-8b-instant",
   messages: [{ role: "user", content: "hello" }],
   pricing: { credits: true, mode: "market" },
 })`,
@@ -77,7 +324,7 @@ function Quickstart() {
   return (
     <Panel className="p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-display text-[17px] font-semibold text-[var(--s-text)]">Connect your app</h2>
+        <h2 className="font-display text-[17px] font-semibold text-[var(--s-text)]">API access</h2>
         <Segmented
           size="sm"
           value={tab}
@@ -91,6 +338,976 @@ function Quickstart() {
       </div>
       <CodeBlock code={t.code} className="mt-3" />
     </Panel>
+  )
+}
+
+function normalizeGatewayUrl(raw: string) {
+  const base = raw.trim().replace(/\/+$/, '')
+  if (!base) return ''
+  return base.endsWith('/v1') ? base : `${base}/v1`
+}
+
+function shortError(e: unknown) {
+  const message = e instanceof Error ? e.message.split('\n')[0]! : String(e)
+  return message.includes('Failed to fetch') ? 'Local gateway offline' : message
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : undefined
+}
+
+function normalizeUsage(value: unknown): ChatUsage | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  const usage: ChatUsage = {}
+  const prompt = finiteNumber(record.prompt_tokens)
+  const completion = finiteNumber(record.completion_tokens)
+  const total = finiteNumber(record.total_tokens)
+  if (prompt !== undefined) usage.prompt_tokens = prompt
+  if (completion !== undefined) usage.completion_tokens = completion
+  if (total !== undefined) usage.total_tokens = total
+  return Object.keys(usage).length > 0 ? usage : undefined
+}
+
+function normalizeInferenceBazaar(value: unknown): ChatStreamResult['inferenceBazaar'] {
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  const servedTokens = finiteNumber(record.servedTokens)
+  const nextCumulative = finiteNumber(record.nextCumulative)
+  return servedTokens !== undefined || nextCumulative !== undefined ? { servedTokens, nextCumulative } : undefined
+}
+
+function chatResultFromJson(json: unknown): ChatStreamResult {
+  const record = (json && typeof json === 'object' ? json : {}) as Record<string, any>
+  return {
+    content: String(record.choices?.[0]?.message?.content ?? '').trim(),
+    usage: normalizeUsage(record.usage),
+    inferenceBazaar: normalizeInferenceBazaar(record['inference-bazaar']),
+    finishReason: typeof record.choices?.[0]?.finish_reason === 'string' ? record.choices[0].finish_reason : undefined,
+  }
+}
+
+function dataLines(event: string): string {
+  return event
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('\n')
+    .trim()
+}
+
+async function streamChat(
+  base: string,
+  body: Record<string, unknown>,
+  headers: Record<string, string>,
+  onDelta: (delta: string) => void,
+): Promise<ChatStreamResult> {
+  const res = await fetch(`${base}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: JSON.stringify({ ...body, stream: true, stream_options: { include_usage: true } }),
+  })
+  const contentType = res.headers.get('content-type') ?? ''
+  if (!res.ok) {
+    const text = await res.text()
+    let json: any = null
+    try {
+      json = JSON.parse(text)
+    } catch {
+      // Plain-text gateway/operator errors are still useful as-is.
+    }
+    const msg = json?.error?.message ?? text
+    throw new Error(`${res.status}: ${msg}`)
+  }
+  if (!contentType.includes('text/event-stream')) {
+    return chatResultFromJson(await res.json())
+  }
+  if (!res.body) throw new Error('stream body missing')
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let content = ''
+  let usage: ChatUsage | undefined
+  let inferenceBazaar: ChatStreamResult['inferenceBazaar']
+  let finishReason: string | undefined
+
+  const consume = (event: string): boolean => {
+    const data = dataLines(event)
+    if (!data) return false
+    if (data === '[DONE]') return true
+    let json: any
+    try {
+      json = JSON.parse(data)
+    } catch {
+      throw new Error('invalid stream event')
+    }
+    const nextInference = normalizeInferenceBazaar(json?.['inference-bazaar'])
+    if (nextInference) inferenceBazaar = nextInference
+    const nextUsage = normalizeUsage(json?.usage)
+    if (nextUsage) usage = nextUsage
+    const nextFinishReason = json?.choices?.[0]?.finish_reason
+    if (typeof nextFinishReason === 'string') finishReason = nextFinishReason
+    const delta = String(json?.choices?.[0]?.delta?.content ?? '')
+    if (delta) {
+      content += delta
+      onDelta(delta)
+    }
+    return false
+  }
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+    let idx = buffer.indexOf('\n\n')
+    while (idx !== -1) {
+      const event = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      if (consume(event)) {
+        await reader.cancel().catch(() => undefined)
+        return { content: content.trim(), usage, inferenceBazaar, finishReason }
+      }
+      idx = buffer.indexOf('\n\n')
+    }
+  }
+  if (buffer.trim()) consume(buffer)
+  return { content: content.trim(), usage, inferenceBazaar, finishReason }
+}
+
+function toModelOption(model: CatalogModel): ChatModelOption {
+  return {
+    id: model.id,
+    name: model.name || model.id,
+    provider: model.provider && model.provider !== 'unknown' ? model.provider : providerFromModelId(model.id),
+    inputMicroPerM: model.inputMicroPerM,
+    outputMicroPerM: model.outputMicroPerM,
+  }
+}
+
+function providerFromModelId(id: string) {
+  if (id.includes('/')) return id.split('/')[0]!
+  const lower = id.toLowerCase()
+  if (lower.startsWith('gemini')) return 'google'
+  if (lower.startsWith('deepseek')) return 'deepseek'
+  if (lower.startsWith('gpt-')) return 'openai'
+  return 'gateway'
+}
+
+function fallbackModelOption(id: string): ChatModelOption {
+  const provider = providerFromModelId(id)
+  return { id, name: id, provider, inputMicroPerM: 0, outputMicroPerM: 0 }
+}
+
+function formatModelPrice(microPerM: number) {
+  return microPerM > 0 ? pricePerM(microPerM) : 'metered'
+}
+
+function lotUnitPriceMicroPerM(lot: CreditLot): number | undefined {
+  const filled = Number(lot.filledTokens)
+  if (!Number.isFinite(filled) || filled <= 0) return undefined
+  return Math.round((Number(lot.notionalMicro) * 1_000_000) / filled)
+}
+
+function priceMicroPerMForKey(
+  key: StoredSpendKey,
+  lots: CreditLot[] | undefined,
+  selected: ChatModelOption,
+): number | undefined {
+  if (Number.isFinite(key.priceMicroPerM) && key.priceMicroPerM! > 0) return key.priceMicroPerM
+  const lot = lots?.find((l) => l.lotId.toLowerCase() === key.lotId.toLowerCase())
+  const lotPrice = lot ? lotUnitPriceMicroPerM(lot) : undefined
+  if (lotPrice !== undefined && lotPrice > 0) return lotPrice
+  const catalogPrice = key.instrumentId.endsWith(':input') ? selected.inputMicroPerM : selected.outputMicroPerM
+  return catalogPrice > 0 ? catalogPrice : undefined
+}
+
+function gatewayStateLabel(state: 'idle' | 'checking' | 'ok' | 'error') {
+  if (state === 'ok') return 'Ready'
+  if (state === 'checking') return 'Checking'
+  if (state === 'error') return 'Offline'
+  return 'Local'
+}
+
+function useOutsideDismiss<T extends HTMLElement>(open: boolean, onDismiss: () => void) {
+  const ref = useRef<T | null>(null)
+  useEffect(() => {
+    if (!open) return
+    function onPointerDown(event: PointerEvent) {
+      if (ref.current && event.target instanceof Node && !ref.current.contains(event.target)) onDismiss()
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onDismiss()
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open, onDismiss])
+  return ref
+}
+
+function ProviderMark({ provider, size = 'md' }: { provider: string; size?: 'sm' | 'md' }) {
+  return <ProviderLogo provider={provider} size={size === 'sm' ? 30 : 36} />
+}
+
+function ChatModelPicker({
+  value,
+  models,
+  onChange,
+  loading,
+  compact = false,
+  placement = 'bottom',
+  className,
+}: {
+  value: string
+  models: ChatModelOption[]
+  onChange: (id: string) => void
+  loading: boolean
+  compact?: boolean
+  placement?: 'top' | 'bottom'
+  className?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const ref = useOutsideDismiss<HTMLDivElement>(open, () => setOpen(false))
+  const selected = models.find((m) => m.id === value) ?? fallbackModelOption(value)
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return models
+    return models.filter((m) => `${m.provider} ${m.name} ${m.id}`.toLowerCase().includes(q))
+  }, [models, query])
+  const groups = useMemo(() => {
+    const byProvider = new Map<string, ChatModelOption[]>()
+    for (const model of filtered) {
+      const key = model.provider || 'Gateway'
+      byProvider.set(key, [...(byProvider.get(key) ?? []), model])
+    }
+    return [...byProvider.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [filtered])
+
+  useEffect(() => {
+    if (!open) setQuery('')
+  }, [open])
+
+  return (
+    <div ref={ref} className={cn('relative min-w-0', className)}>
+      <button
+        type="button"
+        data-testid="developer-model-picker"
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          'flex w-full min-w-0 items-center text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] outline-none transition-colors hover:border-[var(--s-accent)]/45 focus-visible:border-[var(--s-accent)]/70',
+          compact
+            ? 'h-10 gap-2.5 rounded-[9px] border border-transparent bg-[var(--s-bg)]/60 px-2.5'
+            : 'h-[46px] gap-3 rounded-[9px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3',
+        )}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <ProviderMark provider={selected.provider} size={compact ? 'sm' : 'md'} />
+        <span className="min-w-0 flex-1">
+          <span className={cn('block truncate font-data font-semibold text-[var(--s-text)]', compact ? 'text-[14px]' : 'text-[15px]')}>
+            {selected.name}
+          </span>
+          <span className={cn('mt-0.5 min-w-0 items-center gap-2 font-data uppercase tracking-wide text-[var(--s-text-muted)]', compact ? 'hidden' : 'flex text-[12px]')}>
+            <span className="truncate">{selected.provider}</span>
+            <span className="text-[var(--s-text-subtle)]">/</span>
+            <span>{formatModelPrice(selected.outputMicroPerM)} out</span>
+          </span>
+        </span>
+        <span className={cn(loading ? 'i-ph:circle-notch animate-spin' : open ? 'i-ph:caret-up' : 'i-ph:caret-down', 'shrink-0 text-[17px] text-[var(--s-text-muted)]')} />
+      </button>
+
+      {open && (
+        <div
+          data-testid="developer-model-picker-list"
+          className={cn(
+            'absolute left-0 z-40 w-[min(92vw,560px)] overflow-hidden rounded-[10px] border border-[var(--s-border)] bg-[var(--s-panel)] shadow-[0_18px_60px_rgba(0,0,0,0.28)]',
+            placement === 'top' ? 'bottom-full mb-2' : 'top-full mt-2',
+          )}
+          role="listbox"
+        >
+          <div className="border-b border-[var(--s-divider)] p-2">
+            <label className="flex h-10 items-center gap-2 rounded-[10px] border border-[var(--s-border)] bg-[var(--s-bg)]/45 px-3 transition-[border-color,box-shadow,background-color] focus-within:border-[var(--s-accent)]/70 focus-within:bg-[var(--s-bg)]/70 focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--s-accent)_18%,transparent)]">
+              <span className="i-ph:magnifying-glass text-[15px] text-[var(--s-text-subtle)]" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                autoFocus
+                className="h-full min-w-0 flex-1 rounded-[9px] bg-transparent font-data text-[15px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)] focus:outline-none focus-visible:outline-none"
+                placeholder="Search models"
+              />
+            </label>
+          </div>
+          <div className="max-h-[360px] overflow-y-auto py-1">
+            {groups.length === 0 ? (
+              <div className="px-3 py-8 text-center font-data text-[13px] text-[var(--s-text-muted)]">
+                No models match.
+              </div>
+            ) : (
+              groups.map(([provider, items]) => (
+                <div key={provider} className="py-1">
+                  <div className="px-3 py-1 font-data text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--s-text-subtle)]">
+                    {provider}
+                  </div>
+                  {items.map((item) => {
+                    const active = item.id === value
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          onChange(item.id)
+                          setOpen(false)
+                        }}
+                        className={cn(
+                          'mx-1 grid w-[calc(100%-0.5rem)] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[8px] px-2 py-2.5 text-left transition-colors focus:bg-[var(--s-surface)]',
+                          active
+                            ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
+                            : 'text-[var(--s-text-secondary)] hover:bg-[var(--s-surface)]',
+                        )}
+                        role="option"
+                        aria-selected={active}
+                      >
+                        <ProviderMark provider={item.provider} size="sm" />
+                        <span className="min-w-0">
+                          <span className="block truncate font-data text-[15px] font-semibold">{item.name}</span>
+                          <span className="block truncate font-data text-[12px] text-[var(--s-text-muted)]">{item.id}</span>
+                        </span>
+                        <span className="text-right font-data text-[12px] text-[var(--s-text-muted)]">
+                          <span className="block uppercase tracking-wide">out</span>
+                          <span className="block text-[var(--s-text-secondary)]">{formatModelPrice(item.outputMicroPerM)}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function supportsNativeThinking(modelId: string) {
+  const id = modelId.toLowerCase()
+  return id.includes('openai/') || id.startsWith('gpt-') || /\bo[134]\b/.test(id)
+}
+
+function thinkingOptionsFor(modelId: string): ThinkingOption[] {
+  const native = supportsNativeThinking(modelId)
+  return [
+    { value: 'off', label: 'Off', detail: 'No extra reasoning instruction' },
+    {
+      value: 'low',
+      label: 'Low',
+      detail: native ? 'Sends native light reasoning' : 'Adds a brief private check',
+    },
+    {
+      value: 'medium',
+      label: 'Medium',
+      detail: native ? 'Sends native balanced reasoning' : 'Adds careful problem solving',
+    },
+    {
+      value: 'high',
+      label: 'High',
+      detail: native ? 'Sends native deep reasoning' : 'Adds deeper tradeoff analysis',
+    },
+  ]
+}
+
+function thinkingInstruction(thinking: ThinkingLevel) {
+  if (thinking === 'off') return ''
+  if (thinking === 'low') return 'Answer directly. Use a quick private check for assumptions before responding.'
+  if (thinking === 'medium') return 'Work through the problem carefully before answering. Return the answer and only the essential evidence.'
+  return 'Think deeply before answering. Resolve tradeoffs explicitly, then return a concise final answer with the key evidence.'
+}
+
+function buildSystemPrompt(thinking: ThinkingLevel) {
+  return [
+    'You are a concise developer assistant for Inference Bazaar. Give concrete, runnable answers.',
+    thinkingInstruction(thinking),
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+function EffortPicker({
+  value,
+  options,
+  onChange,
+}: {
+  value: ThinkingLevel
+  options: ThinkingOption[]
+  onChange: (value: ThinkingLevel) => void
+}) {
+  const selected = options.find((option) => option.value === value) ?? options[0]
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          data-testid="developer-effort-picker"
+          aria-label="Reasoning effort"
+          className="inline-flex h-10 min-w-[144px] items-center gap-1.5 rounded-[9px] border border-transparent bg-[var(--s-bg)]/60 px-2.5 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] outline-none transition-colors hover:border-[var(--s-accent)]/45 focus-visible:border-[var(--s-accent)]/70 data-[state=open]:border-[var(--s-accent)]/45"
+        >
+          <span className="i-ph:brain shrink-0 text-[15px] text-[var(--s-text-muted)]" />
+          <span className="shrink-0 font-data text-[12px] font-semibold uppercase tracking-wide text-[var(--s-text-muted)]">
+            Effort
+          </span>
+          <span className="min-w-0 flex-1 truncate font-data text-[13px] font-semibold text-[var(--s-text)]">
+            {selected?.label ?? 'Off'}
+          </span>
+          <span className="i-ph:caret-down shrink-0 text-[14px] text-[var(--s-text-muted)]" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        data-testid="developer-effort-picker-list"
+        side="top"
+        align="start"
+        sideOffset={8}
+        className="z-50 w-[288px] max-w-[calc(100vw-24px)] rounded-[10px] border border-[var(--s-border)] bg-[var(--s-panel)] p-1 text-[var(--s-text)] shadow-[0_18px_60px_rgba(0,0,0,0.28)]"
+      >
+        {options.map((option) => {
+          const active = option.value === value
+          return (
+            <DropdownMenuItem
+              key={option.value}
+              data-testid={`developer-effort-option-${option.value}`}
+              onSelect={() => onChange(option.value)}
+              className={cn(
+                'rounded-[8px] px-3 py-2 font-data outline-none transition-colors focus:bg-[var(--s-surface)]',
+                active
+                  ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
+                  : 'text-[var(--s-text-secondary)]',
+              )}
+            >
+              <span className="min-w-0">
+                <span className="block truncate text-[14px] font-semibold">{option.label}</span>
+                <span className={cn('mt-0.5 block text-[12px] leading-snug', active ? 'text-[var(--s-accent)] opacity-80' : 'text-[var(--s-text-muted)]')}>
+                  {option.detail}
+                </span>
+              </span>
+            </DropdownMenuItem>
+          )
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function useDeveloperModels(gatewayModels: string[]) {
+  const catalog = useCatalog()
+  return useMemo(() => {
+    const byId = catalog.data ?? new Map<string, CatalogModel>()
+    const ids = gatewayModels.length
+      ? gatewayModels
+      : [
+          'groq/llama-3.1-8b-instant',
+          'gemini-2.5-flash-lite',
+          'deepseek-v4-flash',
+          'openai/gpt-5-mini',
+        ]
+    const seen = new Set<string>()
+    const out: ChatModelOption[] = []
+    for (const id of ids) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      const catalogModel = byId.get(id)
+      out.push(catalogModel ? toModelOption(catalogModel) : fallbackModelOption(id))
+    }
+    if (out.length < 16 && byId.size > 0) {
+      for (const model of byId.values()) {
+        if (seen.has(model.id) || model.outputMicroPerM <= 0) continue
+        seen.add(model.id)
+        out.push(toModelOption(model))
+        if (out.length >= 32) break
+      }
+    }
+    return out
+  }, [catalog.data, gatewayModels])
+}
+
+export function DeveloperChatPage() {
+  const { address } = useAccount()
+  const lots = useMyLots(address)
+  const logRef = useRef<HTMLElement | null>(null)
+  const [spendKey, setSpendKey] = useState<StoredSpendKey | null>(() => getActiveSpendKey())
+  const [gatewayUrl, setGatewayUrl] = useState('http://127.0.0.1:8088/v1')
+  const [apiKey, setApiKey] = useState('sk-inference-bazaar')
+  const [gatewayModels, setGatewayModels] = useState<string[]>([])
+  const [model, setModel] = useState('groq/llama-3.1-8b-instant')
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [input, setInput] = useState('')
+  const [thinking, setThinking] = useState<ThinkingLevel>('low')
+  const [busy, setBusy] = useState(false)
+  const [gatewayOpen, setGatewayOpen] = useState(false)
+  const [gatewayState, setGatewayState] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
+  const [gatewayError, setGatewayError] = useState<string | null>(null)
+
+  const activeSpendKey = spendKey && isSpendKeyUsable(spendKey) ? spendKey : null
+  const modelOptions = useDeveloperModels(gatewayModels)
+  const selectedModel = activeSpendKey?.model || model
+  const selected = modelOptions.find((m) => m.id === selectedModel) ?? fallbackModelOption(selectedModel)
+  const thinkingOptions = useMemo(() => thinkingOptionsFor(selectedModel), [selectedModel])
+  const statusTone = gatewayState === 'ok' ? 'emerald' : gatewayState === 'error' ? 'crimson' : 'neutral'
+  const activeLots = (lots.data ?? []).filter(
+    (l) => l.qtyTokens - l.lockedTokens > 0n && Number(l.expiry) * 1000 > Date.now(),
+  )
+  const lastMessageLength = messages[messages.length - 1]?.content.length ?? 0
+
+  useEffect(() => {
+    if (messages.length === 0) return
+    let secondFrame = 0
+    const frame = requestAnimationFrame(() => {
+      const log = logRef.current
+      if (!log) return
+      log.scrollTop = log.scrollHeight
+      secondFrame = requestAnimationFrame(() => {
+        const nextLog = logRef.current
+        if (nextLog) nextLog.scrollTop = nextLog.scrollHeight
+      })
+    })
+    return () => {
+      cancelAnimationFrame(frame)
+      cancelAnimationFrame(secondFrame)
+    }
+  }, [busy, messages.length, lastMessageLength])
+
+  useEffect(() => {
+    const refresh = () => setSpendKey(getActiveSpendKey())
+    window.addEventListener(SPEND_KEY_EVENT, refresh)
+    window.addEventListener('storage', refresh)
+    refresh()
+    return () => {
+      window.removeEventListener(SPEND_KEY_EVENT, refresh)
+      window.removeEventListener('storage', refresh)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!activeSpendKey) return
+    setGatewayUrl(`${activeSpendKey.venueUrl}/v1`)
+    setApiKey(spendKeyLabel(activeSpendKey))
+    setModel(activeSpendKey.model)
+    void refreshGatewayModels(activeSpendKey.venueUrl, '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSpendKey?.id])
+
+  useEffect(() => {
+    if (activeSpendKey) return
+    if (modelOptions.length > 0 && !modelOptions.some((m) => m.id === model)) {
+      setModel(modelOptions[0]!.id)
+    }
+  }, [activeSpendKey, model, modelOptions])
+
+  useEffect(() => {
+    if (!thinkingOptions.some((option) => option.value === thinking)) {
+      setThinking(thinkingOptions[thinkingOptions.length - 1]?.value ?? 'off')
+    }
+  }, [thinking, thinkingOptions])
+
+  useEffect(() => {
+    void refreshGatewayModels()
+    // Only probe the default once on mount; editing the URL should not fire
+    // requests on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function refreshGatewayModels(nextUrl = activeSpendKey?.venueUrl ?? gatewayUrl, nextApiKey = activeSpendKey ? '' : apiKey) {
+    const base = normalizeGatewayUrl(nextUrl)
+    if (!base) return
+    setGatewayState('checking')
+    setGatewayError(null)
+    try {
+      const headers: Record<string, string> = {}
+      if (nextApiKey) headers.authorization = `Bearer ${nextApiKey}`
+      const res = await fetch(`${base}/models`, {
+        headers,
+      })
+      const text = await res.text()
+      if (!res.ok) throw new Error(`${res.status}: ${text}`)
+      const json = JSON.parse(text) as { data?: Array<{ id?: string }> }
+      const ids = (json.data ?? []).map((m) => m.id).filter((id): id is string => !!id)
+      if (ids.length === 0) throw new Error('gateway returned no models')
+      setGatewayModels(ids)
+      setModel((current) => (activeSpendKey?.model ? activeSpendKey.model : ids.includes(current) ? current : ids[0]!))
+      setGatewayState('ok')
+    } catch (e) {
+      setGatewayModels([])
+      setGatewayState('error')
+      setGatewayError(shortError(e))
+    }
+  }
+
+  function appendAssistantDelta(id: string, delta: string) {
+    setMessages((current) =>
+      current.map((m) => (m.id === id ? { ...m, content: `${m.content}${delta}`, streaming: true } : m)),
+    )
+  }
+
+  async function sendWithSpendKey(key: StoredSpendKey, nextMessages: ChatMessage[], assistantId: string) {
+    const base = normalizeGatewayUrl(key.venueUrl)
+    if (!base) throw new Error('operator URL missing')
+    const body = {
+      model: key.model,
+      max_tokens: DEFAULT_CHAT_MAX_TOKENS,
+      messages: [
+        { role: 'system', content: buildSystemPrompt(thinking) },
+        ...nextMessages.map((m) => ({ role: m.role, content: m.content })),
+      ],
+    }
+    const started = performance.now()
+    const result = await streamChat(
+      base,
+      body,
+      await spendVoucherHeaders(key, key.ackedTokens),
+      (delta) => appendAssistantDelta(assistantId, delta),
+    )
+    const nextCumulative = Number(result.inferenceBazaar?.nextCumulative)
+    const servedTokens = Number(result.inferenceBazaar?.servedTokens)
+    const promptTokens = Number(result.usage?.prompt_tokens ?? (key.instrumentId.endsWith(':input') && Number.isFinite(servedTokens) ? servedTokens : 0))
+    const completionTokens = Number(result.usage?.completion_tokens ?? (!key.instrumentId.endsWith(':input') && Number.isFinite(servedTokens) ? servedTokens : 0))
+    const totalTokens = Number(result.usage?.total_tokens ?? promptTokens + completionTokens)
+    let billedTokens = key.instrumentId.endsWith(':input') ? promptTokens : completionTokens
+    let remainingTokens = Math.max(0, key.maxTokens - key.ackedTokens - billedTokens)
+    if (Number.isFinite(nextCumulative) && nextCumulative >= key.ackedTokens) {
+      billedTokens = Math.max(0, nextCumulative - key.ackedTokens)
+      remainingTokens = Math.max(0, key.maxTokens - nextCumulative)
+      const updated = updateSpendKey(key.id, { ackedTokens: nextCumulative })
+      if (updated) setSpendKey(updated)
+      try {
+        const ack = await fetch(`${base}/spend/ack`, {
+          method: 'POST',
+          headers: await spendVoucherHeaders({ ...key, ackedTokens: nextCumulative }, nextCumulative),
+        })
+        if (!ack.ok) throw new Error(`${ack.status}: ${await ack.text()}`)
+      } catch (e) {
+        setGatewayError(`Ack pending: ${shortError(e)}`)
+      }
+    }
+    const priceMicroPerM = priceMicroPerMForKey(key, lots.data, selected)
+    const costMicro = priceMicroPerM !== undefined ? Math.round((priceMicroPerM * billedTokens) / 1_000_000) : null
+    return {
+      id: assistantId,
+      role: 'assistant' as const,
+      content: result.content,
+      usage: result.usage,
+      spend: {
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        billedTokens,
+        remainingTokens,
+        costMicro,
+      },
+      ms: Math.round(performance.now() - started),
+      finishReason: result.finishReason,
+      streaming: false,
+    }
+  }
+
+  async function sendWithGateway(nextMessages: ChatMessage[], assistantId: string) {
+    const base = normalizeGatewayUrl(gatewayUrl)
+    if (!base) throw new Error('gateway URL missing')
+    const body: {
+      model: string
+      max_tokens: number
+      messages: { role: 'system' | 'user' | 'assistant'; content: string }[]
+      reasoning_effort?: Exclude<ThinkingLevel, 'off'>
+    } = {
+      model,
+      max_tokens: DEFAULT_CHAT_MAX_TOKENS,
+      messages: [
+        { role: 'system', content: buildSystemPrompt(thinking) },
+        ...nextMessages.map((m) => ({ role: m.role, content: m.content })),
+      ],
+    }
+    if (supportsNativeThinking(model) && thinking !== 'off') {
+      body.reasoning_effort = thinking
+    }
+    const started = performance.now()
+    const result = await streamChat(
+      base,
+      body,
+      { authorization: `Bearer ${apiKey || 'sk-inference-bazaar'}` },
+      (delta) => appendAssistantDelta(assistantId, delta),
+    )
+    return {
+      id: assistantId,
+      role: 'assistant' as const,
+      content: result.content,
+      usage: result.usage,
+      ms: Math.round(performance.now() - started),
+      finishReason: result.finishReason,
+      streaming: false,
+    }
+  }
+
+  async function send() {
+    const prompt = input.trim()
+    if (!prompt || busy) return
+    const user: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: prompt }
+    const assistantId = `a-${Date.now()}`
+    const nextMessages = [...messages, user]
+    setMessages([...nextMessages, { id: assistantId, role: 'assistant', content: '', streaming: true }])
+    setInput('')
+    setBusy(true)
+    try {
+      const assistant = activeSpendKey
+        ? await sendWithSpendKey(activeSpendKey, nextMessages, assistantId)
+        : await sendWithGateway(nextMessages, assistantId)
+      setMessages((current) => current.map((m) => (m.id === assistantId ? assistant : m)))
+      setGatewayState('ok')
+    } catch (e) {
+      const message = shortError(e)
+      setMessages((current) =>
+        current.map((m) =>
+          m.id === assistantId
+            ? { id: assistantId, role: 'assistant', content: message, error: true, streaming: false }
+            : m,
+        ),
+      )
+      setGatewayState('error')
+      setGatewayError(message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <header className="shrink-0 border-b border-[var(--s-divider)] bg-[color-mix(in_srgb,var(--s-bg)_82%,transparent)] px-3 py-3 backdrop-blur-xl sm:px-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <ProviderMark provider={selected.provider} size="sm" />
+              <h1 className="truncate font-display text-[20px] font-semibold text-[var(--s-text)]">Chat</h1>
+              {activeSpendKey && <Badge tone="emerald">Lot key</Badge>}
+              <Badge tone={statusTone}>{gatewayStateLabel(gatewayState)}</Badge>
+            </div>
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
+              <span className="truncate">{selected.provider}</span>
+              <span className="text-[var(--s-text-subtle)]">/</span>
+              <span>{selected.outputMicroPerM ? pricePerM(selected.outputMicroPerM) : 'metered'} out</span>
+              <span className="text-[var(--s-text-subtle)]">/</span>
+                <span>
+                  {activeSpendKey
+                  ? `${chatTokenCount(Math.max(0, activeSpendKey.maxTokens - activeSpendKey.ackedTokens))} key left`
+                  : `${lots.isLoading ? '...' : activeLots.length} active lots`}
+                </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setGatewayOpen((v) => !v)}
+              aria-expanded={gatewayOpen}
+              className="btn-secondary h-9 whitespace-nowrap"
+            >
+              <span className={cn(activeSpendKey ? 'i-ph:key' : 'i-ph:terminal-window', 'text-[16px]')} />
+              {activeSpendKey ? 'Key' : 'Gateway'}
+            </button>
+            <Link to="/developer" className="btn-secondary h-9 whitespace-nowrap">
+              <span className="i-ph:key text-[16px]" /> API keys
+            </Link>
+          </div>
+        </div>
+
+        {gatewayOpen && activeSpendKey && (
+          <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(220px,320px)_auto]">
+            <div className="flex h-9 min-w-0 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-2.5">
+              <span className="i-ph:hard-drives shrink-0 text-[15px] text-[var(--s-text-subtle)]" />
+              <span className="min-w-0 flex-1 truncate font-data text-[14px] text-[var(--s-text)]">
+                {activeSpendKey.venueUrl}
+              </span>
+            </div>
+            <div className="flex h-9 min-w-0 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-2.5">
+              <span className="i-ph:fingerprint shrink-0 text-[15px] text-[var(--s-text-subtle)]" />
+              <span className="min-w-0 flex-1 truncate font-data text-[14px] text-[var(--s-text)]">
+                {spendKeyLabel(activeSpendKey)}
+              </span>
+            </div>
+            <button
+              onClick={() => void refreshGatewayModels(activeSpendKey.venueUrl, '')}
+              className="btn-secondary h-9 justify-center"
+              title="Refresh operator models"
+            >
+              <span className={cn(gatewayState === 'checking' ? 'i-ph:circle-notch animate-spin' : 'i-ph:arrow-clockwise', 'text-[16px]')} />
+              Refresh
+            </button>
+          </div>
+        )}
+
+        {gatewayOpen && !activeSpendKey && (
+          <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(220px,320px)_auto]">
+            <label className="flex h-9 min-w-0 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-2.5">
+              <span className="i-ph:terminal-window shrink-0 text-[15px] text-[var(--s-text-subtle)]" />
+              <input
+                aria-label="Gateway URL"
+                value={gatewayUrl}
+                onChange={(e) => setGatewayUrl(e.target.value)}
+                className="h-full min-w-0 flex-1 bg-transparent font-data text-[14px] text-[var(--s-text)] outline-none"
+              />
+            </label>
+            <label className="flex h-9 min-w-0 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-2.5">
+              <span className="i-ph:key shrink-0 text-[15px] text-[var(--s-text-subtle)]" />
+              <input
+                aria-label="Gateway API key"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                className="h-full min-w-0 flex-1 bg-transparent font-data text-[14px] text-[var(--s-text)] outline-none"
+              />
+            </label>
+            <button
+              onClick={() => void refreshGatewayModels()}
+              className="btn-secondary h-9 justify-center"
+              title="Refresh gateway models"
+            >
+              <span className={cn(gatewayState === 'checking' ? 'i-ph:circle-notch animate-spin' : 'i-ph:arrow-clockwise', 'text-[16px]')} />
+              Refresh
+            </button>
+          </div>
+        )}
+      </header>
+
+      <section ref={logRef} data-testid="developer-chat-log" className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6">
+        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col gap-3">
+          {messages.length === 0 ? (
+            <div className="w-full max-w-[680px] self-center pt-[clamp(32px,12dvh,112px)]">
+              <div className="flex items-center gap-3">
+                <ProviderMark provider={selected.provider} />
+                <div className="min-w-0">
+                  <h2 className="font-display text-[24px] font-semibold leading-tight text-[var(--s-text)]">
+                    Lot-backed chat
+                  </h2>
+                  <p className="mt-1 font-body text-[15px] leading-relaxed text-[var(--s-text-muted)]">
+                    {activeSpendKey
+                      ? `Spending through ${activeSpendKey.model}.`
+                      : 'Spend through the local gateway with any OpenAI-compatible model.'}
+                  </p>
+                </div>
+              </div>
+              {gatewayError && (
+                <div className="mt-4 flex items-center gap-2 rounded-[8px] border border-[var(--s-crimson)]/25 bg-[var(--s-crimson-soft)] px-3 py-2 font-data text-[13px] text-[var(--s-crimson)]">
+                  <span className="i-ph:warning-circle shrink-0 text-[16px]" />
+                  <span className="min-w-0 truncate">{gatewayError}</span>
+                </div>
+              )}
+              <div className="mt-5 grid gap-2 sm:grid-cols-3">
+                {STARTER_PROMPTS.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => setInput(prompt)}
+                    className="min-h-[74px] rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-3 py-2 text-left font-data text-[13px] leading-relaxed text-[var(--s-text-secondary)] transition-colors hover:border-[var(--s-accent)]/45 hover:text-[var(--s-accent)]"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            messages.map((m) => (
+              <div key={m.id} className={cn('flex items-start gap-2', m.role === 'user' ? 'justify-end' : 'justify-start')}>
+                {m.role === 'assistant' && (
+                  <span
+                    className={cn(
+                      'mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] border',
+                      m.error
+                        ? 'border-[var(--s-crimson)]/35 bg-[var(--s-crimson-soft)] text-[var(--s-crimson)]'
+                        : 'border-[var(--s-brand)]/35 bg-[var(--s-brand-soft)] text-[var(--s-brand)]',
+                    )}
+                  >
+                    <span className={cn(m.error ? 'i-ph:warning-circle' : 'i-ph:sparkle', 'text-[15px]')} />
+                  </span>
+                )}
+                <div
+                  className={cn(
+                    'min-w-0 max-w-[min(86%,720px)] overflow-hidden rounded-[10px] border px-3 py-2',
+                    m.role === 'user'
+                      ? 'border-[var(--s-accent)]/30 bg-[var(--s-accent-soft)] text-[var(--s-text)]'
+                      : m.error
+                        ? 'border-[var(--s-crimson)]/30 bg-[var(--s-crimson-soft)] text-[var(--s-crimson)]'
+                        : 'border-[var(--s-border)] bg-[var(--s-surface)] text-[var(--s-text-secondary)]',
+                  )}
+                >
+                  {m.role === 'assistant' && !m.error ? (
+                    <ChatMarkdown content={m.content} />
+                  ) : (
+                    <div className="whitespace-pre-wrap break-words font-body text-[15px] leading-relaxed">{m.content}</div>
+                  )}
+                  {m.streaming && !m.error && (
+                    <span className="mt-1 inline-block h-4 w-1 animate-pulse rounded-full bg-[var(--s-accent)] align-middle" />
+                  )}
+                  {(m.spend || m.usage || m.ms !== undefined || m.finishReason === 'length') && (
+                    <div className="mt-2 border-t border-[var(--s-divider)] pt-2 font-data text-[12px] leading-relaxed text-[var(--s-text-muted)]">
+                      {m.spend ? (
+                        <ChatSpendLine spend={m.spend} ms={m.ms} finishReason={m.finishReason} />
+                      ) : (
+                        <span>
+                          {m.usage?.total_tokens ?? '...'} tokens{m.ms !== undefined ? ` · ${m.ms} ms` : ''}
+                          {m.finishReason === 'length' ? ' · hit limit' : ''}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
+      <footer className="shrink-0 border-t border-[var(--s-divider)] bg-[color-mix(in_srgb,var(--s-bg)_86%,transparent)] p-3 backdrop-blur-xl sm:p-4">
+        <div className="mx-auto max-w-4xl overflow-visible rounded-[12px] border border-[var(--s-border)] bg-[var(--s-surface)] shadow-[0_10px_40px_rgba(0,0,0,0.12)]">
+          <textarea
+            data-testid="developer-chat-input"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                void send()
+              }
+            }}
+            rows={3}
+            className="max-h-[28dvh] min-h-[92px] w-full resize-none bg-transparent px-3 py-3 font-body text-[15px] text-[var(--s-text)] outline-none placeholder:text-[var(--s-text-subtle)]"
+            placeholder="Message your lot-backed model..."
+          />
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--s-divider)] px-2 py-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+              <ChatModelPicker
+                value={selectedModel}
+                models={activeSpendKey ? [selected] : modelOptions}
+                onChange={activeSpendKey ? () => setModel(activeSpendKey.model) : setModel}
+                loading={gatewayState === 'checking'}
+                compact
+                placement="top"
+                className="w-[min(100%,360px)]"
+              />
+              <EffortPicker value={thinking} options={thinkingOptions} onChange={setThinking} />
+            </div>
+            <button
+              data-testid="developer-chat-send"
+              onClick={() => void send()}
+              disabled={busy || !input.trim()}
+              className="btn-primary h-9 w-11 !px-0"
+              title="Send"
+            >
+              <span className={cn(busy ? 'i-ph:circle-notch animate-spin' : 'i-ph:paper-plane-tilt', 'text-[18px]')} />
+            </button>
+          </div>
+        </div>
+      </footer>
+    </div>
   )
 }
 
@@ -228,27 +1445,6 @@ export default function DeveloperPage() {
     query: { enabled: !!address },
   })
 
-  if (!isConnected || !address) {
-    return (
-      <div>
-        <PageHeader title="Developer" subtitle="Your inference credits, as an OpenAI-compatible API." />
-        <div className="flex flex-col items-center gap-4 px-6 py-20 text-center">
-          <span className="i-ph:code text-[44px] text-[var(--s-text-subtle)]" />
-          <p className="max-w-sm font-body text-[15px] text-[var(--s-text-muted)]">
-            Connect to mint API keys from your credit lots and watch them draw down on-chain.
-          </p>
-          <ConnectKitButton.Custom>
-            {({ show }) => (
-              <button onClick={show} className="btn-primary h-11">
-                <span className="i-ph:wallet text-[18px]" /> Connect wallet
-              </button>
-            )}
-          </ConnectKitButton.Custom>
-        </div>
-      </div>
-    )
-  }
-
   const all = lots.data ?? []
   const remaining = all.reduce((n, l) => n + Number(l.qtyTokens - l.lockedTokens), 0)
   const spent = all.reduce((n, l) => n + Math.max(0, Number(l.filledTokens - l.qtyTokens)), 0)
@@ -259,49 +1455,88 @@ export default function DeveloperPage() {
     <div>
       <PageHeader
         title="Developer"
-        subtitle="Your inference credits, as an OpenAI-compatible API."
+        subtitle="API keys, credit spend, and integration paths."
         right={
-          all.length > 0 ? (
-            <button
-              onClick={() => void meter.sync(all, registry.data)}
-              disabled={meter.syncing}
-              className="btn-secondary h-9 whitespace-nowrap"
-              title="Sign a read-only query to fetch live, unsettled spend from your operators"
-            >
-              <span className={meter.syncing ? 'i-ph:circle-notch animate-spin text-[16px]' : 'i-ph:pulse text-[16px]'} />
-              {meter.syncing ? 'Signing…' : meter.rows ? 'Refresh live usage' : 'Sync live usage'}
-            </button>
-          ) : undefined
+          <>
+            <Link to="/developer/chat" className="btn-primary h-9 whitespace-nowrap">
+              <span className="i-ph:chat-circle-dots text-[16px]" /> Open chat
+            </Link>
+            {isConnected && all.length > 0 ? (
+              <button
+                onClick={() => void meter.sync(all, registry.data)}
+                disabled={meter.syncing}
+                className="btn-secondary h-9 whitespace-nowrap"
+                title="Sign a read-only query to fetch live, unsettled spend from your operators"
+              >
+                <span className={meter.syncing ? 'i-ph:circle-notch animate-spin text-[16px]' : 'i-ph:pulse text-[16px]'} />
+                {meter.syncing ? 'Signing...' : meter.rows ? 'Refresh usage' : 'Sync usage'}
+              </button>
+            ) : null}
+          </>
         }
       />
 
       <div className="px-4 py-4 sm:px-6">
-        <div className="panel grid grid-cols-2 divide-x divide-[var(--s-divider)] sm:grid-cols-4">
-          <Stat label="Credits left" value={lots.isLoading ? '…' : tokens(remaining)} tone="emerald" sub="spendable tokens" />
-          <Stat
-            label="Spent"
-            value={lots.isLoading ? '…' : tokens(spent)}
-            sub={inflight != null && inflight > 0 ? `+${tokens(inflight)} in-flight` : 'drawn down on-chain'}
-          />
-          <Stat label="Active keys" value={lots.isLoading ? '…' : liveKeys.length} tone="accent" sub="usable lots" />
-          <Stat
-            label="Settlement balance"
-            value={settlementBalance.data !== undefined ? compactUsd(Number(settlementBalance.data)) : '…'}
-            sub="deposited tsUSD"
-          />
-        </div>
-        {meter.error && (
-          <p className="mt-2 font-data text-[12px] text-[var(--s-crimson)]">Live usage: {meter.error}</p>
+        {isConnected ? (
+          <>
+            <div className="panel grid grid-cols-2 divide-x divide-[var(--s-divider)] sm:grid-cols-4">
+              <Stat label="Credits left" value={lots.isLoading ? '…' : tokens(remaining)} tone="emerald" sub="spendable tokens" />
+              <Stat
+                label="Spent"
+                value={lots.isLoading ? '…' : tokens(spent)}
+                sub={inflight != null && inflight > 0 ? `+${tokens(inflight)} in-flight` : 'drawn down on-chain'}
+              />
+              <Stat label="Active keys" value={lots.isLoading ? '…' : liveKeys.length} tone="accent" sub="usable lots" />
+              <Stat
+                label="Settlement balance"
+                value={settlementBalance.data !== undefined ? compactUsd(Number(settlementBalance.data)) : '…'}
+                sub="deposited tsUSD"
+              />
+            </div>
+            {meter.error && (
+              <p className="mt-2 font-data text-[12px] text-[var(--s-crimson)]">Live usage: {meter.error}</p>
+            )}
+          </>
+        ) : (
+          <Panel bodyClassName="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="i-ph:key text-[24px] text-[var(--s-text-subtle)]" />
+              <p className="font-body text-[15px] text-[var(--s-text-muted)]">
+                Connect a wallet to mint lot-backed API keys and view on-chain drawdown.
+              </p>
+            </div>
+            <ConnectKitButton.Custom>
+              {({ show }) => (
+                <button onClick={show} className="btn-primary h-10">
+                  <span className="i-ph:wallet text-[17px]" /> Connect wallet
+                </button>
+              )}
+            </ConnectKitButton.Custom>
+          </Panel>
         )}
       </div>
 
-      <div className="px-4 sm:px-6">
+      <div className="px-4 pb-4 sm:px-6">
         <Quickstart />
       </div>
 
-      <div className="px-4 py-4 sm:px-6">
+      <div className="px-4 pb-4 sm:px-6">
         <h2 className="mb-2 font-display text-[17px] font-semibold text-[var(--s-text)]">API keys</h2>
-        {lots.isLoading ? (
+        {!isConnected || !address ? (
+          <Panel bodyClassName="flex flex-col items-center gap-3 px-6 py-12 text-center">
+            <span className="i-ph:wallet text-[36px] text-[var(--s-text-subtle)]" />
+            <p className="max-w-sm font-body text-[15px] text-[var(--s-text-muted)]">
+              Wallet connection is only needed for key minting and live usage reads.
+            </p>
+            <ConnectKitButton.Custom>
+              {({ show }) => (
+                <button onClick={show} className="btn-primary h-10">
+                  <span className="i-ph:wallet text-[16px]" /> Connect wallet
+                </button>
+              )}
+            </ConnectKitButton.Custom>
+          </Panel>
+        ) : lots.isLoading ? (
           <p className="px-1 py-6 font-body text-[15px] text-[var(--s-text-muted)]">Reading your lots from the chain…</p>
         ) : all.length === 0 ? (
           <Panel bodyClassName="flex flex-col items-center gap-3 px-6 py-12 text-center">

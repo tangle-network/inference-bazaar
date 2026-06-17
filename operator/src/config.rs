@@ -123,7 +123,7 @@ impl OperatorConfig {
         // Boot instrument: `<model>:<kind>` (more arrive via list_instrument
         // jobs on blueprint venues). A standalone venue picks its market here.
         let boot_instrument = std::env::var("INFERENCE_BAZAAR_INSTRUMENT")
-            .unwrap_or_else(|_| "anthropic/claude-opus-4-8:output".to_string());
+            .unwrap_or_else(|_| "groq/llama-3.1-8b-instant:output".to_string());
         let (model_id, token_kind) = match boot_instrument.rsplit_once(':') {
             Some((m, k)) if k == "input" || k == "output" => (m.to_string(), k.to_string()),
             _ => (boot_instrument.clone(), "output".to_string()),

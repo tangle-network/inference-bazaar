@@ -12,7 +12,8 @@ const RPC = process.env.RPC ?? 'http://127.0.0.1:8545'
 const SETTLEMENT = process.env.SETTLEMENT
 const USD = process.env.USD
 const VENUE = process.env.VENUE ?? 'http://127.0.0.1:9210'
-const INSTRUMENT = 'claude-sonnet-4-6:output'
+const INSTRUMENT = process.env.INSTRUMENT ?? 'groq/llama-3.1-8b-instant:output'
+const STREAM_MUST_INCLUDE = process.env.STREAM_MUST_INCLUDE
 
 // anvil #0 = the operator/issuer (the venue signs quotes with it), #3 = buyer.
 const operator = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80')
@@ -22,8 +23,7 @@ const settlementAbi = parseAbi([
   'function deposit(uint256 amount)',
   'function depositCollateral(uint256 amount)',
   'function lots(bytes32) view returns (address holder, address issuer, bytes32 instrument, uint64 qtyTokens, uint64 lockedTokens, uint64 expiry, uint128 notionalMicro)',
-  'function spendSettled(bytes32 permitDigest) view returns (uint64)',
-  'function spendPermitDigest((bytes32 lotId, address sessionKey, uint64 maxTokens, uint64 expiry) p) view returns (bytes32)',
+  'function spendSettled(bytes32 lotId) view returns (uint64)',
   'function revokeSpendKey((bytes32 lotId, address sessionKey, uint64 maxTokens, uint64 expiry) permit)',
 ])
 const usdAbi = parseAbi([
@@ -190,11 +190,7 @@ if (bare.status !== 401) throw new Error(`bare request returned ${bare.status}, 
 const spendFlush = await post(`${VENUE}/v1/spend/flush`, {})
 if (spendFlush.settled !== 1) throw new Error(`spend flush: ${JSON.stringify(spendFlush)}`)
 
-const digest = await pub.readContract({
-  address: SETTLEMENT, abi: settlementAbi, functionName: 'spendPermitDigest',
-  args: [{ lotId, sessionKey: session.address, maxTokens, expiry }],
-})
-const settled = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [digest] })
+const settled = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [lotId] })
 const lot1 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'lots', args: [lotId] })
 if (Number(settled) !== served1) throw new Error(`on-chain settled ${settled}, served ${served1}`)
 if (Number(lot0[3]) - Number(lot1[3]) !== served1) throw new Error('lot quantity did not debit by served tokens')
@@ -205,7 +201,7 @@ const served2 = c2.usage.completion_tokens
 acked = c2['inference-bazaar'].nextCumulative
 await ack(acked)
 await post(`${VENUE}/v1/spend/flush`, {})
-const settledCum = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [digest] })
+const settledCum = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [lotId] })
 const lot2 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'lots', args: [lotId] })
 if (Number(settledCum) !== served1 + served2) throw new Error(`cumulative settled ${settledCum} != ${served1 + served2}`)
 
@@ -235,7 +231,10 @@ const events = (await streamRes.text())
 if (events[events.length - 1] !== '[DONE]') throw new Error('stream did not terminate with [DONE]')
 const parsed = events.filter((e) => e !== '[DONE]').map((e) => JSON.parse(e))
 const streamedText = parsed.map((c) => c.choices?.[0]?.delta?.content ?? '').join('')
-if (!streamedText.includes('stub reply')) throw new Error(`streamed content wrong: "${streamedText}"`)
+if (STREAM_MUST_INCLUDE && !streamedText.includes(STREAM_MUST_INCLUDE)) {
+  throw new Error(`streamed content wrong: "${streamedText}"`)
+}
+if (!streamedText.trim()) throw new Error('streamed content empty')
 const ibEv = parsed.find((c) => c['inference-bazaar'])
 if (!ibEv) throw new Error('operator did not emit an inference-bazaar event in the stream')
 const served3 = ibEv['inference-bazaar'].servedTokens
@@ -244,7 +243,7 @@ if (acked !== served1 + served2 + served3)
   throw new Error(`stream nextCumulative ${acked} != ${served1 + served2 + served3}`)
 await ack(acked)
 await post(`${VENUE}/v1/spend/flush`, {})
-const settledStream = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [digest] })
+const settledStream = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [lotId] })
 const lot3 = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'lots', args: [lotId] })
 if (Number(settledStream) !== served1 + served2 + served3)
   throw new Error(`stream settled ${settledStream} != ${served1 + served2 + served3}`)
@@ -269,7 +268,7 @@ const afterRevoke = await fetch(`${VENUE}/v1/chat/completions`, {
   body: JSON.stringify({ model: reg.model, messages: [{ role: 'user', content: 'after revoke' }], max_tokens: 256 }),
 })
 if (afterRevoke.status !== 401) throw new Error(`post-revocation serve returned ${afterRevoke.status}, want 401 (channel dropped)`)
-const settledAfterRevoke = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [digest] })
+const settledAfterRevoke = await pub.readContract({ address: SETTLEMENT, abi: settlementAbi, functionName: 'spendSettled', args: [lotId] })
 if (Number(settledAfterRevoke) !== Number(settledStream)) throw new Error('revoked channel must not bill further')
 
 console.log('')

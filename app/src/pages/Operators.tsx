@@ -30,6 +30,16 @@ const STAKING_ABI = [
   },
 ] as const
 
+function formatTntBond(bond: bigint | undefined) {
+  if (bond === undefined) return '…'
+  const tnt = Number(formatUnits(bond, 18))
+  return `${tnt.toLocaleString('en-US', { maximumFractionDigits: tnt >= 100 ? 0 : 2 })} TNT`
+}
+
+function displayVenueUrl(url: string | undefined) {
+  return url ? url.replace(/^https?:\/\//, '').replace(/\/$/, '') : '—'
+}
+
 /** Buyer-side demand: request a market operators aren't quoting yet, and see the
  * aggregated demand book (what's wanted vs already quoted) across the operator set. */
 function RequestMarket({ venues, servedIds }: { venues: Venue[] | undefined; servedIds: Set<string> }) {
@@ -157,6 +167,29 @@ export default function OperatorsPage() {
     ]),
     query: { enabled: addrs.length > 0 },
   })
+  const rows = useMemo(
+    () =>
+      addrs.map((addr, i) => {
+        const venue = venueByOp.get(addr.toLowerCase())
+        return {
+          addr,
+          bond: bonds.data?.[i]?.result as bigint | undefined,
+          collateral: issuerFunds.data?.[i * 2]?.result as bigint | undefined,
+          liability: issuerFunds.data?.[i * 2 + 1]?.result as bigint | undefined,
+          serving: venue?.healthy ?? false,
+          venue,
+        }
+      }).sort((a, b) => {
+        if (a.serving !== b.serving) return a.serving ? -1 : 1
+        const la = a.venue?.latencyMs ?? Infinity
+        const lb = b.venue?.latencyMs ?? Infinity
+        if (la !== lb) return la - lb
+        const ba = a.bond ?? 0n
+        const bb = b.bond ?? 0n
+        return bb > ba ? 1 : bb < ba ? -1 : 0
+      }),
+    [addrs, bonds.data, issuerFunds.data, venueByOp],
+  )
 
   return (
     <div>
@@ -204,93 +237,138 @@ export default function OperatorsPage() {
               Discovering operators across instances…
             </div>
           )}
-          {addrs
-            .map((addr, i) => ({
-              addr,
-              bond: bonds.data?.[i]?.result as bigint | undefined,
-              venue: venueByOp.get(addr.toLowerCase()),
-              collateral: issuerFunds.data?.[i * 2]?.result as bigint | undefined,
-              liability: issuerFunds.data?.[i * 2 + 1]?.result as bigint | undefined,
-            }))
-            // Best-first: serving operators, then lowest latency, then biggest bond.
-            .sort((a, b) => {
-              const sa = a.venue?.healthy ? 1 : 0
-              const sb = b.venue?.healthy ? 1 : 0
-              if (sa !== sb) return sb - sa
-              const la = a.venue?.latencyMs ?? Infinity
-              const lb = b.venue?.latencyMs ?? Infinity
-              if (la !== lb) return la - lb
-              const ba = a.bond ?? 0n
-              const bb = b.bond ?? 0n
-              return bb > ba ? 1 : bb < ba ? -1 : 0
-            })
-            .map(({ addr, bond, venue, collateral, liability }) => {
-              const serving = venue?.healthy ?? false
-              const fast = (venue?.latencyMs ?? Infinity) < 400
-              return (
-                <div
-                  key={addr}
-                  className="flex flex-wrap items-center gap-4 border-b border-[var(--s-divider)] px-4 py-4 last:border-0"
-                >
-                  <span className="relative overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
-                    <Identicon address={addr} size={36} />
-                    <span
-                      className={cn(
-                        'absolute -bottom-0 -right-0 h-3 w-3 rounded-full ring-2 ring-[var(--s-panel)]',
-                        serving ? 'bg-[var(--s-emerald)]' : 'bg-[var(--s-text-subtle)]',
-                      )}
-                      title={serving ? 'serving' : 'on-chain only'}
-                    />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <a
-                        href={`${CHAIN.explorer}/address/${addr}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-data text-[15px] font-semibold text-[var(--s-text)] hover:text-[var(--s-accent)]"
-                      >
-                        {truncAddr(addr)}
-                      </a>
-                      <Badge tone="emerald" icon="i-ph:shield-check-fill">bonded</Badge>
-                      {serving && <Badge tone="accent">quoting</Badge>}
-                      {venue?.onion && (
-                        <Badge tone="neutral" icon="i-ph:shield">.onion</Badge>
+          {!registry.isLoading && !registry.isError && rows.length === 0 && (
+            <div className="px-4 py-8 text-center font-data text-[15px] text-[var(--s-text-muted)]">
+              No operators are active for blueprint {CHAIN.blueprintId}.
+            </div>
+          )}
+          {rows.length > 0 && (
+            <>
+              <div className="md:hidden">
+                {rows.map((row) => (
+                  <div
+                    key={row.addr}
+                    className="border-b border-[var(--s-divider)] px-4 py-4 last:border-0"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
+                        <Identicon address={row.addr} size={36} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <a
+                          href={`${CHAIN.explorer}/address/${row.addr}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-data text-[15px] font-semibold text-[var(--s-text)] hover:text-[var(--s-accent)]"
+                        >
+                          {truncAddr(row.addr)}
+                        </a>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <Badge tone="emerald" icon="i-ph:shield-check-fill">bonded</Badge>
+                          {row.serving ? <Badge tone="accent">quoting</Badge> : <Badge>offline</Badge>}
+                          {row.venue?.onion && <Badge tone="neutral" icon="i-ph:shield">.onion</Badge>}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-3 font-data">
+                      <div>
+                        <div className="mono-label">Restake bond</div>
+                        <div className="mt-1 text-[15px] font-bold tabular-nums text-[var(--s-text)]">
+                          {formatTntBond(row.bond)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="mono-label">Issuance collateral</div>
+                        <div className="mt-1 text-[15px] font-bold tabular-nums text-[var(--s-emerald)]">
+                          {row.collateral !== undefined ? compactUsd(Number(row.collateral)) : '…'}
+                        </div>
+                        <div className="mt-0.5 text-[12px] tabular-nums text-[var(--s-text-muted)]">
+                          liability {row.liability !== undefined ? compactUsd(Number(row.liability)) : '…'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3 truncate font-data text-[13px] text-[var(--s-text-muted)]">
+                      {row.serving ? displayVenueUrl(row.venue?.url) : 'joined on-chain, venue offline'}
+                      {row.venue?.latencyMs != null && (
+                        <span className={row.venue.latencyMs < 400 ? 'text-[var(--s-emerald)]' : undefined}>
+                          {' '}· {row.venue.latencyMs}ms
+                        </span>
                       )}
                     </div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 font-data text-[15px] text-[var(--s-text-muted)]">
-                      {serving ? (
-                        <>
-                          <span>{venue!.url.replace('https://', '')}</span>
-                          {venue?.latencyMs != null && (
-                            <span className={fast ? 'text-[var(--s-emerald)]' : undefined}>
-                              · {venue.latencyMs}ms
+                  </div>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
+                <table className="w-full min-w-[1060px] border-collapse">
+                  <thead>
+                    <tr className="border-b border-[var(--s-divider)] text-left">
+                      <th className="mono-label px-4 py-3">Operator</th>
+                      <th className="mono-label px-3 py-3">Status</th>
+                      <th className="mono-label min-w-[340px] px-3 py-3">Venue</th>
+                      <th className="mono-label px-3 py-3 text-right">Restake bond</th>
+                      <th className="mono-label px-4 py-3 text-right">Issuance collateral</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => (
+                      <tr key={row.addr} className="border-b border-[var(--s-divider)] last:border-0">
+                        <td className="px-4 py-3.5">
+                          <div className="flex min-w-[170px] items-center gap-3">
+                            <span className="overflow-hidden rounded-full ring-1 ring-[var(--s-border)]">
+                              <Identicon address={row.addr} size={34} />
                             </span>
-                          )}
-                        </>
-                      ) : (
-                        'joined the operator set on-chain'
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="mono-label">Restake bond</div>
-                    <div className="font-data text-[15px] font-bold tabular-nums text-[var(--s-text)]">
-                      {bond !== undefined ? `${Number(formatUnits(bond, 18)).toLocaleString()} TNT` : '…'}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="mono-label">Issuance collateral</div>
-                    <div className="font-data text-[15px] font-bold tabular-nums text-[var(--s-emerald)]">
-                      {collateral !== undefined ? compactUsd(Number(collateral)) : '…'}
-                    </div>
-                    <div className="font-data text-[12px] tabular-nums text-[var(--s-text-muted)]">
-                      {liability !== undefined ? `liability ${compactUsd(Number(liability))}` : ''}
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
+                            <a
+                              href={`${CHAIN.explorer}/address/${row.addr}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="font-data text-[15px] font-semibold text-[var(--s-text)] hover:text-[var(--s-accent)]"
+                            >
+                              {truncAddr(row.addr)}
+                            </a>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3.5">
+                          <div className="flex min-w-[132px] flex-wrap gap-1.5">
+                            <Badge tone="emerald" icon="i-ph:shield-check-fill">bonded</Badge>
+                            {row.serving ? <Badge tone="accent">quoting</Badge> : <Badge>offline</Badge>}
+                            {row.venue?.onion && <Badge tone="neutral" icon="i-ph:shield">.onion</Badge>}
+                          </div>
+                        </td>
+                        <td className="min-w-[340px] px-3 py-3.5">
+                          <div className="flex min-w-0 items-center gap-1.5 font-data text-[13px] text-[var(--s-text-muted)]">
+                            <span className="min-w-0 truncate">
+                              {row.serving ? displayVenueUrl(row.venue?.url) : 'joined on-chain'}
+                            </span>
+                            {row.venue?.latencyMs != null && (
+                              <span
+                                className={cn(
+                                  'shrink-0',
+                                  row.venue.latencyMs < 400 && 'text-[var(--s-emerald)]',
+                                )}
+                              >
+                                · {row.venue.latencyMs}ms
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-3.5 text-right font-data text-[15px] font-bold tabular-nums text-[var(--s-text)]">
+                          {formatTntBond(row.bond)}
+                        </td>
+                        <td className="px-4 py-3.5 text-right">
+                          <div className="font-data text-[15px] font-bold tabular-nums text-[var(--s-emerald)]">
+                            {row.collateral !== undefined ? compactUsd(Number(row.collateral)) : '…'}
+                          </div>
+                          <div className="mt-0.5 font-data text-[12px] tabular-nums text-[var(--s-text-muted)]">
+                            liability {row.liability !== undefined ? compactUsd(Number(row.liability)) : '…'}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </Panel>
 
         <div className={cn('panel mt-4 px-4 py-3 font-data text-[15px] text-[var(--s-text-muted)]')}>

@@ -9,7 +9,7 @@ Environment=DATA_DIR=/opt/inference-bazaar-usdc/data
 Environment=INFERENCE_BAZAAR_SIDECAR_URL=http://127.0.0.1:9310
 Environment=INFERENCE_BAZAAR_ROUTER_URL=https://router.tangle.tools
 Environment=INFERENCE_BAZAAR_OPERATOR_ADDR=127.0.0.1:9600
-Environment=INFERENCE_BAZAAR_INSTRUMENT=claude-sonnet-4-6:output
+Environment=INFERENCE_BAZAAR_INSTRUMENT=groq/llama-3.1-8b-instant:output
 Environment=INFERENCE_BAZAAR_MM_SIZE=100000
 Environment=INFERENCE_BAZAAR_MM_LEVELS=2
 Environment=INFERENCE_BAZAAR_CHAIN_ID=84532

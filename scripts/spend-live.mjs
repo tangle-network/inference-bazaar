@@ -19,8 +19,7 @@ const wallet = createWalletClient({ account: buyer, chain: baseSepolia, transpor
 
 const abi = parseAbi([
   'function lots(bytes32) view returns (address holder, address issuer, bytes32 instrument, uint64 qtyTokens, uint64 lockedTokens, uint64 expiry, uint128 notionalMicro)',
-  'function spendSettled(bytes32) view returns (uint64)',
-  'function spendPermitDigest((bytes32 lotId, address sessionKey, uint64 maxTokens, uint64 expiry) p) view returns (bytes32)',
+  'function spendSettled(bytes32 lotId) view returns (uint64)',
 ])
 
 const domain = { name: 'InferenceBazaarSettlement', version: '1', chainId: baseSepolia.id, verifyingContract: SETTLEMENT }
@@ -97,16 +96,12 @@ console.log(`REAL completion (${served} tokens): "${out.choices[0].message.conte
 // Flush and verify the on-chain debit.
 const flush = await post(`${VENUE}/v1/spend/flush`, {})
 if (flush.settled !== 1) throw new Error(`flush: ${JSON.stringify(flush)}`)
-const digest = await pub.readContract({
-  address: SETTLEMENT, abi, functionName: 'spendPermitDigest',
-  args: [{ lotId, sessionKey: session.address, maxTokens, expiry }],
-})
 // Public RPC is load-balanced; the settle tx may not be visible on the node
 // answering the read yet. Poll until it is.
 let settled = 0n, lotAfter = lot
 for (let i = 0; i < 20 && Number(settled) === 0; i++) {
   await new Promise((r) => setTimeout(r, 3000))
-  settled = await pub.readContract({ address: SETTLEMENT, abi, functionName: 'spendSettled', args: [digest] })
+  settled = await pub.readContract({ address: SETTLEMENT, abi, functionName: 'spendSettled', args: [lotId] })
   lotAfter = await pub.readContract({ address: SETTLEMENT, abi, functionName: 'lots', args: [lotId] })
 }
 if (Number(settled) !== served) throw new Error(`settled ${settled} != served ${served}`)

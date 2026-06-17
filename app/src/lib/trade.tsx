@@ -6,6 +6,7 @@
  * issuer; the minted lot is the receipt.
  */
 import { useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { zeroHash, type Hex } from 'viem'
 import { useAccount, usePublicClient, useSignTypedData, useWriteContract } from 'wagmi'
 import { CHAIN } from './api'
@@ -13,6 +14,7 @@ import { endpointFor, type Venue } from './venues'
 import { pickAntiSticky, privacyOn, rememberOperator } from './privacy'
 import {
   EIP712_DOMAIN,
+  fetchMyLots,
   fillRfq,
   flushSettlement,
   ORDER_TYPES,
@@ -21,6 +23,8 @@ import {
   SETTLEMENT,
   SETTLEMENT_ABI,
   USD_ABI,
+  writeCachedMyLots,
+  type RfqQuote,
   type WireOrder,
 } from './settlement'
 
@@ -46,17 +50,32 @@ export interface TradeReceipt {
   operator?: `0x${string}`
 }
 
+export interface FirmTradeQuote {
+  instrumentId: string
+  qtyTokens: number
+  priceMicroPerM: number
+  costMicro: number
+  rfq: RfqQuote
+  venue: Venue
+}
+
+export interface FirmRoutePlan {
+  instrumentId: string
+  requestedTokens: number
+  filledTokens: number
+  quotes: FirmTradeQuote[]
+  partial: boolean
+}
+
 /** Fan an RFQ to every healthy venue; best price wins (ties → lower latency). */
 // Privacy never overpays: anti-stickiness only chooses AMONG quotes within this
 // fraction of the best price (the "competitive tier").
 const ANTI_STICKY_PRICE_TOLERANCE = 0.005 // 0.5%
 
-async function bestQuote(
+async function collectFirmQuotes(
   venues: Venue[],
   params: { instrumentId: string; side: 'buy' | 'sell'; qtyTokens: number },
-  /** Buyer identity for anti-sticky acquisition (only used under privacy mode). */
-  antiStickyIdentity?: string,
-): Promise<{ rfq: Awaited<ReturnType<typeof requestRfq>>; venue: Venue }> {
+): Promise<Array<{ rfq: Awaited<ReturnType<typeof requestRfq>>; venue: Venue }>> {
   const live = venues.filter((v) => v.healthy)
   if (live.length === 0) throw new Error('no live venues')
   const quotes = await Promise.all(
@@ -79,6 +98,16 @@ async function bestQuote(
       : b.rfq.order.priceMicroPerM - a.rfq.order.priceMicroPerM ||
         (a.venue.latencyMs ?? 1e9) - (b.venue.latencyMs ?? 1e9),
   )
+  return valid
+}
+
+async function bestQuote(
+  venues: Venue[],
+  params: { instrumentId: string; side: 'buy' | 'sell'; qtyTokens: number },
+  /** Buyer identity for anti-sticky acquisition (only used under privacy mode). */
+  antiStickyIdentity?: string,
+): Promise<{ rfq: Awaited<ReturnType<typeof requestRfq>>; venue: Venue }> {
+  const valid = await collectFirmQuotes(venues, params)
 
   // Anti-stickiness (privacy): spread acquisitions across operators so a consumer's
   // eventual redemption footprint isn't concentrated where one operator can
@@ -99,11 +128,65 @@ async function bestQuote(
   return valid[0]!
 }
 
+export async function planFirmBuyRoute(
+  venues: Venue[],
+  params: { instrumentId: string; qtyTokens: number },
+): Promise<FirmRoutePlan> {
+  const valid = await collectFirmQuotes(venues, { ...params, side: 'buy' })
+  const requestedTokens = Math.max(0, Math.floor(params.qtyTokens))
+  let remaining = requestedTokens
+  const quotes: FirmTradeQuote[] = []
+
+  for (const { rfq, venue } of valid) {
+    if (remaining <= 0) break
+    const qtyTokens = Math.min(remaining, rfq.order.qtyTokens)
+    if (qtyTokens <= 0) continue
+    const priceMicroPerM = rfq.order.priceMicroPerM
+    quotes.push({
+      instrumentId: params.instrumentId,
+      qtyTokens,
+      priceMicroPerM,
+      costMicro: Math.round((priceMicroPerM * qtyTokens) / 1e6),
+      rfq,
+      venue,
+    })
+    remaining -= qtyTokens
+  }
+
+  const filledTokens = requestedTokens - remaining
+  return {
+    instrumentId: params.instrumentId,
+    requestedTokens,
+    filledTokens,
+    quotes,
+    partial: filledTokens < requestedTokens,
+  }
+}
+
 export function useFirmTrade() {
   const { address } = useAccount()
   const client = usePublicClient({ chainId: CHAIN.id })
   const { signTypedDataAsync } = useSignTypedData()
   const { writeContractAsync } = useWriteContract()
+  const queryClient = useQueryClient()
+
+  const refreshLotsAfterSettle = useCallback(
+    (settleTx: Hex | null) => {
+      if (!address || !client) return
+      const refresh = async () => {
+        const lots = await fetchMyLots(client, address)
+        writeCachedMyLots(address, lots)
+        queryClient.setQueryData(['lots', address], lots)
+        await queryClient.invalidateQueries({ queryKey: ['lots', address] })
+      }
+      if (settleTx) {
+        void client.waitForTransactionReceipt({ hash: settleTx }).then(refresh, refresh)
+      } else {
+        void refresh()
+      }
+    },
+    [address, client, queryClient],
+  )
 
   /**
    * Make sure the wallet's in-contract balance covers `costMicro`, minting
@@ -171,32 +254,26 @@ export function useFirmTrade() {
     [address, client, writeContractAsync],
   )
 
-  /** Buy one leg firm: best quote across all venues → sign → pair → settle. */
-  const buyLeg = useCallback(
+  const buyFirmQuote = useCallback(
     async (
-      instrumentId: string,
-      qtyTokens: number,
+      firm: FirmTradeQuote,
       onProgress: (p: TradeProgress) => void,
-      venues: Venue[],
     ): Promise<TradeReceipt> => {
       if (!address) throw new Error('wallet not connected')
 
-      onProgress({ step: 'quoting', detail: `auctioning across ${venues.filter((v) => v.healthy).length} venues` })
-      const { rfq, venue } = await bestQuote(venues, { instrumentId, side: 'buy', qtyTokens }, address)
-      const qty = Math.min(qtyTokens, rfq.order.qtyTokens)
-      const costMicro = BigInt(Math.round((rfq.order.priceMicroPerM * qty) / 1e6))
+      const costMicro = BigInt(firm.costMicro)
 
       await ensureFunds(costMicro, onProgress)
 
       onProgress({ step: 'signing', detail: 'confirm the order in your wallet' })
       const taker: WireOrder = {
-        instrument: rfq.order.instrument,
+        instrument: firm.rfq.order.instrument,
         side: 0,
-        priceMicroPerM: rfq.order.priceMicroPerM,
-        qtyTokens: qty,
+        priceMicroPerM: firm.priceMicroPerM,
+        qtyTokens: firm.qtyTokens,
         lotId: zeroHash,
         trader: address,
-        expiry: rfq.order.expiry,
+        expiry: firm.rfq.order.expiry,
         salt: randomSalt(),
       }
       const signature = await signTypedDataAsync({
@@ -216,11 +293,11 @@ export function useFirmTrade() {
       })
 
       onProgress({ step: 'pairing' })
-      const venueUrl = endpointFor(venue, privacyOn())
+      const venueUrl = endpointFor(firm.venue, privacyOn())
       await fillRfq({
-        makerInstrumentId: instrumentId,
-        maker: rfq.order,
-        makerSignature: rfq.signature,
+        makerInstrumentId: firm.instrumentId,
+        maker: firm.rfq.order,
+        makerSignature: firm.rfq.signature,
         taker,
         takerSignature: signature as Hex,
         venueUrl,
@@ -229,17 +306,41 @@ export function useFirmTrade() {
       onProgress({ step: 'settling', detail: 'submitting settleFills' })
       const flush = await flushSettlement(venueUrl)
       const settleTx = (flush.tx as Hex | undefined) ?? null
+      refreshLotsAfterSettle(settleTx)
 
       return {
-        instrumentId,
-        qtyTokens: qty,
-        priceMicroPerM: rfq.order.priceMicroPerM,
+        instrumentId: firm.instrumentId,
+        qtyTokens: firm.qtyTokens,
+        priceMicroPerM: firm.priceMicroPerM,
         costMicro: Number(costMicro),
         settleTx,
-        operator: venue.operator,
+        operator: firm.venue.operator,
       }
     },
-    [address, ensureFunds, signTypedDataAsync],
+    [address, ensureFunds, refreshLotsAfterSettle, signTypedDataAsync],
+  )
+
+  /** Buy one leg firm: preflight RFQ coverage before any wallet transaction. */
+  const buyLeg = useCallback(
+    async (
+      instrumentId: string,
+      qtyTokens: number,
+      onProgress: (p: TradeProgress) => void,
+      venues: Venue[],
+    ): Promise<TradeReceipt> => {
+      if (!address) throw new Error('wallet not connected')
+
+      onProgress({ step: 'quoting', detail: `auctioning across ${venues.filter((v) => v.healthy).length} venues` })
+      const plan = await planFirmBuyRoute(venues, { instrumentId, qtyTokens })
+      if (plan.quotes.length === 0) throw new Error('no operator is quoting this instrument')
+      if (plan.partial) {
+        throw new Error(
+          `only ${plan.filledTokens.toLocaleString()} of ${plan.requestedTokens.toLocaleString()} tokens are firm right now`,
+        )
+      }
+      return buyFirmQuote(plan.quotes[0]!, onProgress)
+    },
+    [address, buyFirmQuote],
   )
 
   /** Resell a held lot firm: best bid across all venues → sign → settle. */
@@ -298,20 +399,22 @@ export function useFirmTrade() {
 
       onProgress({ step: 'settling', detail: 'submitting settleFills' })
       const flush = await flushSettlement(venueUrl)
+      const settleTx = (flush.tx as Hex | undefined) ?? null
+      refreshLotsAfterSettle(settleTx)
 
       return {
         instrumentId,
         qtyTokens: qty,
         priceMicroPerM: rfq.order.priceMicroPerM,
         costMicro: Number(proceedsMicro),
-        settleTx: (flush.tx as Hex | undefined) ?? null,
+        settleTx,
         operator: venue.operator,
       }
     },
-    [address, signTypedDataAsync],
+    [address, refreshLotsAfterSettle, signTypedDataAsync],
   )
 
-  return { buyLeg, sellLot }
+  return { buyLeg, buyFirmQuote, sellLot }
 }
 
 export const STEP_LABEL: Record<TradeProgress['step'], string> = {

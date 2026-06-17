@@ -43,7 +43,7 @@ cast send $SET "deposit(uint256)" 20000000               --rpc-url $RPC --privat
 ```bash
 curl -s https://inference-bazaar.178.104.232.124.sslip.io/rfq \
   -H 'content-type: application/json' \
-  -d '{"instrumentId":"claude-sonnet-4-6:output","side":"buy","qtyTokens":1000000}'
+  -d '{"instrumentId":"groq/llama-3.1-8b-instant:output","side":"buy","qtyTokens":1000000}'
 ```
 
 The response is an EIP-712 **signed order** from the operator: price locked

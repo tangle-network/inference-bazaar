@@ -19,7 +19,7 @@ Or by hand: generate a secret, build
 ```python
 from openai import OpenAI
 client = OpenAI(base_url="https://<issuer-venue>/v1", api_key="sk-inference-bazaar-…")
-r = client.chat.completions.create(model="claude-sonnet-4-6",
+r = client.chat.completions.create(model="groq/llama-3.1-8b-instant",
                                    messages=[{"role": "user", "content": "hi"}])
 ```
 
@@ -36,7 +36,7 @@ Each completion meters your lot's token kind against the key. The operator
 periodically settles the cumulative served amount on-chain
 (`settleSpend(auth, servedCumulative, holderSig)`), which debits your lot and
 releases its liability — visible on Basescan, reconcilable any time against
-`spendSettled(authDigest)`.
+`spendSettled(lotId)`.
 
 ## Trust model, plainly
 

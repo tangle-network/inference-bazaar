@@ -120,6 +120,14 @@ impl InferenceBackend {
         json!({ "mode": self.mode, "url": self.base_url })
     }
 
+    fn chat_completions_url(&self) -> String {
+        if self.base_url.ends_with("/v1") {
+            format!("{}/chat/completions", self.base_url)
+        } else {
+            format!("{}/v1/chat/completions", self.base_url)
+        }
+    }
+
     /// "managed-vllm" | "external" | "router". A bonded issuer must NOT be in
     /// "router" mode — it would resell a third party's inference rather than
     /// serve what it sold (enforced fail-closed at venue boot).
@@ -137,7 +145,7 @@ impl InferenceBackend {
     ) -> Result<(reqwest::StatusCode, Value), String> {
         let mut req = self
             .client
-            .post(format!("{}/v1/chat/completions", self.base_url))
+            .post(self.chat_completions_url())
             .json(&json!({
                 "model": model,
                 "messages": messages,
@@ -168,7 +176,7 @@ impl InferenceBackend {
     ) -> Result<reqwest::Response, String> {
         let mut req = self
             .client
-            .post(format!("{}/v1/chat/completions", self.base_url))
+            .post(self.chat_completions_url())
             .json(&json!({
                 "model": model,
                 "messages": messages,
@@ -242,6 +250,21 @@ mod tests {
     #[tokio::test]
     async fn serves_from_any_openai_url_with_bearer() {
         let url = stub_openai(Some("sekret")).await;
+        let backend = InferenceBackend::new(url, Some("sekret".into()));
+        let messages =
+            serde_json::value::RawValue::from_string(r#"[{"role":"user","content":"hi"}]"#.into())
+                .unwrap();
+        let (status, body) = backend
+            .chat_completion("test-model", &messages, 256)
+            .await
+            .unwrap();
+        assert!(status.is_success());
+        assert_eq!(body["usage"]["completion_tokens"], 42);
+    }
+
+    #[tokio::test]
+    async fn accepts_openai_v1_base_url() {
+        let url = format!("{}/v1", stub_openai(Some("sekret")).await);
         let backend = InferenceBackend::new(url, Some("sekret".into()));
         let messages =
             serde_json::value::RawValue::from_string(r#"[{"role":"user","content":"hi"}]"#.into())
