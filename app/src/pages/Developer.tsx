@@ -49,6 +49,7 @@ interface ChatMessage {
   usage?: ChatUsage
   spend?: ChatSpend
   ms?: number
+  finishReason?: string
   error?: boolean
   streaming?: boolean
 }
@@ -72,6 +73,7 @@ interface ChatStreamResult {
   content: string
   usage?: ChatUsage
   inferenceBazaar?: { servedTokens?: number; nextCumulative?: number }
+  finishReason?: string
 }
 
 interface ChatModelOption {
@@ -94,7 +96,7 @@ const STARTER_PROMPTS = [
   'What should I verify before routing this through production?',
 ]
 
-const DEFAULT_CHAT_MAX_TOKENS = 600
+const DEFAULT_CHAT_MAX_TOKENS = 2048
 
 function markdownBlocks(input: string) {
   const lines = input.replace(/\r\n/g, '\n').split('\n')
@@ -179,7 +181,7 @@ function inlineMarkdown(text: string): ReactNode[] {
     const token = match[0]
     if (token.startsWith('`')) {
       out.push(
-        <code key={out.length} className="rounded-[4px] bg-[var(--s-bg)]/70 px-1 py-0.5 font-data text-[0.92em] text-[var(--s-text)]">
+        <code key={out.length} className="break-words rounded-[4px] bg-[var(--s-bg)]/70 px-1 py-0.5 font-data text-[0.92em] text-[var(--s-text)]">
           {token.slice(1, -1)}
         </code>,
       )
@@ -209,7 +211,7 @@ function ChatMarkdown({ content }: { content: string }) {
   const blocks = markdownBlocks(content)
   if (blocks.length === 0) return null
   return (
-    <div className="chat-markdown font-body text-[15px] leading-relaxed">
+    <div className="chat-markdown min-w-0 break-words font-body text-[15px] leading-relaxed">
       {blocks.map((block, index) => {
         if (block.type === 'h') {
           return (
@@ -220,21 +222,21 @@ function ChatMarkdown({ content }: { content: string }) {
         }
         if (block.type === 'code') {
           return (
-            <pre key={index} className="my-2 max-w-full overflow-x-auto rounded-[8px] border border-[var(--s-border)] bg-[var(--s-bg)]/70 p-3 font-data text-[13px] leading-relaxed text-[var(--s-text)]">
-              <code>{block.text}</code>
+            <pre key={index} className="my-2 max-w-full overflow-hidden whitespace-pre-wrap break-words rounded-[8px] border border-[var(--s-border)] bg-[var(--s-bg)]/70 p-3 font-data text-[13px] leading-relaxed text-[var(--s-text)]">
+              <code className="break-words whitespace-pre-wrap">{block.text}</code>
             </pre>
           )
         }
         if (block.type === 'ul' || block.type === 'ol') {
           const Tag = block.type === 'ul' ? 'ul' : 'ol'
           return (
-            <Tag key={index} className={cn('my-2 space-y-1 pl-5', block.type === 'ul' ? 'list-disc' : 'list-decimal')}>
+            <Tag key={index} className={cn('my-2 space-y-1 break-words pl-5', block.type === 'ul' ? 'list-disc' : 'list-decimal')}>
               {block.items.map((item, itemIndex) => <li key={itemIndex}>{inlineMarkdown(item)}</li>)}
             </Tag>
           )
         }
         return (
-          <p key={index} className="my-2 whitespace-pre-wrap first:mt-0 last:mb-0">
+          <p key={index} className="my-2 whitespace-pre-wrap break-words first:mt-0 last:mb-0">
             {inlineMarkdown(block.text)}
           </p>
         )
@@ -243,15 +245,16 @@ function ChatMarkdown({ content }: { content: string }) {
   )
 }
 
-function ChatSpendLine({ spend, ms }: { spend?: ChatSpend; ms?: number }) {
+function ChatSpendLine({ spend, ms, finishReason }: { spend?: ChatSpend; ms?: number; finishReason?: string }) {
+  const stop = finishReason === 'length' ? 'hit limit' : ''
   if (!spend) {
-    return ms !== undefined ? <span>{ms} ms</span> : null
+    return ms !== undefined || stop ? <span>{[ms !== undefined ? `${ms} ms` : '', stop].filter(Boolean).join(' · ')}</span> : null
   }
   const cost = spend.costMicro !== null ? chatCost(spend.costMicro) : 'metered'
   return (
     <span>
       {chatTokenCount(spend.promptTokens)} in · {chatTokenCount(spend.completionTokens)} out · {chatTokenCount(spend.billedTokens)} billed · {cost} · {chatTokenCount(spend.remainingTokens)} left
-      {ms !== undefined ? ` · ${ms} ms` : ''}
+      {ms !== undefined ? ` · ${ms} ms` : ''}{stop ? ` · ${stop}` : ''}
     </span>
   )
 }
@@ -381,6 +384,7 @@ function chatResultFromJson(json: unknown): ChatStreamResult {
     content: String(record.choices?.[0]?.message?.content ?? '').trim(),
     usage: normalizeUsage(record.usage),
     inferenceBazaar: normalizeInferenceBazaar(record['inference-bazaar']),
+    finishReason: typeof record.choices?.[0]?.finish_reason === 'string' ? record.choices[0].finish_reason : undefined,
   }
 }
 
@@ -428,6 +432,7 @@ async function streamChat(
   let content = ''
   let usage: ChatUsage | undefined
   let inferenceBazaar: ChatStreamResult['inferenceBazaar']
+  let finishReason: string | undefined
 
   const consume = (event: string): boolean => {
     const data = dataLines(event)
@@ -443,6 +448,8 @@ async function streamChat(
     if (nextInference) inferenceBazaar = nextInference
     const nextUsage = normalizeUsage(json?.usage)
     if (nextUsage) usage = nextUsage
+    const nextFinishReason = json?.choices?.[0]?.finish_reason
+    if (typeof nextFinishReason === 'string') finishReason = nextFinishReason
     const delta = String(json?.choices?.[0]?.delta?.content ?? '')
     if (delta) {
       content += delta
@@ -461,13 +468,13 @@ async function streamChat(
       buffer = buffer.slice(idx + 2)
       if (consume(event)) {
         await reader.cancel().catch(() => undefined)
-        return { content: content.trim(), usage, inferenceBazaar }
+        return { content: content.trim(), usage, inferenceBazaar, finishReason }
       }
       idx = buffer.indexOf('\n\n')
     }
   }
   if (buffer.trim()) consume(buffer)
-  return { content: content.trim(), usage, inferenceBazaar }
+  return { content: content.trim(), usage, inferenceBazaar, finishReason }
 }
 
 function toModelOption(model: CatalogModel): ChatModelOption {
@@ -1002,6 +1009,7 @@ export function DeveloperChatPage() {
         costMicro,
       },
       ms: Math.round(performance.now() - started),
+      finishReason: result.finishReason,
       streaming: false,
     }
   }
@@ -1038,6 +1046,7 @@ export function DeveloperChatPage() {
       content: result.content,
       usage: result.usage,
       ms: Math.round(performance.now() - started),
+      finishReason: result.finishReason,
       streaming: false,
     }
   }
@@ -1222,7 +1231,7 @@ export function DeveloperChatPage() {
                 )}
                 <div
                   className={cn(
-                    'max-w-[min(86%,720px)] rounded-[10px] border px-3 py-2',
+                    'min-w-0 max-w-[min(86%,720px)] overflow-hidden rounded-[10px] border px-3 py-2',
                     m.role === 'user'
                       ? 'border-[var(--s-accent)]/30 bg-[var(--s-accent-soft)] text-[var(--s-text)]'
                       : m.error
@@ -1233,17 +1242,20 @@ export function DeveloperChatPage() {
                   {m.role === 'assistant' && !m.error ? (
                     <ChatMarkdown content={m.content} />
                   ) : (
-                    <div className="whitespace-pre-wrap font-body text-[15px] leading-relaxed">{m.content}</div>
+                    <div className="whitespace-pre-wrap break-words font-body text-[15px] leading-relaxed">{m.content}</div>
                   )}
                   {m.streaming && !m.error && (
                     <span className="mt-1 inline-block h-4 w-1 animate-pulse rounded-full bg-[var(--s-accent)] align-middle" />
                   )}
-                  {(m.spend || m.usage || m.ms !== undefined) && (
+                  {(m.spend || m.usage || m.ms !== undefined || m.finishReason === 'length') && (
                     <div className="mt-2 border-t border-[var(--s-divider)] pt-2 font-data text-[12px] leading-relaxed text-[var(--s-text-muted)]">
                       {m.spend ? (
-                        <ChatSpendLine spend={m.spend} ms={m.ms} />
+                        <ChatSpendLine spend={m.spend} ms={m.ms} finishReason={m.finishReason} />
                       ) : (
-                        <span>{m.usage?.total_tokens ?? '...'} tokens{m.ms !== undefined ? ` · ${m.ms} ms` : ''}</span>
+                        <span>
+                          {m.usage?.total_tokens ?? '...'} tokens{m.ms !== undefined ? ` · ${m.ms} ms` : ''}
+                          {m.finishReason === 'length' ? ' · hit limit' : ''}
+                        </span>
                       )}
                     </div>
                   )}
