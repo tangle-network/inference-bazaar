@@ -40,6 +40,8 @@ function displayVenueUrl(url: string | undefined) {
   return url ? url.replace(/^https?:\/\//, '').replace(/\/$/, '') : '—'
 }
 
+/** Buyer-side demand: request a market operators aren't quoting yet, and see the
+ * aggregated demand book (what's wanted vs already quoted) across the operator set. */
 function RequestMarket({ venues, servedIds }: { venues: Venue[] | undefined; servedIds: Set<string> }) {
   const [model, setModel] = useState('')
   const [kind, setKind] = useState<'output' | 'input'>('output')

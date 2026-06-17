@@ -32,6 +32,11 @@ pub fn router(venue: Shared) -> Router {
         .route("/order-signed", post(place_signed))
         .route("/rfq", post(rfq_quote))
         .route("/rfq/fill", post(rfq_fill))
+        // Demand: buyers request markets; operators read them to decide what to list.
+        .route(
+            "/market-requests",
+            get(market_requests).post(request_market),
+        )
         // Credit discovery: which lots this holder can spend on a model here.
         .route("/credits", get(credits))
         // Redemption: spend a credit lot on real inference (gate G1).
@@ -85,6 +90,25 @@ pub fn spawn_auto_flush(venue: Shared) {
             }
         }
     });
+}
+
+#[derive(Deserialize)]
+struct MarketRequestBody {
+    model: String,
+    kind: String,
+}
+
+/// `POST /market-requests` — a buyer asks operators to make a market in a model.
+async fn request_market(
+    State(v): State<Shared>,
+    Json(b): Json<MarketRequestBody>,
+) -> impl IntoResponse {
+    Json(v.record_market_request(&b.model, &b.kind)).into_response()
+}
+
+/// `GET /market-requests` — the demand book, most-wanted first.
+async fn market_requests(State(v): State<Shared>) -> impl IntoResponse {
+    Json(v.market_requests_json()).into_response()
 }
 
 #[derive(Deserialize)]

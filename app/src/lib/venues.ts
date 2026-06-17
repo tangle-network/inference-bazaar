@@ -275,7 +275,8 @@ export interface MarketDemand {
   lastRequestedAt: number
 }
 
-/** Signal demand for a market across every healthy operator. Returns how many accepted. */
+/** Signal demand for a market: POST to every healthy operator so the whole set
+ * sees it (the demand book is read back aggregated). Returns how many accepted. */
 export async function requestMarket(
   venues: Venue[] | undefined,
   model: string,
@@ -294,7 +295,7 @@ export async function requestMarket(
   return results.filter((r) => r.status === 'fulfilled' && r.value.ok).length
 }
 
-/** Aggregated demand book across every healthy operator, most-requested first. */
+/** The aggregated demand book across every healthy operator, most-wanted first. */
 export function useMarketRequests(venues: Venue[] | undefined) {
   return useQuery({
     queryKey: ['market-requests', (venues ?? []).map((v) => v.url).sort()],
