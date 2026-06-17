@@ -12,6 +12,7 @@
  * RFQs and on-chain settlement.
  */
 import { useQuery } from '@tanstack/react-query'
+import { cacheKey, readBrowserCache, writeBrowserCache } from './browser-cache'
 
 // `import.meta.env?` (not `.env.`) so these modules also load under plain
 // node/tsx (the SOR/NBBO checks run outside Vite, where import.meta.env is
@@ -89,6 +90,11 @@ async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
 // ── Router catalog ───────────────────────────────────────────────────────────
 
 const USD_PER_TOKEN_TO_MICRO_PER_M = 1e12 // USD/token × 1M tokens × 1e6 micro
+const CATALOG_CACHE_MS = 24 * 60 * 60_000
+const INSTRUMENT_CACHE_MS = 5 * 60_000
+const BOOK_CACHE_MS = 30_000
+const BOOK_FALLBACK_CACHE_MS = 2 * 60_000
+const OUTBOX_CACHE_MS = 60_000
 
 const FALLBACK_CATALOG: CatalogModel[] = [
   {
@@ -207,13 +213,30 @@ function fallbackCatalog(): Map<string, CatalogModel> {
   return new Map(FALLBACK_CATALOG.map((m) => [m.id, m]))
 }
 
+function catalogCacheKey(): string {
+  return cacheKey('catalog', ROUTER_URL)
+}
+
+function readCachedCatalog(maxAgeMs = CATALOG_CACHE_MS): Map<string, CatalogModel> | undefined {
+  return readBrowserCache<Array<[string, CatalogModel]>, Map<string, CatalogModel>>(catalogCacheKey(), {
+    maxAgeMs,
+    revive: (entries) => new Map(entries),
+  })
+}
+
+function writeCachedCatalog(catalog: Map<string, CatalogModel>): void {
+  writeBrowserCache(catalogCacheKey(), catalog, {
+    serialize: (value) => [...value.entries()],
+  })
+}
+
 export async function fetchCatalog(): Promise<Map<string, CatalogModel>> {
   let data: RouterModel[]
   try {
     const catalog = await getJson<{ data: RouterModel[] }>(`${ROUTER_URL}/v1/models`)
     data = catalog.data
   } catch {
-    return fallbackCatalog()
+    return readCachedCatalog() ?? fallbackCatalog()
   }
   const map = new Map<string, CatalogModel>()
   for (const m of data) {
@@ -230,11 +253,18 @@ export async function fetchCatalog(): Promise<Map<string, CatalogModel>> {
       modalities: m.architecture?.input_modalities ?? [],
     })
   }
+  writeCachedCatalog(map)
   return map
 }
 
 export function useCatalog() {
-  return useQuery({ queryKey: ['catalog'], queryFn: fetchCatalog, staleTime: 5 * 60_000 })
+  return useQuery({
+    queryKey: ['catalog'],
+    queryFn: fetchCatalog,
+    initialData: () => readCachedCatalog(),
+    staleTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
+  })
 }
 
 // ── Venue ────────────────────────────────────────────────────────────────────
@@ -242,24 +272,53 @@ export function useCatalog() {
 export function useInstruments() {
   return useQuery({
     queryKey: ['instruments'],
-    queryFn: () => getJson<VenueInstrument[]>(`${VENUE_URL}/instruments`),
+    queryFn: async () => {
+      try {
+        const instruments = await getJson<VenueInstrument[]>(`${VENUE_URL}/instruments`)
+        if (instruments.length > 0) writeBrowserCache(cacheKey('instruments', VENUE_URL), instruments)
+        return instruments
+      } catch (error) {
+        const cached = readBrowserCache<VenueInstrument[]>(cacheKey('instruments', VENUE_URL), {
+          maxAgeMs: INSTRUMENT_CACHE_MS,
+        })
+        if (cached) return cached
+        throw error
+      }
+    },
+    initialData: () =>
+      readBrowserCache<VenueInstrument[]>(cacheKey('instruments', VENUE_URL), { maxAgeMs: INSTRUMENT_CACHE_MS }),
+    staleTime: 30_000,
+    gcTime: 30 * 60_000,
     refetchInterval: 30_000,
   })
 }
 
 export async function fetchBook(instrumentId: string): Promise<VenueBook> {
-  return getJson<VenueBook>(`${VENUE_URL}/book`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ instrumentId }),
-  })
+  const key = cacheKey('book', VENUE_URL, instrumentId)
+  try {
+    const book = await getJson<VenueBook>(`${VENUE_URL}/book`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ instrumentId }),
+    })
+    writeBrowserCache(key, book)
+    return book
+  } catch (error) {
+    const cached = readBrowserCache<VenueBook>(key, { maxAgeMs: BOOK_FALLBACK_CACHE_MS })
+    if (cached) return cached
+    throw error
+  }
 }
 
 export function useBook(instrumentId: string | null) {
+  const key = instrumentId ? cacheKey('book', VENUE_URL, instrumentId) : null
   return useQuery({
     queryKey: ['book', instrumentId],
     queryFn: () => fetchBook(instrumentId!),
     enabled: !!instrumentId,
+    initialData: () => (key ? readBrowserCache<VenueBook>(key, { maxAgeMs: BOOK_CACHE_MS }) : undefined),
+    staleTime: 5_000,
+    gcTime: 10 * 60_000,
     refetchInterval: 10_000,
   })
 }
@@ -290,7 +349,21 @@ export interface SettlementOutbox {
 export function useSettlementOutbox() {
   return useQuery({
     queryKey: ['outbox'],
-    queryFn: () => getJson<SettlementOutbox>(`${VENUE_URL}/settlement/outbox`),
+    queryFn: async () => {
+      const key = cacheKey('outbox', VENUE_URL)
+      try {
+        const outbox = await getJson<SettlementOutbox>(`${VENUE_URL}/settlement/outbox`)
+        writeBrowserCache(key, outbox)
+        return outbox
+      } catch (error) {
+        const cached = readBrowserCache<SettlementOutbox>(key, { maxAgeMs: OUTBOX_CACHE_MS })
+        if (cached) return cached
+        throw error
+      }
+    },
+    initialData: () => readBrowserCache<SettlementOutbox>(cacheKey('outbox', VENUE_URL), { maxAgeMs: OUTBOX_CACHE_MS }),
+    staleTime: 10_000,
+    gcTime: 10 * 60_000,
     refetchInterval: 20_000,
   })
 }

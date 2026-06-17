@@ -6,6 +6,7 @@
  * issuer; the minted lot is the receipt.
  */
 import { useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { zeroHash, type Hex } from 'viem'
 import { useAccount, usePublicClient, useSignTypedData, useWriteContract } from 'wagmi'
 import { CHAIN } from './api'
@@ -13,6 +14,7 @@ import { endpointFor, type Venue } from './venues'
 import { pickAntiSticky, privacyOn, rememberOperator } from './privacy'
 import {
   EIP712_DOMAIN,
+  fetchMyLots,
   fillRfq,
   flushSettlement,
   ORDER_TYPES,
@@ -21,6 +23,7 @@ import {
   SETTLEMENT,
   SETTLEMENT_ABI,
   USD_ABI,
+  writeCachedMyLots,
   type RfqQuote,
   type WireOrder,
 } from './settlement'
@@ -165,6 +168,25 @@ export function useFirmTrade() {
   const client = usePublicClient({ chainId: CHAIN.id })
   const { signTypedDataAsync } = useSignTypedData()
   const { writeContractAsync } = useWriteContract()
+  const queryClient = useQueryClient()
+
+  const refreshLotsAfterSettle = useCallback(
+    (settleTx: Hex | null) => {
+      if (!address || !client) return
+      const refresh = async () => {
+        const lots = await fetchMyLots(client, address)
+        writeCachedMyLots(address, lots)
+        queryClient.setQueryData(['lots', address], lots)
+        await queryClient.invalidateQueries({ queryKey: ['lots', address] })
+      }
+      if (settleTx) {
+        void client.waitForTransactionReceipt({ hash: settleTx }).then(refresh, refresh)
+      } else {
+        void refresh()
+      }
+    },
+    [address, client, queryClient],
+  )
 
   /**
    * Make sure the wallet's in-contract balance covers `costMicro`, minting
@@ -284,6 +306,7 @@ export function useFirmTrade() {
       onProgress({ step: 'settling', detail: 'submitting settleFills' })
       const flush = await flushSettlement(venueUrl)
       const settleTx = (flush.tx as Hex | undefined) ?? null
+      refreshLotsAfterSettle(settleTx)
 
       return {
         instrumentId: firm.instrumentId,
@@ -294,7 +317,7 @@ export function useFirmTrade() {
         operator: firm.venue.operator,
       }
     },
-    [address, ensureFunds, signTypedDataAsync],
+    [address, ensureFunds, refreshLotsAfterSettle, signTypedDataAsync],
   )
 
   /** Buy one leg firm: preflight RFQ coverage before any wallet transaction. */
@@ -376,17 +399,19 @@ export function useFirmTrade() {
 
       onProgress({ step: 'settling', detail: 'submitting settleFills' })
       const flush = await flushSettlement(venueUrl)
+      const settleTx = (flush.tx as Hex | undefined) ?? null
+      refreshLotsAfterSettle(settleTx)
 
       return {
         instrumentId,
         qtyTokens: qty,
         priceMicroPerM: rfq.order.priceMicroPerM,
         costMicro: Number(proceedsMicro),
-        settleTx: (flush.tx as Hex | undefined) ?? null,
+        settleTx,
         operator: venue.operator,
       }
     },
-    [address, signTypedDataAsync],
+    [address, refreshLotsAfterSettle, signTypedDataAsync],
   )
 
   return { buyLeg, buyFirmQuote, sellLot }

@@ -11,6 +11,7 @@ import { useQuery } from '@tanstack/react-query'
 import { usePublicClient } from 'wagmi'
 import type { Address } from 'viem'
 import { CHAIN, type BookLevel, type VenueBook, type VenueInstrument } from './api'
+import { cacheKey, readBrowserCache, writeBrowserCache } from './browser-cache'
 
 const TANGLE_ABI = [
   {
@@ -70,6 +71,11 @@ const TANGLE_ABI = [
 
 /** Service-id sweep ceiling. Global ids are sequential; raise as the chain grows. */
 const SERVICE_SCAN_MAX = 48
+const VENUE_REGISTRY_CACHE_MS = 5 * 60_000
+const AGG_BOOK_CACHE_MS = 30_000
+const AGG_BOOK_FALLBACK_CACHE_MS = 2 * 60_000
+const AGG_INSTRUMENT_CACHE_MS = 5 * 60_000
+const MARKET_REQUEST_CACHE_MS = 60_000
 
 export interface Venue {
   operator: Address
@@ -91,76 +97,97 @@ export function endpointFor(v: Pick<Venue, 'url' | 'onion'>, privacy: boolean): 
   return privacy && v.onion ? v.onion : v.url
 }
 
+function venueUrlsKey(venues: Venue[] | undefined): string {
+  return (venues ?? []).map((v) => v.url).sort().join(',')
+}
+
+function venueRegistryCacheKey(): string {
+  return cacheKey('venue-registry', CHAIN.id, CHAIN.blueprintId, SERVICE_SCAN_MAX)
+}
+
 export function useVenueRegistry() {
   const client = usePublicClient({ chainId: CHAIN.id })
   return useQuery({
     queryKey: ['venue-registry'],
     enabled: !!client,
     refetchInterval: 60_000,
+    initialData: () => readBrowserCache<Venue[]>(venueRegistryCacheKey(), { maxAgeMs: VENUE_REGISTRY_CACHE_MS }),
+    staleTime: 30_000,
+    gcTime: 30 * 60_000,
     queryFn: async (): Promise<Venue[]> => {
       // Pure view-call discovery (public RPCs cap getLogs ranges): sweep
       // service ids, keep active services of this blueprint, union operators.
-      const ids = [...Array(SERVICE_SCAN_MAX).keys()]
-      const services = await Promise.all(
-        ids.map(async (id) => {
-          try {
-            const svc = await client!.readContract({
+      try {
+        const ids = [...Array(SERVICE_SCAN_MAX).keys()]
+        const services = await Promise.all(
+          ids.map(async (id) => {
+            try {
+              const svc = await client!.readContract({
+                address: CHAIN.tangle,
+                abi: TANGLE_ABI,
+                functionName: 'getService',
+                args: [BigInt(id)],
+              })
+              return { id, svc }
+            } catch {
+              return null
+            }
+          }),
+        )
+        const mine = services.filter(
+          (x): x is NonNullable<typeof x> =>
+            x !== null && Number(x.svc.blueprintId) === CHAIN.blueprintId && x.svc.status === 1,
+        )
+        const operatorSets = await Promise.all(
+          mine.map((x) =>
+            client!.readContract({
               address: CHAIN.tangle,
               abi: TANGLE_ABI,
-              functionName: 'getService',
-              args: [BigInt(id)],
+              functionName: 'getServiceOperators',
+              args: [BigInt(x.id)],
+            }),
+          ),
+        )
+        const operators = [...new Set(operatorSets.flat())] as Address[]
+        const venues = await Promise.all(
+          operators.map(async (operator): Promise<Venue> => {
+            // Preferences are the source of truth (registration URL can be updated).
+            const prefs = await client!.readContract({
+              address: CHAIN.tangle,
+              abi: TANGLE_ABI,
+              functionName: 'getOperatorPreferences',
+              args: [BigInt(CHAIN.blueprintId), operator],
             })
-            return { id, svc }
-          } catch {
-            return null
-          }
-        }),
-      )
-      const mine = services.filter(
-        (x): x is NonNullable<typeof x> =>
-          x !== null && Number(x.svc.blueprintId) === CHAIN.blueprintId && x.svc.status === 1,
-      )
-      const operatorSets = await Promise.all(
-        mine.map((x) =>
-          client!.readContract({
-            address: CHAIN.tangle,
-            abi: TANGLE_ABI,
-            functionName: 'getServiceOperators',
-            args: [BigInt(x.id)],
-          }),
-        ),
-      )
-      const operators = [...new Set(operatorSets.flat())] as Address[]
-      const venues = await Promise.all(
-        operators.map(async (operator): Promise<Venue> => {
-          // Preferences are the source of truth (registration URL can be updated).
-          const prefs = await client!.readContract({
-            address: CHAIN.tangle,
-            abi: TANGLE_ABI,
-            functionName: 'getOperatorPreferences',
-            args: [BigInt(CHAIN.blueprintId), operator],
-          })
-          const url = prefs.rpcAddress.replace(/\/$/, '')
-          if (!url.startsWith('http')) {
-            return { operator, url, onion: null, healthy: false, latencyMs: null }
-          }
-          try {
-            const t0 = performance.now()
-            const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(4000) })
-            const onion = res.ok ? ((await res.json().catch(() => null))?.onion ?? null) : null
-            return {
-              operator,
-              url,
-              onion: typeof onion === 'string' && onion ? onion : null,
-              healthy: res.ok,
-              latencyMs: Math.round(performance.now() - t0),
+            const url = prefs.rpcAddress.replace(/\/$/, '')
+            if (!url.startsWith('http')) {
+              return { operator, url, onion: null, healthy: false, latencyMs: null }
             }
-          } catch {
-            return { operator, url, onion: null, healthy: false, latencyMs: null }
-          }
-        }),
-      )
-      return venues
+            try {
+              const t0 = performance.now()
+              const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(4000) })
+              const onion = res.ok ? ((await res.json().catch(() => null))?.onion ?? null) : null
+              return {
+                operator,
+                url,
+                onion: typeof onion === 'string' && onion ? onion : null,
+                healthy: res.ok,
+                latencyMs: Math.round(performance.now() - t0),
+              }
+            } catch {
+              return { operator, url, onion: null, healthy: false, latencyMs: null }
+            }
+          }),
+        )
+        if (venues.length > 0) {
+          writeBrowserCache(venueRegistryCacheKey(), venues)
+          return venues
+        }
+        return readBrowserCache<Venue[]>(venueRegistryCacheKey(), { maxAgeMs: VENUE_REGISTRY_CACHE_MS }) ?? venues
+      } catch (error) {
+        const cached = readBrowserCache<Venue[]>(venueRegistryCacheKey(), { maxAgeMs: VENUE_REGISTRY_CACHE_MS })
+        if (cached) return cached
+        throw error
+      }
     },
   })
 }
@@ -220,23 +247,57 @@ export async function fetchAggBook(venues: Venue[], instrumentId: string): Promi
   return { instrumentId, bids, asks, refMid, perVenue }
 }
 
+function aggBookCacheKey(venues: Venue[] | undefined, instrumentId: string): string {
+  return cacheKey('agg-book', instrumentId, venueUrlsKey(venues))
+}
+
+function readCachedAggBook(
+  venues: Venue[] | undefined,
+  instrumentId: string,
+  maxAgeMs = AGG_BOOK_CACHE_MS,
+): AggBook | undefined {
+  return readBrowserCache<AggBook>(aggBookCacheKey(venues, instrumentId), { maxAgeMs })
+}
+
+async function fetchAggBookForUi(venues: Venue[], instrumentId: string): Promise<AggBook> {
+  const book = await fetchAggBook(venues, instrumentId)
+  if (book.perVenue.length > 0) {
+    writeBrowserCache(aggBookCacheKey(venues, instrumentId), book)
+    return book
+  }
+  return readCachedAggBook(venues, instrumentId, AGG_BOOK_FALLBACK_CACHE_MS) ?? book
+}
+
 export function useAggBook(venues: Venue[] | undefined, instrumentId: string | null) {
   return useQuery({
-    queryKey: ['agg-book', instrumentId, (venues ?? []).map((v) => v.url).join(',')],
+    queryKey: ['agg-book', instrumentId, venueUrlsKey(venues)],
     enabled: !!instrumentId && (venues ?? []).some((v) => v.healthy),
+    initialData: () => (instrumentId ? readCachedAggBook(venues, instrumentId) : undefined),
+    staleTime: 5_000,
+    gcTime: 10 * 60_000,
     refetchInterval: 10_000,
-    queryFn: () => fetchAggBook(venues!, instrumentId!),
+    queryFn: () => fetchAggBookForUi(venues!, instrumentId!),
   })
 }
 
 export function useAggBooks(venues: Venue[] | undefined, instrumentIds: string[]) {
+  const ids = [...new Set(instrumentIds)].sort()
   return useQuery({
-    queryKey: ['agg-books', instrumentIds.join(','), (venues ?? []).map((v) => v.url).join(',')],
-    enabled: instrumentIds.length > 0 && (venues ?? []).some((v) => v.healthy),
+    queryKey: ['agg-books', ids.join(','), venueUrlsKey(venues)],
+    enabled: ids.length > 0 && (venues ?? []).some((v) => v.healthy),
+    initialData: () => {
+      const entries = ids.flatMap((id) => {
+        const book = readCachedAggBook(venues, id)
+        return book ? [[id, book] as const] : []
+      })
+      return entries.length > 0 ? new Map(entries) : undefined
+    },
+    staleTime: 5_000,
+    gcTime: 10 * 60_000,
     refetchInterval: 15_000,
     queryFn: async () => {
       const entries = await Promise.all(
-        instrumentIds.map(async (id) => [id, await fetchAggBook(venues!, id)] as const),
+        ids.map(async (id) => [id, await fetchAggBookForUi(venues!, id)] as const),
       )
       return new Map(entries)
     },
@@ -245,9 +306,13 @@ export function useAggBooks(venues: Venue[] | undefined, instrumentIds: string[]
 
 /** Union of instruments listed across all healthy venues. */
 export function useAggInstruments(venues: Venue[] | undefined) {
+  const key = cacheKey('agg-instruments', venueUrlsKey(venues))
   return useQuery({
-    queryKey: ['agg-instruments', (venues ?? []).map((v) => v.url).join(',')],
+    queryKey: ['agg-instruments', venueUrlsKey(venues)],
     enabled: (venues ?? []).some((v) => v.healthy),
+    initialData: () => readBrowserCache<VenueInstrument[]>(key, { maxAgeMs: AGG_INSTRUMENT_CACHE_MS }),
+    staleTime: 30_000,
+    gcTime: 30 * 60_000,
     refetchInterval: 60_000,
     queryFn: async (): Promise<VenueInstrument[]> => {
       const all = await Promise.all(
@@ -264,7 +329,12 @@ export function useAggInstruments(venues: Venue[] | undefined) {
       )
       const byId = new Map<string, VenueInstrument>()
       for (const list of all) for (const i of list) byId.set(i.id, i)
-      return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))
+      const instruments = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))
+      if (instruments.length > 0) {
+        writeBrowserCache(key, instruments)
+        return instruments
+      }
+      return readBrowserCache<VenueInstrument[]>(key, { maxAgeMs: AGG_INSTRUMENT_CACHE_MS }) ?? instruments
     },
   })
 }
@@ -297,9 +367,13 @@ export async function requestMarket(
 
 /** The aggregated demand book across every healthy operator, most-wanted first. */
 export function useMarketRequests(venues: Venue[] | undefined) {
+  const key = cacheKey('market-requests', venueUrlsKey(venues))
   return useQuery({
-    queryKey: ['market-requests', (venues ?? []).map((v) => v.url).sort()],
+    queryKey: ['market-requests', venueUrlsKey(venues)],
     enabled: !!venues,
+    initialData: () => readBrowserCache<MarketDemand[]>(key, { maxAgeMs: MARKET_REQUEST_CACHE_MS }),
+    staleTime: 10_000,
+    gcTime: 10 * 60_000,
     refetchInterval: 30_000,
     queryFn: async (): Promise<MarketDemand[]> => {
       const healthy = (venues ?? []).filter((v) => v.healthy)
@@ -322,7 +396,12 @@ export function useMarketRequests(venues: Venue[] | undefined) {
           agg.set(req.instrumentId, e)
         }
       }
-      return [...agg.values()].sort((a, b) => b.count - a.count)
+      const requests = [...agg.values()].sort((a, b) => b.count - a.count)
+      if (requests.length > 0) {
+        writeBrowserCache(key, requests)
+        return requests
+      }
+      return readBrowserCache<MarketDemand[]>(key, { maxAgeMs: MARKET_REQUEST_CACHE_MS }) ?? requests
     },
   })
 }

@@ -12,6 +12,7 @@ import type { GetContractEventsReturnType } from 'viem/actions'
 import { useQuery } from '@tanstack/react-query'
 import { usePublicClient } from 'wagmi'
 import { CHAIN, VENUE_URL } from './api'
+import { cacheKey, readBrowserCache, writeBrowserCache } from './browser-cache'
 
 export const SETTLEMENT = {
   address: '0x31D0215d77A06ff97Cb61BbBe4b931Ac0D1da8aA' as Address,
@@ -22,6 +23,7 @@ export const SETTLEMENT = {
 
 const LOG_SCAN_BLOCKS = 1_900n
 const ZERO_LOT_ID = `0x${'0'.repeat(64)}` as Hex
+const LOT_CACHE_MS = 10 * 60_000
 
 export const EIP712_DOMAIN = {
   name: 'InferenceBazaarSettlement',
@@ -272,6 +274,63 @@ export interface CreditLot {
   txHash: Hex
 }
 
+interface CachedCreditLot {
+  lotId: Hex
+  instrument: Hex
+  qtyTokens: string
+  lockedTokens: string
+  filledTokens: string
+  expiry: string
+  notionalMicro: string
+  issuer: Address
+  txHash: Hex
+}
+
+function myLotsCacheKey(holderAddress: Address): string {
+  return cacheKey('my-lots', CHAIN.id, SETTLEMENT.address, holderAddress.toLowerCase())
+}
+
+function toCachedCreditLot(lot: CreditLot): CachedCreditLot {
+  return {
+    lotId: lot.lotId,
+    instrument: lot.instrument,
+    qtyTokens: lot.qtyTokens.toString(),
+    lockedTokens: lot.lockedTokens.toString(),
+    filledTokens: lot.filledTokens.toString(),
+    expiry: lot.expiry.toString(),
+    notionalMicro: lot.notionalMicro.toString(),
+    issuer: lot.issuer,
+    txHash: lot.txHash,
+  }
+}
+
+function fromCachedCreditLot(lot: CachedCreditLot): CreditLot {
+  return {
+    lotId: lot.lotId,
+    instrument: lot.instrument,
+    qtyTokens: BigInt(lot.qtyTokens),
+    lockedTokens: BigInt(lot.lockedTokens),
+    filledTokens: BigInt(lot.filledTokens),
+    expiry: BigInt(lot.expiry),
+    notionalMicro: BigInt(lot.notionalMicro),
+    issuer: lot.issuer,
+    txHash: lot.txHash,
+  }
+}
+
+export function readCachedMyLots(holderAddress: Address, maxAgeMs = LOT_CACHE_MS): CreditLot[] | undefined {
+  return readBrowserCache<CachedCreditLot[], CreditLot[]>(myLotsCacheKey(holderAddress), {
+    maxAgeMs,
+    revive: (lots) => lots.map(fromCachedCreditLot),
+  })
+}
+
+export function writeCachedMyLots(holderAddress: Address, lots: CreditLot[]): void {
+  writeBrowserCache(myLotsCacheKey(holderAddress), lots, {
+    serialize: (value) => value.map(toCachedCreditLot),
+  })
+}
+
 async function fetchFillSettledLogs(client: PublicClient): Promise<FillSettledLog[]> {
   const latestBlock = await client.getBlockNumber()
   const logs: FillSettledLog[] = []
@@ -329,7 +388,20 @@ export function useMyLots(address: Address | undefined) {
   return useQuery({
     queryKey: ['lots', address],
     enabled: !!address && !!client,
+    initialData: () => (address ? readCachedMyLots(address) : undefined),
+    staleTime: 30_000,
+    gcTime: 30 * 60_000,
     refetchInterval: 30_000,
-    queryFn: () => fetchMyLots(client!, address!),
+    queryFn: async () => {
+      try {
+        const lots = await fetchMyLots(client!, address!)
+        writeCachedMyLots(address!, lots)
+        return lots
+      } catch (error) {
+        const cached = readCachedMyLots(address!)
+        if (cached) return cached
+        throw error
+      }
+    },
   })
 }
