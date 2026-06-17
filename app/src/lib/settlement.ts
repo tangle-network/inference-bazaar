@@ -62,6 +62,14 @@ export const SPEND_PERMIT_TYPES = {
   ],
 } as const
 
+export const SPEND_VOUCHER_TYPES = {
+  SpendVoucher: [
+    { name: 'lotId', type: 'bytes32' },
+    { name: 'sessionKey', type: 'address' },
+    { name: 'servedCumulative', type: 'uint64' },
+  ],
+} as const
+
 export const RECEIPT_TYPES = {
   RedemptionReceipt: [
     { name: 'redemptionId', type: 'bytes32' },

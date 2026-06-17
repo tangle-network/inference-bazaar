@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useSignTypedData } from 'wagmi'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { CHAIN } from '~/lib/api'
@@ -8,6 +9,7 @@ import {
   SPEND_PERMIT_TYPES,
   type CreditLot,
 } from '~/lib/settlement'
+import { saveSpendKey, spendKeyId, type StoredSpendKey } from '~/lib/spend-key'
 
 /**
  * The headline consumption path (spend channel — see docs/specs/spend-rail.md).
@@ -20,7 +22,7 @@ import {
  */
 export function ApiKeyMint({ lot, venueUrl }: { lot: CreditLot; venueUrl: string }) {
   const { signTypedDataAsync } = useSignTypedData()
-  const [minted, setMinted] = useState<{ sessionPriv: string } | null>(null)
+  const [minted, setMinted] = useState<{ sessionPriv: string; key: StoredSpendKey } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -53,8 +55,26 @@ export function ApiKeyMint({ lot, venueUrl }: { lot: CreditLot; venueUrl: string
         }),
       })
       if (!res.ok) throw new Error(await res.text())
-      await res.json()
-      setMinted({ sessionPriv })
+      const reg = (await res.json()) as {
+        model?: string
+        instrumentId?: string
+        maxTokens?: number
+        expiry?: number
+      }
+      const key = saveSpendKey({
+        id: spendKeyId(lot.lotId, sessionKey),
+        lotId: lot.lotId,
+        sessionPriv,
+        sessionKey,
+        venueUrl,
+        model: reg.model ?? '',
+        instrumentId: reg.instrumentId ?? '',
+        maxTokens: reg.maxTokens ?? Number(maxTokens),
+        expiry: reg.expiry ?? Number(expiry),
+        ackedTokens: 0,
+        createdAt: Date.now(),
+      })
+      setMinted({ sessionPriv, key })
     } catch (e) {
       setError(e instanceof Error ? e.message.split('\n')[0]! : String(e))
     } finally {
@@ -74,14 +94,22 @@ export function ApiKeyMint({ lot, venueUrl }: { lot: CreditLot; venueUrl: string
     const copyAll = `${run}\n\n# then:\n${snippet}`
     return (
       <div className="w-full rounded-[10px] border border-[var(--s-accent)]/30 bg-[var(--s-accent-soft)] px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <span className="mono-label !text-[var(--s-accent)]">Session key — shown once, store it now</span>
-          <button
-            onClick={() => { void navigator.clipboard.writeText(copyAll); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
-            className="font-data text-[15px] font-semibold text-[var(--s-accent)] hover:underline"
-          >
-            {copied ? 'copied ✓' : 'copy setup'}
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="mono-label !text-[var(--s-accent)]">Loaded into chat</span>
+          <div className="flex items-center gap-2">
+            <Link to="/developer/chat" className="btn-primary h-8 whitespace-nowrap !px-3 !text-[13px]">
+              <span className="i-ph:chat-circle-dots text-[15px]" /> Open chat
+            </Link>
+            <button
+              onClick={() => { void navigator.clipboard.writeText(copyAll); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
+              className="font-data text-[15px] font-semibold text-[var(--s-accent)] hover:underline"
+            >
+              {copied ? 'copied' : 'copy setup'}
+            </button>
+          </div>
+        </div>
+        <div className="mt-1 font-data text-[12px] text-[var(--s-text-muted)]">
+          {minted.key.model || 'Model'} · stored locally for this browser
         </div>
         <div className="mt-2 font-data text-[15px] text-[var(--s-text-secondary)]">
           Run the gateway with your session key (locally = zero trust in us):

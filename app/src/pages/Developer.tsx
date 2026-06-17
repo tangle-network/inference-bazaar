@@ -27,6 +27,15 @@ import {
   type CreditLot,
   type MeterRow,
 } from '~/lib/settlement'
+import {
+  getActiveSpendKey,
+  isSpendKeyUsable,
+  spendKeyLabel,
+  spendVoucherHeaders,
+  SPEND_KEY_EVENT,
+  updateSpendKey,
+  type StoredSpendKey,
+} from '~/lib/spend-key'
 import { useVenueRegistry, endpointFor, type Venue } from '~/lib/venues'
 import { privacyOn } from '~/lib/privacy'
 
@@ -486,6 +495,7 @@ function useDeveloperModels(gatewayModels: string[]) {
 export function DeveloperChatPage() {
   const { address } = useAccount()
   const lots = useMyLots(address)
+  const [spendKey, setSpendKey] = useState<StoredSpendKey | null>(() => getActiveSpendKey())
   const [gatewayUrl, setGatewayUrl] = useState('http://127.0.0.1:8088/v1')
   const [apiKey, setApiKey] = useState('sk-inference-bazaar')
   const [gatewayModels, setGatewayModels] = useState<string[]>([])
@@ -498,19 +508,42 @@ export function DeveloperChatPage() {
   const [gatewayState, setGatewayState] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
   const [gatewayError, setGatewayError] = useState<string | null>(null)
 
+  const activeSpendKey = spendKey && isSpendKeyUsable(spendKey) ? spendKey : null
   const modelOptions = useDeveloperModels(gatewayModels)
-  const selected = modelOptions.find((m) => m.id === model) ?? fallbackModelOption(model)
-  const thinkingOptions = useMemo(() => thinkingOptionsFor(model), [model])
+  const selectedModel = activeSpendKey?.model || model
+  const selected = modelOptions.find((m) => m.id === selectedModel) ?? fallbackModelOption(selectedModel)
+  const thinkingOptions = useMemo(() => thinkingOptionsFor(selectedModel), [selectedModel])
   const statusTone = gatewayState === 'ok' ? 'emerald' : gatewayState === 'error' ? 'crimson' : 'neutral'
   const activeLots = (lots.data ?? []).filter(
     (l) => l.qtyTokens - l.lockedTokens > 0n && Number(l.expiry) * 1000 > Date.now(),
   )
 
   useEffect(() => {
+    const refresh = () => setSpendKey(getActiveSpendKey())
+    window.addEventListener(SPEND_KEY_EVENT, refresh)
+    window.addEventListener('storage', refresh)
+    refresh()
+    return () => {
+      window.removeEventListener(SPEND_KEY_EVENT, refresh)
+      window.removeEventListener('storage', refresh)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!activeSpendKey) return
+    setGatewayUrl(`${activeSpendKey.venueUrl}/v1`)
+    setApiKey(spendKeyLabel(activeSpendKey))
+    setModel(activeSpendKey.model)
+    void refreshGatewayModels(activeSpendKey.venueUrl, '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSpendKey?.id])
+
+  useEffect(() => {
+    if (activeSpendKey) return
     if (modelOptions.length > 0 && !modelOptions.some((m) => m.id === model)) {
       setModel(modelOptions[0]!.id)
     }
-  }, [model, modelOptions])
+  }, [activeSpendKey, model, modelOptions])
 
   useEffect(() => {
     if (!thinkingOptions.some((option) => option.value === thinking)) {
@@ -525,14 +558,16 @@ export function DeveloperChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function refreshGatewayModels() {
-    const base = normalizeGatewayUrl(gatewayUrl)
+  async function refreshGatewayModels(nextUrl = activeSpendKey?.venueUrl ?? gatewayUrl, nextApiKey = activeSpendKey ? '' : apiKey) {
+    const base = normalizeGatewayUrl(nextUrl)
     if (!base) return
     setGatewayState('checking')
     setGatewayError(null)
     try {
+      const headers: Record<string, string> = {}
+      if (nextApiKey) headers.authorization = `Bearer ${nextApiKey}`
       const res = await fetch(`${base}/models`, {
-        headers: { authorization: `Bearer ${apiKey || 'sk-inference-bazaar'}` },
+        headers,
       })
       const text = await res.text()
       if (!res.ok) throw new Error(`${res.status}: ${text}`)
@@ -540,7 +575,7 @@ export function DeveloperChatPage() {
       const ids = (json.data ?? []).map((m) => m.id).filter((id): id is string => !!id)
       if (ids.length === 0) throw new Error('gateway returned no models')
       setGatewayModels(ids)
-      setModel((current) => (ids.includes(current) ? current : ids[0]!))
+      setModel((current) => (activeSpendKey?.model ? activeSpendKey.model : ids.includes(current) ? current : ids[0]!))
       setGatewayState('ok')
     } catch (e) {
       setGatewayModels([])
@@ -549,59 +584,104 @@ export function DeveloperChatPage() {
     }
   }
 
+  async function postChat(base: string, body: Record<string, unknown>, headers: Record<string, string>) {
+    const res = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    })
+    const text = await res.text()
+    let json: any
+    try {
+      json = JSON.parse(text)
+    } catch {
+      json = null
+    }
+    if (!res.ok) {
+      const msg = json?.error?.message ?? text
+      throw new Error(`${res.status}: ${msg}`)
+    }
+    return json
+  }
+
+  async function sendWithSpendKey(key: StoredSpendKey, nextMessages: ChatMessage[]) {
+    const base = normalizeGatewayUrl(key.venueUrl)
+    if (!base) throw new Error('operator URL missing')
+    const body = {
+      model: key.model,
+      max_tokens: DEFAULT_CHAT_MAX_TOKENS,
+      messages: [
+        { role: 'system', content: buildSystemPrompt(thinking) },
+        ...nextMessages.map((m) => ({ role: m.role, content: m.content })),
+      ],
+    }
+    const started = performance.now()
+    const json = await postChat(base, body, await spendVoucherHeaders(key, key.ackedTokens))
+    const nextCumulative = Number(json?.['inference-bazaar']?.nextCumulative)
+    if (Number.isFinite(nextCumulative) && nextCumulative >= key.ackedTokens) {
+      const updated = updateSpendKey(key.id, { ackedTokens: nextCumulative })
+      if (updated) setSpendKey(updated)
+      try {
+        const ack = await fetch(`${base}/spend/ack`, {
+          method: 'POST',
+          headers: await spendVoucherHeaders({ ...key, ackedTokens: nextCumulative }, nextCumulative),
+        })
+        if (!ack.ok) throw new Error(`${ack.status}: ${await ack.text()}`)
+      } catch (e) {
+        setGatewayError(`Ack pending: ${shortError(e)}`)
+      }
+    }
+    return {
+      id: `a-${Date.now()}`,
+      role: 'assistant' as const,
+      content: json?.choices?.[0]?.message?.content?.trim() || '',
+      usage: json?.usage,
+      ms: Math.round(performance.now() - started),
+    }
+  }
+
+  async function sendWithGateway(nextMessages: ChatMessage[]) {
+    const base = normalizeGatewayUrl(gatewayUrl)
+    if (!base) throw new Error('gateway URL missing')
+    const body: {
+      model: string
+      max_tokens: number
+      messages: { role: 'system' | 'user' | 'assistant'; content: string }[]
+      reasoning_effort?: Exclude<ThinkingLevel, 'off'>
+    } = {
+      model,
+      max_tokens: DEFAULT_CHAT_MAX_TOKENS,
+      messages: [
+        { role: 'system', content: buildSystemPrompt(thinking) },
+        ...nextMessages.map((m) => ({ role: m.role, content: m.content })),
+      ],
+    }
+    if (supportsNativeThinking(model) && thinking !== 'off') {
+      body.reasoning_effort = thinking
+    }
+    const started = performance.now()
+    const json = await postChat(base, body, { authorization: `Bearer ${apiKey || 'sk-inference-bazaar'}` })
+    return {
+      id: `a-${Date.now()}`,
+      role: 'assistant' as const,
+      content: json?.choices?.[0]?.message?.content?.trim() || '',
+      usage: json?.usage,
+      ms: Math.round(performance.now() - started),
+    }
+  }
+
   async function send() {
     const prompt = input.trim()
-    const base = normalizeGatewayUrl(gatewayUrl)
-    if (!prompt || !base || busy) return
+    if (!prompt || busy) return
     const user: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: prompt }
     const nextMessages = [...messages, user]
     setMessages(nextMessages)
     setInput('')
     setBusy(true)
     try {
-      const body: {
-        model: string
-        max_tokens: number
-        messages: { role: 'system' | 'user' | 'assistant'; content: string }[]
-        reasoning_effort?: Exclude<ThinkingLevel, 'off'>
-      } = {
-        model,
-        max_tokens: DEFAULT_CHAT_MAX_TOKENS,
-        messages: [
-          { role: 'system', content: buildSystemPrompt(thinking) },
-          ...nextMessages.map((m) => ({ role: m.role, content: m.content })),
-        ],
-      }
-      if (supportsNativeThinking(model) && thinking !== 'off') {
-        body.reasoning_effort = thinking
-      }
-      const started = performance.now()
-      const res = await fetch(`${base}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${apiKey || 'sk-inference-bazaar'}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      })
-      const text = await res.text()
-      let json: any
-      try {
-        json = JSON.parse(text)
-      } catch {
-        json = null
-      }
-      if (!res.ok) {
-        const msg = json?.error?.message ?? text
-        throw new Error(`${res.status}: ${msg}`)
-      }
-      const assistant: ChatMessage = {
-        id: `a-${Date.now()}`,
-        role: 'assistant',
-        content: json?.choices?.[0]?.message?.content?.trim() || '',
-        usage: json?.usage,
-        ms: Math.round(performance.now() - started),
-      }
+      const assistant = activeSpendKey
+        ? await sendWithSpendKey(activeSpendKey, nextMessages)
+        : await sendWithGateway(nextMessages)
       setMessages([...nextMessages, assistant])
       setGatewayState('ok')
     } catch (e) {
@@ -625,6 +705,7 @@ export function DeveloperChatPage() {
             <div className="flex items-center gap-2">
               <ProviderMark provider={selected.provider} size="sm" />
               <h1 className="truncate font-display text-[20px] font-semibold text-[var(--s-text)]">Chat</h1>
+              {activeSpendKey && <Badge tone="emerald">Lot key</Badge>}
               <Badge tone={statusTone}>{gatewayStateLabel(gatewayState)}</Badge>
             </div>
             <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 font-data text-[12px] uppercase tracking-wide text-[var(--s-text-muted)]">
@@ -632,7 +713,11 @@ export function DeveloperChatPage() {
               <span className="text-[var(--s-text-subtle)]">/</span>
               <span>{selected.outputMicroPerM ? pricePerM(selected.outputMicroPerM) : 'metered'} out</span>
               <span className="text-[var(--s-text-subtle)]">/</span>
-              <span>{lots.isLoading ? '...' : activeLots.length} active lots</span>
+              <span>
+                {activeSpendKey
+                  ? `${tokens(Math.max(0, activeSpendKey.maxTokens - activeSpendKey.ackedTokens))} key left`
+                  : `${lots.isLoading ? '...' : activeLots.length} active lots`}
+              </span>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -642,7 +727,8 @@ export function DeveloperChatPage() {
               aria-expanded={gatewayOpen}
               className="btn-secondary h-9 whitespace-nowrap"
             >
-              <span className="i-ph:terminal-window text-[16px]" /> Gateway
+              <span className={cn(activeSpendKey ? 'i-ph:key' : 'i-ph:terminal-window', 'text-[16px]')} />
+              {activeSpendKey ? 'Key' : 'Gateway'}
             </button>
             <Link to="/developer" className="btn-secondary h-9 whitespace-nowrap">
               <span className="i-ph:key text-[16px]" /> API keys
@@ -650,7 +736,32 @@ export function DeveloperChatPage() {
           </div>
         </div>
 
-        {gatewayOpen && (
+        {gatewayOpen && activeSpendKey && (
+          <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(220px,320px)_auto]">
+            <div className="flex h-9 min-w-0 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-2.5">
+              <span className="i-ph:hard-drives shrink-0 text-[15px] text-[var(--s-text-subtle)]" />
+              <span className="min-w-0 flex-1 truncate font-data text-[14px] text-[var(--s-text)]">
+                {activeSpendKey.venueUrl}
+              </span>
+            </div>
+            <div className="flex h-9 min-w-0 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-2.5">
+              <span className="i-ph:fingerprint shrink-0 text-[15px] text-[var(--s-text-subtle)]" />
+              <span className="min-w-0 flex-1 truncate font-data text-[14px] text-[var(--s-text)]">
+                {spendKeyLabel(activeSpendKey)}
+              </span>
+            </div>
+            <button
+              onClick={() => void refreshGatewayModels(activeSpendKey.venueUrl, '')}
+              className="btn-secondary h-9 justify-center"
+              title="Refresh operator models"
+            >
+              <span className={cn(gatewayState === 'checking' ? 'i-ph:circle-notch animate-spin' : 'i-ph:arrow-clockwise', 'text-[16px]')} />
+              Refresh
+            </button>
+          </div>
+        )}
+
+        {gatewayOpen && !activeSpendKey && (
           <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(220px,320px)_auto]">
             <label className="flex h-9 min-w-0 items-center gap-2 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-surface)] px-2.5">
               <span className="i-ph:terminal-window shrink-0 text-[15px] text-[var(--s-text-subtle)]" />
@@ -693,7 +804,9 @@ export function DeveloperChatPage() {
                     Lot-backed chat
                   </h2>
                   <p className="mt-1 font-body text-[15px] leading-relaxed text-[var(--s-text-muted)]">
-                    Spend through the local gateway with any OpenAI-compatible model.
+                    {activeSpendKey
+                      ? `Spending through ${activeSpendKey.model}.`
+                      : 'Spend through the local gateway with any OpenAI-compatible model.'}
                   </p>
                 </div>
               </div>
@@ -773,9 +886,9 @@ export function DeveloperChatPage() {
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--s-divider)] px-2 py-2">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
               <ChatModelPicker
-                value={model}
-                models={modelOptions}
-                onChange={setModel}
+                value={selectedModel}
+                models={activeSpendKey ? [selected] : modelOptions}
+                onChange={activeSpendKey ? () => setModel(activeSpendKey.model) : setModel}
                 loading={gatewayState === 'checking'}
                 compact
                 placement="top"
