@@ -7,9 +7,9 @@ import { Panel, Slider } from '~/components/ui'
 import { ProviderLogo } from '~/lib/logos'
 import { cn } from '~/lib/cn'
 import { compactUsd, pct, pricePerM, tokens } from '~/lib/format'
-import { CHAIN, useCatalog, useInstruments } from '~/lib/api'
+import { CHAIN, useCatalog } from '~/lib/api'
 import { STEP_LABEL, useFirmTrade, type TradeProgress, type TradeReceipt } from '~/lib/trade'
-import { useAggBook, useVenueRegistry } from '~/lib/venues'
+import { useAggBook, useAggInstruments, useVenueRegistry } from '~/lib/venues'
 import { planRoute } from '~/lib/router'
 
 /**
@@ -22,7 +22,8 @@ export default function BuyPage() {
   const routeModel = (params['*'] ??'').replace(/:(input|output)$/, '')
 
   const catalog = useCatalog()
-  const instruments = useInstruments()
+  const registry = useVenueRegistry()
+  const instruments = useAggInstruments(registry.data)
 
   // Models tradeable here = models with at least one live instrument.
   const tradeable = useMemo(() => {
@@ -50,7 +51,6 @@ export default function BuyPage() {
   // Price + execute against the MERGED (cross-venue) NBBO ladder, not a single
   // home venue — so the quote the user sees is exactly the liquidity execution
   // sweeps (see ~/lib/router planRoute). registry must be resolved first.
-  const registry = useVenueRegistry()
   const outBook = useAggBook(registry.data, entry?.kinds.output ? `${modelId}:output` : null)
   const inBook = useAggBook(registry.data, entry?.kinds.input ? `${modelId}:input` : null)
 

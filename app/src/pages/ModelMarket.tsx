@@ -8,9 +8,9 @@ import { DepthChart } from '~/components/DepthChart'
 import { ProviderLogo } from '~/lib/logos'
 import { cn } from '~/lib/cn'
 import { compactUsd, pct, pricePerM, tokens } from '~/lib/format'
-import { CHAIN, useCatalog, useInstruments } from '~/lib/api'
+import { CHAIN, useCatalog } from '~/lib/api'
 import { STEP_LABEL, useFirmTrade, type TradeProgress, type TradeReceipt } from '~/lib/trade'
-import { useVenueRegistry, useAggBook } from '~/lib/venues'
+import { useVenueRegistry, useAggBook, useAggInstruments } from '~/lib/venues'
 import { planRoute } from '~/lib/router'
 
 type Kind = 'output' | 'input'
@@ -25,8 +25,8 @@ export default function ModelMarketPage() {
   const [kind, setKind] = useState<Kind>(kindFromRoute ?? 'output')
 
   const catalog = useCatalog()
-  const instruments = useInstruments()
   const registry = useVenueRegistry()
+  const instruments = useAggInstruments(registry.data)
   const model = catalog.data?.get(modelId)
   const instrumentId = `${modelId}:${kind}`
   const hasInstrument = (instruments.data ?? []).some((i) => i.id === instrumentId)
