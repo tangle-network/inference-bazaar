@@ -8,9 +8,14 @@ import { ProviderLogo } from '~/lib/logos'
 import { cn } from '~/lib/cn'
 import { compactUsd, pct, pricePerM, tokens } from '~/lib/format'
 import { CHAIN, useCatalog } from '~/lib/api'
-import { STEP_LABEL, useFirmTrade, type TradeProgress, type TradeReceipt } from '~/lib/trade'
+import {
+  STEP_LABEL,
+  planFirmBuyRoute,
+  useFirmTrade,
+  type TradeProgress,
+  type TradeReceipt,
+} from '~/lib/trade'
 import { useAggBook, useAggInstruments, useVenueRegistry } from '~/lib/venues'
-import { planRoute } from '~/lib/router'
 
 /**
  * Inference burns input AND output tokens on every call — so you buy usage,
@@ -45,12 +50,11 @@ export default function BuyPage() {
   const entry = tradeable.find((t) => t.model.id === modelId) ?? null
 
   // Monthly usage, in millions of tokens.
-  const [inputM, setInputM] = useState(50)
-  const [outputM, setOutputM] = useState(10)
+  const [inputM, setInputM] = useState(1)
+  const [outputM, setOutputM] = useState(1)
 
-  // Price + execute against the MERGED (cross-venue) NBBO ladder, not a single
-  // home venue — so the quote the user sees is exactly the liquidity execution
-  // sweeps (see ~/lib/router planRoute). registry must be resolved first.
+  // Price display comes from the merged book; execution below revalidates with
+  // signed RFQs before any wallet transaction.
   const outBook = useAggBook(registry.data, entry?.kinds.output ? `${modelId}:output` : null)
   const inBook = useAggBook(registry.data, entry?.kinds.input ? `${modelId}:input` : null)
 
@@ -92,7 +96,7 @@ export default function BuyPage() {
         covered: leg.qty - remaining,
         costMicro: cost,
         worstPrice: worst,
-        listCostMicro: Math.round((leg.listMicroPerM * leg.qty) / 1e6),
+        listCostMicro: Math.round((leg.listMicroPerM * (leg.qty - remaining)) / 1e6),
       }
     })
     const cost = priced.reduce((s, l) => s + l.costMicro, 0)
@@ -101,7 +105,7 @@ export default function BuyPage() {
   }, [entry, inputM, outputM, inBook.data, outBook.data])
 
   const { address, isConnected } = useAccount()
-  const { buyLeg } = useFirmTrade()
+  const { buyFirmQuote } = useFirmTrade()
   const [progress, setProgress] = useState<(TradeProgress & { leg?: string }) | null>(null)
   const [receipts, setReceipts] = useState<TradeReceipt[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -113,28 +117,29 @@ export default function BuyPage() {
     setReceipts([])
     try {
       const venues = registry.data ?? []
-      const done: TradeReceipt[] = []
-      for (const leg of quote.legs) {
-        if (leg.covered <= 0) continue
-        const onProg = (p: TradeProgress) => setProgress({ ...p, leg: leg.kind })
-        // Walk the merged ladder into a split plan, then fill each venue's slice
-        // through the firm path (passing a single-venue set pins that operator).
-        // This is the SOR: sweep the genuinely-cheapest liquidity wherever it
-        // sits, matching the quote shown above.
-        const book = leg.kind === 'output' ? outBook.data : inBook.data
-        const route = book ? planRoute(book, 'buy', leg.covered) : null
-        const subLegs = route?.legs ?? []
-        if (subLegs.length === 0) {
-          // No agg book (single-venue dev, or stale) — best across all venues.
-          done.push(await buyLeg(`${modelId}:${leg.kind}`, leg.covered, onProg, venues))
-          continue
-        }
-        for (const rleg of subLegs) {
-          const venue = venues.find(
-            (v) => v.operator.toLowerCase() === rleg.operator.toLowerCase(),
+      const firmPlans: Array<{ kind: 'input' | 'output'; plan: Awaited<ReturnType<typeof planFirmBuyRoute>> }> = []
+      for (const leg of quote.legs.filter((l) => l.covered > 0)) {
+        setProgress({ step: 'quoting', leg: leg.kind })
+        const plan = await planFirmBuyRoute(venues, {
+          instrumentId: `${modelId}:${leg.kind}`,
+          qtyTokens: leg.covered,
+        })
+        if (plan.partial) {
+          throw new Error(
+            `Only ${tokens(plan.filledTokens)} ${leg.kind} tokens are firm right now; requested ${tokens(plan.requestedTokens)}.`,
           )
-          if (!venue) continue
-          done.push(await buyLeg(`${modelId}:${leg.kind}`, rleg.qtyTokens, onProg, [venue]))
+        }
+        firmPlans.push({ kind: leg.kind, plan })
+      }
+      if (firmPlans.every(({ plan }) => plan.quotes.length === 0)) {
+        throw new Error('No firm quote is available right now.')
+      }
+
+      const done: TradeReceipt[] = []
+      for (const { kind, plan } of firmPlans) {
+        const onProg = (p: TradeProgress) => setProgress({ ...p, leg: kind })
+        for (const firm of plan.quotes) {
+          done.push(await buyFirmQuote(firm, onProg))
         }
       }
       setReceipts(done)
@@ -240,10 +245,10 @@ export default function BuyPage() {
                           {compactUsd(leg.listCostMicro)}
                         </td>
                         <td className="py-2.5 text-right font-semibold tabular-nums text-[var(--s-text)]">
-                          {compactUsd(leg.costMicro)}
+                          {leg.covered > 0 ? compactUsd(leg.costMicro) : 'No firm quote'}
                         </td>
                         <td className="py-2.5 text-right tabular-nums text-[var(--s-emerald)]">
-                          {leg.listCostMicro > leg.costMicro
+                          {leg.covered > 0 && leg.listCostMicro > leg.costMicro
                             ? pct((leg.listCostMicro - leg.costMicro) / leg.listCostMicro, 1)
                             : '—'}
                         </td>

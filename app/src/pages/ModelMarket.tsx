@@ -9,9 +9,14 @@ import { ProviderLogo } from '~/lib/logos'
 import { cn } from '~/lib/cn'
 import { compactUsd, pct, pricePerM, tokens } from '~/lib/format'
 import { CHAIN, useCatalog } from '~/lib/api'
-import { STEP_LABEL, useFirmTrade, type TradeProgress, type TradeReceipt } from '~/lib/trade'
+import {
+  STEP_LABEL,
+  planFirmBuyRoute,
+  useFirmTrade,
+  type TradeProgress,
+  type TradeReceipt,
+} from '~/lib/trade'
 import { useVenueRegistry, useAggBook, useAggInstruments } from '~/lib/venues'
-import { planRoute } from '~/lib/router'
 
 type Kind = 'output' | 'input'
 
@@ -215,8 +220,8 @@ function TradeTicket({
   onFilled: () => void
 }) {
   const { isConnected } = useAccount()
-  const { buyLeg } = useFirmTrade()
-  const [qtyM, setQtyM] = useState(5) // millions of tokens
+  const { buyFirmQuote } = useFirmTrade()
+  const [qtyM, setQtyM] = useState(1) // millions of tokens
   const [progress, setProgress] = useState<TradeProgress | null>(null)
   const [receipt, setReceipt] = useState<TradeReceipt | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -231,21 +236,15 @@ function TradeTicket({
     setError(null)
     setReceipt(null)
     try {
-      // SOR: walk the merged NBBO ladder into a split plan, fill each venue's
-      // slice through the firm path (pin the operator with a single-venue set) —
-      // same pattern as Buy.tsx. Collapse the per-leg receipts into one blended
-      // summary for this single-receipt surface.
-      const route = planRoute({ asks: askDepth, bids: [] } as unknown as Parameters<typeof planRoute>[0], 'buy', qtyTokens)
-      const receipts: TradeReceipt[] = []
-      if (route.legs.length === 0) {
-        receipts.push(await buyLeg(instrumentId, qtyTokens, setProgress, venues))
-      } else {
-        for (const leg of route.legs) {
-          const venue = venues.find((v) => v.operator.toLowerCase() === leg.operator.toLowerCase())
-          if (!venue) continue
-          receipts.push(await buyLeg(instrumentId, leg.qtyTokens, setProgress, [venue]))
-        }
+      setProgress({ step: 'quoting', detail: `auctioning across ${venues.filter((v) => v.healthy).length} venues` })
+      const firm = await planFirmBuyRoute(venues, { instrumentId, qtyTokens })
+      if (firm.partial) {
+        throw new Error(
+          `Only ${tokens(firm.filledTokens)} tokens are firm right now; requested ${tokens(firm.requestedTokens)}.`,
+        )
       }
+      const receipts: TradeReceipt[] = []
+      for (const quote of firm.quotes) receipts.push(await buyFirmQuote(quote, setProgress))
       if (receipts.length === 0) throw new Error('no venue filled this order')
       const totalQty = receipts.reduce((s, x) => s + x.qtyTokens, 0)
       const totalCost = receipts.reduce((s, x) => s + x.costMicro, 0)
