@@ -7,16 +7,25 @@ import { WalletButton } from '~/components/WalletButton'
 import { NetworkSwitcher } from '~/components/NetworkSwitcher'
 import { InferenceBazaarBrand } from '~/components/TangleLogo'
 
-// Outcome-led: the buyer's two verbs first (get cheaper inference, hold it),
-// then the engine room (books, sellers, operators, the on-chain trail).
-const NAV = [
+interface NavItem {
+  to: string
+  label: string
+  icon: string
+  end?: boolean
+}
+
+const MARKET_NAV: NavItem[] = [
   { to: '/', label: 'Buy inference', icon: 'i-ph:lightning', end: true },
   { to: '/portfolio', label: 'Portfolio', icon: 'i-ph:wallet' },
-  { to: '/developer', label: 'Developer', icon: 'i-ph:code' },
   { to: '/markets', label: 'Order books', icon: 'i-ph:chart-line-up' },
   { to: '/sell', label: 'Sell', icon: 'i-ph:storefront' },
   { to: '/operators', label: 'Operators', icon: 'i-ph:hard-drives' },
   { to: '/activity', label: 'Activity', icon: 'i-ph:pulse' },
+]
+
+const DEVELOPER_NAV: NavItem[] = [
+  { to: '/developer', label: 'Developer', icon: 'i-ph:code', end: true },
+  { to: '/developer/chat', label: 'Chat', icon: 'i-ph:chat-circle-dots' },
 ]
 
 function ThemeButton() {
@@ -64,10 +73,18 @@ function PrivacyButton() {
   )
 }
 
-function NavItems({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
+function NavItems({
+  items,
+  collapsed = false,
+  onNavigate,
+}: {
+  items: NavItem[]
+  collapsed?: boolean
+  onNavigate?: () => void
+}) {
   return (
     <nav className="flex flex-col gap-0.5">
-      {NAV.map((item) => (
+      {items.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}
@@ -98,6 +115,27 @@ function NavItems({ collapsed = false, onNavigate }: { collapsed?: boolean; onNa
         </NavLink>
       ))}
     </nav>
+  )
+}
+
+function NavSection({
+  label,
+  items,
+  collapsed,
+  onNavigate,
+  className,
+}: {
+  label: string
+  items: NavItem[]
+  collapsed?: boolean
+  onNavigate?: () => void
+  className?: string
+}) {
+  return (
+    <div className={cn(!collapsed && 'px-1', className)}>
+      {collapsed ? <div className="mx-auto mb-2 h-px w-8 bg-[var(--s-divider)]" /> : <div className="mono-label mb-2 px-2">{label}</div>}
+      <NavItems items={items} collapsed={collapsed} onNavigate={onNavigate} />
+    </div>
   )
 }
 
@@ -165,10 +203,8 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <div className={cn('mt-6', !collapsed && 'px-1')}>
-          {!collapsed && <div className="mono-label mb-2 px-2">Market</div>}
-          <NavItems collapsed={collapsed} />
-        </div>
+        <NavSection label="Market" items={MARKET_NAV} collapsed={collapsed} className="mt-6" />
+        <NavSection label="Developer" items={DEVELOPER_NAV} collapsed={collapsed} className="mt-5" />
 
         {/* Controls dock — bottom-left (arena pattern). The top bar is killed on
          * desktop, so theme + privacy, the account, and the network switcher all
@@ -223,7 +259,8 @@ export function Shell({ children }: { children: ReactNode }) {
         {/* Mobile nav drawer */}
         {mobileNav && (
           <div className="border-b border-[var(--s-border)] bg-[var(--s-surface)] px-3 py-3 lg:hidden">
-            <NavItems onNavigate={() => setMobileNav(false)} />
+            <NavSection label="Market" items={MARKET_NAV} onNavigate={() => setMobileNav(false)} />
+            <NavSection label="Developer" items={DEVELOPER_NAV} onNavigate={() => setMobileNav(false)} className="mt-4" />
           </div>
         )}
 

@@ -268,3 +268,60 @@ export function useAggInstruments(venues: Venue[] | undefined) {
     },
   })
 }
+
+export interface MarketDemand {
+  instrumentId: string
+  count: number
+  lastRequestedAt: number
+}
+
+/** Signal demand for a market across every healthy operator. Returns how many accepted. */
+export async function requestMarket(
+  venues: Venue[] | undefined,
+  model: string,
+  kind: string,
+): Promise<number> {
+  const healthy = (venues ?? []).filter((v) => v.healthy)
+  const results = await Promise.allSettled(
+    healthy.map((v) =>
+      fetch(`${v.url}/market-requests`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model, kind }),
+      }),
+    ),
+  )
+  return results.filter((r) => r.status === 'fulfilled' && r.value.ok).length
+}
+
+/** Aggregated demand book across every healthy operator, most-requested first. */
+export function useMarketRequests(venues: Venue[] | undefined) {
+  return useQuery({
+    queryKey: ['market-requests', (venues ?? []).map((v) => v.url).sort()],
+    enabled: !!venues,
+    refetchInterval: 30_000,
+    queryFn: async (): Promise<MarketDemand[]> => {
+      const healthy = (venues ?? []).filter((v) => v.healthy)
+      const results = await Promise.allSettled(
+        healthy.map((v) =>
+          fetch(`${v.url}/market-requests`).then((r) => (r.ok ? r.json() : { requests: [] })),
+        ),
+      )
+      const agg = new Map<string, MarketDemand>()
+      for (const r of results) {
+        if (r.status !== 'fulfilled') continue
+        for (const req of (r.value.requests ?? []) as MarketDemand[]) {
+          const e = agg.get(req.instrumentId) ?? {
+            instrumentId: req.instrumentId,
+            count: 0,
+            lastRequestedAt: 0,
+          }
+          e.count += req.count
+          e.lastRequestedAt = Math.max(e.lastRequestedAt, req.lastRequestedAt)
+          agg.set(req.instrumentId, e)
+        }
+      }
+      return [...agg.values()].sort((a, b) => b.count - a.count)
+    },
+  })
+}

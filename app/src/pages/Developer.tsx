@@ -5,8 +5,7 @@ import { ConnectKitButton } from 'connectkit'
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
+  DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@tangle-network/sandbox-ui/primitives'
 import type { Address, Hex } from 'viem'
@@ -424,34 +423,29 @@ function EffortPicker({
         sideOffset={8}
         className="z-50 w-[288px] max-w-[calc(100vw-24px)] rounded-[10px] border border-[var(--s-border)] bg-[var(--s-panel)] p-1 text-[var(--s-text)] shadow-[0_18px_60px_rgba(0,0,0,0.28)]"
       >
-        <DropdownMenuRadioGroup
-          value={value}
-          onValueChange={(next) => onChange(next as ThinkingLevel)}
-        >
-          {options.map((option) => {
-            const active = option.value === value
-            return (
-              <DropdownMenuRadioItem
-                key={option.value}
-                value={option.value}
-                data-testid={`developer-effort-option-${option.value}`}
-                className={cn(
-                  'rounded-[8px] py-2 pl-8 pr-2.5 font-data outline-none transition-colors focus:bg-[var(--s-surface)]',
-                  active
-                    ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
-                    : 'text-[var(--s-text-secondary)]',
-                )}
-              >
-                <span className="min-w-0">
-                  <span className="block truncate text-[14px] font-semibold">{option.label}</span>
-                  <span className={cn('mt-0.5 block text-[12px] leading-snug', active ? 'text-[var(--s-accent)] opacity-80' : 'text-[var(--s-text-muted)]')}>
-                    {option.detail}
-                  </span>
+        {options.map((option) => {
+          const active = option.value === value
+          return (
+            <DropdownMenuItem
+              key={option.value}
+              data-testid={`developer-effort-option-${option.value}`}
+              onSelect={() => onChange(option.value)}
+              className={cn(
+                'rounded-[8px] px-3 py-2 font-data outline-none transition-colors focus:bg-[var(--s-surface)]',
+                active
+                  ? 'bg-[var(--s-accent-soft)] text-[var(--s-accent)]'
+                  : 'text-[var(--s-text-secondary)]',
+              )}
+            >
+              <span className="min-w-0">
+                <span className="block truncate text-[14px] font-semibold">{option.label}</span>
+                <span className={cn('mt-0.5 block text-[12px] leading-snug', active ? 'text-[var(--s-accent)] opacity-80' : 'text-[var(--s-text-muted)]')}>
+                  {option.detail}
                 </span>
-              </DropdownMenuRadioItem>
-            )
-          })}
-        </DropdownMenuRadioGroup>
+              </span>
+            </DropdownMenuItem>
+          )
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   )
