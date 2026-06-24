@@ -13,6 +13,7 @@ import BuyPage from '~/pages/Buy'
 import SellPage from '~/pages/Sell'
 import OperatorsPage from '~/pages/Operators'
 import OperatorRegisterPage from '~/pages/OperatorRegister'
+import DeployPage from '~/pages/Deploy'
 import ActivityPage from '~/pages/Activity'
 import PortfolioPage from '~/pages/Portfolio'
 import DeveloperPage, { DeveloperChatPage } from '~/pages/Developer'
@@ -37,6 +38,7 @@ const router = createBrowserRouter([
   route('/sell', <SellPage />),
   route('/operators', <OperatorsPage />),
   route('/operators/register', <OperatorRegisterPage />),
+  route('/deploy', <DeployPage />),
   route('/activity', <ActivityPage />),
   route('/portfolio', <PortfolioPage />),
   route('/developer', <DeveloperPage />),

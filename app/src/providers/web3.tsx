@@ -14,14 +14,35 @@ import { http } from 'wagmi'
 import { createConfig } from 'wagmi'
 import { baseSepolia } from 'wagmi/chains'
 import { ConnectKitProvider, getDefaultConfig } from 'connectkit'
-import { defaultConnectKitOptions, tangleMainnet, tangleTestnet } from '@tangle-network/blueprint-ui'
+import {
+  configureNetworks,
+  defaultConnectKitOptions,
+  tangleMainnet,
+  tangleTestnet,
+} from '@tangle-network/blueprint-ui'
 import { Web3Shell } from '@tangle-network/blueprint-ui/components'
 import {
   detectTangleCloudParentOrigin,
   parentBridgeConnector,
 } from '@tangle-network/blueprint-ui/wallet'
+import { CHAIN } from '~/lib/api'
 
 const chains = [baseSepolia, tangleTestnet, tangleMainnet] as const
+
+// Register Base Sepolia with blueprint-ui's network store so the library's
+// core hooks (useServiceRequest, etc.) resolve contract addresses. tnt-core
+// deploys Services/Jobs/Operators as a single Base contract, so both core
+// addresses point at CHAIN.tangle. Without this, getAddresses().services is
+// undefined and the hooks write to address(0).
+configureNetworks({
+  [CHAIN.id]: {
+    chain: baseSepolia,
+    rpcUrl: baseSepolia.rpcUrls.default.http[0],
+    label: 'Base Sepolia',
+    shortLabel: 'Base Sepolia',
+    addresses: { jobs: CHAIN.tangle, services: CHAIN.tangle },
+  },
+})
 
 // Detect Tangle Cloud iframe context once at module load. The detection reads
 // `document.referrer` + `window.location` — stable for the iframe's lifetime.
