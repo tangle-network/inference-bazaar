@@ -20,6 +20,7 @@ const MARKET_NAV: NavItem[] = [
   { to: '/markets', label: 'Order books', icon: 'i-ph:chart-line-up' },
   { to: '/sell', label: 'Sell', icon: 'i-ph:storefront' },
   { to: '/operators', label: 'Operators', icon: 'i-ph:hard-drives' },
+  { to: '/deploy', label: 'Request instance', icon: 'i-ph:rocket-launch' },
   { to: '/activity', label: 'Activity', icon: 'i-ph:pulse' },
 ]
 
