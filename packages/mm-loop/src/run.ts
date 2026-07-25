@@ -3,7 +3,7 @@ import {
   type AgentRunSpec,
   type LoopResult,
   type LoopTraceEmitter,
-  runLoop,
+  runAgentRounds,
   type SandboxClient,
 } from '@tangle-network/agent-runtime/loops'
 import { marketMakerDriver } from './driver'
@@ -39,7 +39,7 @@ export interface MMLoopResult {
 }
 
 /**
- * One market-making session as one `runLoop` run: tick in, quotes out,
+ * One market-making session as one `runAgentRounds` run: tick in, quotes out,
  * risk-gated, fully traced. This is the loop — point it at the simulator
  * to develop, at the marketplace venue to make markets.
  */
@@ -65,7 +65,7 @@ export async function runMarketMakingLoop(opts: MMLoopOptions): Promise<MMLoopRe
     agentRun = opts.agentRun
   }
 
-  const loop = await runLoop<MarketTick, QuoteSet, MMDecision>({
+  const loop = await runAgentRounds<MarketTick, QuoteSet, MMDecision>({
     driver: marketMakerDriver({ session, horizonTicks: opts.horizonTicks }),
     agentRun,
     output: quoteSetOutput,

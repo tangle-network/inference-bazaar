@@ -34,9 +34,9 @@ batches through a 2-of-2 attested quorum; credits redeem against real inference.
 `ROADMAP.md` is the source of truth for what is proven vs open.
 
 The **market-making loop** is the centerpiece: one market-making session is one
-`runLoop` run on the agent-runtime loops API. It runs in two modes through one
-kernel — a deterministic Avellaneda–Stoikov quoter, or a sandboxed agent — both
-gated by the same fail-closed risk desk.
+`runAgentRounds` run on the agent-runtime loops API. It runs in two modes through
+one kernel: a deterministic Avellaneda–Stoikov quoter or a sandboxed agent, both
+checked by the same fail-closed risk desk.
 
 The **privacy** layer keeps sellers anonymous via **Tor** (through Arti, the Tor
 Project's Rust implementation): requests tunnel through Arti's SOCKS proxy to

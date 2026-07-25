@@ -83,7 +83,7 @@ to the phase that delivers it.
 
 - [x] `@inference-bazaar/market-core`: orderbook, A–S quoting, risk gate + kill switch,
   ledger, seeded simulator. **Done:** 17 tests green.
-- [x] `@inference-bazaar/mm-loop`: market-making as one `runLoop` on agent-runtime loops;
+- [x] `@inference-bazaar/mm-loop`: market-making as one `runAgentRounds` call on agent-runtime loops;
   algorithmic + agentic modes through one kernel. **Done:** 7 tests green.
 - [x] `@inference-bazaar/mm-sidecar`: stateless HTTP quote server (the operator's brain).
   **Done:** 5 tests green + live `curl` smoke.
