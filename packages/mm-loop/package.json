@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@inference-bazaar/market-core": "workspace:*",
-    "@tangle-network/agent-runtime": "^0.48.0"
+    "@tangle-network/agent-runtime": "0.108.0"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
