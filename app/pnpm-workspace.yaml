@@ -3,3 +3,12 @@ packages:
 
 onlyBuiltDependencies:
   - esbuild
+
+overrides:
+  postcss: 8.5.24
+  ws: 8.21.0
+
+auditConfig:
+  ignoreGhsas:
+    # The app uses React Router data mode and does not import unstable RSC APIs.
+    - GHSA-qwww-vcr4-c8h2

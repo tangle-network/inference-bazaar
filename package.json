@@ -5,7 +5,7 @@
   "description": "Inference Bazaar — an open market for AI inference. Buy discounted inference, sell spare capacity, market-make the spread.",
   "type": "module",
   "scripts": {
-    "build": "pnpm -r build",
+    "build": "pnpm --dir app build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "demo:mm": "pnpm --filter @inference-bazaar/mm-loop demo"
