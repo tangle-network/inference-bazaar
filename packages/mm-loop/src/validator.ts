@@ -1,5 +1,5 @@
 import { assessQuotes, type QuoteSet } from '@inference-bazaar/market-core'
-import type { Validator } from '@tangle-network/agent-runtime/loops'
+import type { Validator } from '@tangle-network/agent-runtime/kernel'
 import type { MarketMakingSession } from './session'
 
 /**

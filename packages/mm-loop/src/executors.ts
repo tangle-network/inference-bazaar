@@ -4,7 +4,7 @@ import {
   type AgentRunSpec,
   inlineSandboxClient,
   type SandboxClient,
-} from '@tangle-network/agent-runtime/loops'
+} from '@tangle-network/agent-runtime/kernel'
 import type { MarketTick } from './types'
 
 /**

@@ -1,5 +1,5 @@
 import type { QuoteSet } from '@inference-bazaar/market-core'
-import type { Driver, Iteration } from '@tangle-network/agent-runtime/loops'
+import type { Driver, Iteration } from '@tangle-network/agent-runtime/kernel'
 import type { MarketMakingSession } from './session'
 import type { MarketTick, MMDecision } from './types'
 

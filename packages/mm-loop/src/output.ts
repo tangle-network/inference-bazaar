@@ -1,5 +1,5 @@
 import type { QuoteSet } from '@inference-bazaar/market-core'
-import type { OutputAdapter, SandboxEvent } from '@tangle-network/agent-runtime/loops'
+import type { OutputAdapter, SandboxEvent } from '@tangle-network/agent-runtime/kernel'
 
 /**
  * SandboxEvent stream → QuoteSet.

@@ -105,7 +105,7 @@ caller-supplied, so every test asserts exact behavior and every session replays.
 ### `@inference-bazaar/mm-loop` — OFFLINE research / agentic-quoting prototype
 
 A single-operator, continuous Avellaneda–Stoikov session built on the
-agent-runtime loops API (`@tangle-network/agent-runtime/loops`). **It is NOT the
+agent-runtime kernel API (`@tangle-network/agent-runtime/kernel`). **It is NOT the
 production maker** — nothing in the operator, sidecar, or any deploy unit imports
 it. It exists for two things: offline parameter sweeps (`@inference-bazaar/mm-eval`) and
 as the worked example of *agentic* quoting (an LLM in the quote loop) that a
@@ -132,11 +132,11 @@ See [The market-making loop](#the-market-making-loop).
 > Scope: this describes the `@inference-bazaar/mm-loop` **research/agentic-prototype**
 > session shape. In production, quoting is the stateless `mm-sidecar` (one
 > risk-gated A–S quote set per `/quote` call, driven by the seed.sh tick) and
-> matching is the epoch matcher — NOT a continuous in-process runLoop. The two
+> matching is the epoch matcher — NOT a continuous in-process `runAgentRounds`. The two
 > share the same `@inference-bazaar/market-core` math; this section documents the loop
 > kernel that the offline harness and the future agentic sidecar run on.
 
-A **market-making session is one `runLoop` run**. The mapping onto the
+A **market-making session is one `runAgentRounds` run**. The mapping onto the
 agent-runtime loop kernel:
 
 | Loop concept       | Inference Bazaar binding                                                        |
@@ -213,8 +213,9 @@ touches loop wiring.
 A session is bounded (a horizon). A production market maker runs **forever**:
 the operator service runs back-to-back sessions on a tick cron (the
 ai-trading-blueprint's `JOB_WORKFLOW_TICK`, default `0 */5 * * * *`), persisting
-the ledger across sessions and resuming inventory. Each session is one traced,
-cost-accounted `runLoop` — the unit of observability and the unit of the
+the ledger across sessions and resuming inventory.
+Each session is one cost-accounted `runAgentRounds` call and can emit traces when configured.
+It is the unit of observability and the unit of the
 analyst/self-improvement loop (`@tangle-network/agent-runtime/analyst-loop`)
 that tunes `QuoteParams` from realized PnL between sessions.
 
@@ -405,7 +406,7 @@ tokens; reusing the inference blueprints for the operator/sell side.
 | Trading blueprint                                   | Inference Bazaar equivalent                                          | Status |
 |-----------------------------------------------------|-------------------------------------------------------------|--------|
 | `trading-runtime` (intents, strategy, portfolio)    | `@inference-bazaar/market-core` (orderbook, quoting, ledger, risk)   | **built** |
-| trading agent sidecar (Claude in Docker)            | `@inference-bazaar/mm-loop` on agent-runtime loops                   | **built** |
+| trading agent sidecar (Claude in Docker)            | `@inference-bazaar/mm-loop` on the agent-runtime kernel              | **built** |
 | `JOB_WORKFLOW_TICK` cron (`0 */5 * * * *`)          | back-to-back MM sessions on the same tick cron              | migrate |
 | `trading-blueprint-lib` jobs (provision/start/stop) | marketplace jobs (list instrument / start MM / stop / status)| migrate |
 | `TradingVault` + validator-signed envelope          | `InferenceBazaarSettlement` + attester-quorum / SP1-proven batches  | **built** |

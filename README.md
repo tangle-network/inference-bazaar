@@ -24,7 +24,7 @@ operator/          the venue: HTTP + Tangle blueprint runner, shared-CLOB epoch 
 zk/                SP1 program re-executing the batch for settleBatchProven
 packages/
   market-core/     orderbook · A–S quoting · risk gate · ledger · seeded simulator
-  mm-loop/         the market-making LOOP, on @tangle-network/agent-runtime/loops
+  mm-loop/         the market-making LOOP, on @tangle-network/agent-runtime/kernel
   router-bridge/   Tangle Router client · ShieldedCredits SpendAuth · Tor (Arti) privacy
 app/               the market UI (NBBO across venues, trading, lots) — Cloudflare Pages
 ```
@@ -34,7 +34,7 @@ batches through a 2-of-2 attested quorum; credits redeem against real inference.
 `ROADMAP.md` is the source of truth for what is proven vs open.
 
 The **market-making loop** is the centerpiece: one market-making session is one
-`runLoop` run on the agent-runtime loops API. It runs in two modes through one
+`runAgentRounds` run on the agent-runtime kernel API. It runs in two modes through one
 kernel — a deterministic Avellaneda–Stoikov quoter, or a sandboxed agent — both
 gated by the same fail-closed risk desk.
 
