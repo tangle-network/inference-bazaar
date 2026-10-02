@@ -17,11 +17,13 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 
+# Deps are soldeer, not submodules — a fresh clone has no contracts/dependencies yet.
+(cd contracts && forge soldeer install >/dev/null)
 OUT=$(cd contracts && PRIVATE_KEY="$DEPLOYER_KEY" DEPLOY_DEV_VERIFIER=1 \
   forge script script/Deploy.s.sol --rpc-url "http://127.0.0.1:$ANVIL_PORT" --broadcast 2>&1)
-SETTLEMENT=$(grep -oP 'InferenceBazaarSettlement: \K0x\w+' <<<"$OUT")
-USD=$(grep -oP 'MockUSD: \K0x\w+' <<<"$OUT")
-VERIFIER=$(grep -oP 'SP1MockVerifierStrict: \K0x\w+' <<<"$OUT")
+SETTLEMENT=$(sed -n 's/.*InferenceBazaarSettlement: \(0x[0-9a-fA-F][0-9a-fA-F]*\).*/\1/p' <<<"$OUT")
+USD=$(sed -n 's/.*MockUSD: \(0x[0-9a-fA-F][0-9a-fA-F]*\).*/\1/p' <<<"$OUT")
+VERIFIER=$(sed -n 's/.*SP1MockVerifierStrict: \(0x[0-9a-fA-F][0-9a-fA-F]*\).*/\1/p' <<<"$OUT")
 echo "deployed: settlement=$SETTLEMENT usd=$USD verifier=$VERIFIER"
 
 cargo run -q -p inference-bazaar-settlement --features chain --example e2e_anvil -- \

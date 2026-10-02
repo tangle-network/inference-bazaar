@@ -31,13 +31,16 @@ ENV_OUT="${DEPLOY_ENV_OUT:-deploy/.env.deployed}"
 DEF="${BLUEPRINT_DEF:-blueprint.toml}"
 
 echo "==> Deploying InferenceBazaar contracts to $RPC (timelock=$USE_TIMELOCK admin=$TIMELOCK_ADMIN book=$REGISTER_BOOK)"
+# Deps are soldeer (foundry.toml `[dependencies]`), not git submodules — a fresh
+# clone has no contracts/dependencies until installed, and every forge step fails.
+(cd contracts && forge soldeer install >/dev/null)
 OUT=$(cd contracts && FOUNDRY_DISABLE_NIGHTLY_WARNING=1 forge script script/Deploy.s.sol \
   --rpc-url "$RPC" $BROADCAST 2>&1) || { echo "$OUT" | tail -30; exit 1; }
 echo "$OUT" | grep -E "MockUSD:|InferenceBazaarSettlement:|InferenceBazaarBSM:|book registered:|TimelockController:|SP1 verifier wired" || true
 
-SETTLEMENT=$(grep -oP 'InferenceBazaarSettlement: \K0x\w+' <<<"$OUT" || true)
-BSM=$(grep -oP 'InferenceBazaarBSM: \K0x\w+' <<<"$OUT" || true)
-PAYTOKEN="${PAYMENT_TOKEN:-$(grep -oP 'MockUSD: \K0x\w+' <<<"$OUT" || true)}"
+SETTLEMENT=$(sed -n 's/.*InferenceBazaarSettlement: \(0x[0-9a-fA-F][0-9a-fA-F]*\).*/\1/p' <<<"$OUT" || true)
+BSM=$(sed -n 's/.*InferenceBazaarBSM: \(0x[0-9a-fA-F][0-9a-fA-F]*\).*/\1/p' <<<"$OUT" || true)
+PAYTOKEN="${PAYMENT_TOKEN:-$(sed -n 's/.*MockUSD: \(0x[0-9a-fA-F][0-9a-fA-F]*\).*/\1/p' <<<"$OUT" || true)}"
 [[ -n "$SETTLEMENT" && -n "$BSM" ]] || { echo "could not parse deployed addresses"; echo "$OUT" | tail -30; exit 1; }
 
 CHAIN_ID=$(cast chain-id --rpc-url "$RPC" 2>/dev/null || echo "")

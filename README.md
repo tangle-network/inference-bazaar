@@ -51,7 +51,7 @@ anonymity; we only choose which operator fulfills.
 pnpm install
 pnpm -r test           # TS suites
 cargo test --workspace # Rust: matcher, consensus, operator, clob e2e
-cd contracts && forge test  # settlement contract suite
+cd contracts && forge soldeer install && forge test  # settlement contract suite
 pnpm demo:mm           # market-making session against the simulator
 ```
 
