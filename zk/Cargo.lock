@@ -2945,6 +2945,74 @@ dependencies = [
 ]
 
 [[package]]
+name = "inference-bazaar-batch-prover"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "inference-bazaar-batch-types",
+ "inference-bazaar-matcher",
+ "inference-bazaar-settlement",
+ "inference-bazaar-settlement-core",
+ "serde",
+ "serde_json",
+ "sp1-helper",
+ "sp1-sdk",
+ "tokio",
+]
+
+[[package]]
+name = "inference-bazaar-batch-types"
+version = "0.1.0"
+dependencies = [
+ "inference-bazaar-settlement-core",
+ "serde",
+]
+
+[[package]]
+name = "inference-bazaar-matcher"
+version = "0.1.0"
+dependencies = [
+ "inference-bazaar-orderbook",
+ "inference-bazaar-settlement",
+ "inference-bazaar-settlement-core",
+]
+
+[[package]]
+name = "inference-bazaar-orderbook"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+]
+
+[[package]]
+name = "inference-bazaar-settlement"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "alloy-primitives",
+ "alloy-sol-types",
+ "anyhow",
+ "inference-bazaar-orderbook",
+ "inference-bazaar-settlement-core",
+ "k256",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "inference-bazaar-settlement-core"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-sol-types",
+ "k256",
+ "serde",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6338,74 +6406,6 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
-
-[[package]]
-name = "surplus-batch-prover"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "hex",
- "serde",
- "serde_json",
- "sp1-helper",
- "sp1-sdk",
- "surplus-batch-types",
- "surplus-matcher",
- "surplus-settlement",
- "surplus-settlement-core",
- "tokio",
-]
-
-[[package]]
-name = "surplus-batch-types"
-version = "0.1.0"
-dependencies = [
- "serde",
- "surplus-settlement-core",
-]
-
-[[package]]
-name = "surplus-matcher"
-version = "0.1.0"
-dependencies = [
- "surplus-orderbook",
- "surplus-settlement",
- "surplus-settlement-core",
-]
-
-[[package]]
-name = "surplus-orderbook"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde",
-]
-
-[[package]]
-name = "surplus-settlement"
-version = "0.1.0"
-dependencies = [
- "alloy",
- "alloy-primitives",
- "alloy-sol-types",
- "anyhow",
- "k256",
- "serde",
- "serde_json",
- "surplus-orderbook",
- "surplus-settlement-core",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "surplus-settlement-core"
-version = "0.1.0"
-dependencies = [
- "alloy-primitives",
- "alloy-sol-types",
- "k256",
- "serde",
-]
 
 [[package]]
 name = "symlink"

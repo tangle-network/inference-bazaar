@@ -126,8 +126,7 @@ The model you serve must match the instrument you quote
 The operator delegates pricing to the sidecar; it won't quote without one.
 
 ```bash
-pnpm --filter @inference-bazaar/mm-sidecar build
-node packages/mm-sidecar/dist/index.mjs      # listens on :9110 by default
+pnpm --filter @inference-bazaar/mm-sidecar start   # tsx; listens on :9110 by default
 ```
 
 (Production runs it as `deploy/hetzner/inference-bazaar-mm-sidecar.service`.)

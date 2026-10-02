@@ -26,10 +26,12 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 
+# Deps are soldeer, not submodules — a fresh clone has no contracts/dependencies yet.
+(cd contracts && forge soldeer install >/dev/null)
 OUT=$(cd contracts && PRIVATE_KEY="$OPERATOR_KEY" forge script script/Deploy.s.sol \
   --rpc-url "$RPC" --broadcast 2>&1)
-SETTLEMENT=$(grep -oP 'InferenceBazaarSettlement: \K0x\w+' <<<"$OUT")
-USD=$(grep -oP 'MockUSD: \K0x\w+' <<<"$OUT")
+SETTLEMENT=$(sed -n 's/.*InferenceBazaarSettlement: \(0x[0-9a-fA-F][0-9a-fA-F]*\).*/\1/p' <<<"$OUT")
+USD=$(sed -n 's/.*MockUSD: \(0x[0-9a-fA-F][0-9a-fA-F]*\).*/\1/p' <<<"$OUT")
 [[ -n "$SETTLEMENT" && -n "$USD" ]] || { echo "deploy parse failed"; exit 1; }
 echo "deployed: settlement=$SETTLEMENT usd=$USD"
 

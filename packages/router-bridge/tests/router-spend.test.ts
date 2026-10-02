@@ -3,7 +3,12 @@ import {
   RouterClient,
   usdPerTokenToMicroPerM,
 } from '../src/router-client'
-import { buildSpendAuthMessage, tokenLotCostBaseUnits, TANGLE_CHAIN_IDS } from '../src/spend-auth'
+import {
+  buildSpendAuthMessage,
+  SPEND_AUTH_TYPES,
+  tokenLotCostBaseUnits,
+  TANGLE_CHAIN_IDS,
+} from '../src/spend-auth'
 
 describe('usdPerTokenToMicroPerM', () => {
   it('converts OpenRouter USD-per-token strings to micro-tsUSD per 1M tokens', () => {
@@ -61,6 +66,21 @@ describe('RouterClient', () => {
 })
 
 describe('SpendAuth', () => {
+  // Pinned INDEPENDENTLY here — this exact string is the SPEND_TYPEHASH
+  // preimage in ShieldedCredits.sol (shielded-payment-gateway) and the
+  // canonical definition in llm-inference-blueprint's sdk/src/eip712.ts.
+  // Asserting against the literal (not the module's own constants) is what
+  // catches a real drift instead of a tautology; drift here is a fund-loss bug.
+  const PINNED_SPEND_AUTH =
+    'SpendAuthorization(bytes32 commitment,uint64 serviceId,uint8 jobIndex,uint256 amount,address operator,uint256 nonce,uint64 expiry)'
+
+  it('type array is byte-identical to the ShieldedCredits contract preimage', () => {
+    const typeString = `SpendAuthorization(${SPEND_AUTH_TYPES.SpendAuthorization.map(
+      (f) => `${f.type} ${f.name}`,
+    ).join(',')})`
+    expect(typeString).toBe(PINNED_SPEND_AUTH)
+  })
+
   it('builds EIP-712 typed data matching the router contract surface', () => {
     const msg = buildSpendAuthMessage(
       {

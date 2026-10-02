@@ -30,9 +30,11 @@ cleanup() { for p in "${OP_PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done; 
 trap cleanup EXIT
 for _ in $(seq 1 50); do cast chain-id --rpc-url "$RPC" >/dev/null 2>&1 && break; sleep 0.1; done
 
+# Deps are soldeer, not submodules — a fresh clone has no contracts/dependencies yet.
+(cd contracts && forge soldeer install >/dev/null)
 OUT=$(cd contracts && PRIVATE_KEY="$DEPLOYER_KEY" forge script script/Deploy.s.sol --rpc-url "$RPC" --broadcast 2>&1)
-SETTLEMENT=$(grep -oP 'InferenceBazaarSettlement: \K0x\w+' <<<"$OUT")
-USD=$(grep -oP 'MockUSD: \K0x\w+' <<<"$OUT")
+SETTLEMENT=$(sed -n 's/.*InferenceBazaarSettlement: \(0x[0-9a-fA-F][0-9a-fA-F]*\).*/\1/p' <<<"$OUT")
+USD=$(sed -n 's/.*MockUSD: \(0x[0-9a-fA-F][0-9a-fA-F]*\).*/\1/p' <<<"$OUT")
 echo "deployed: settlement=$SETTLEMENT"
 
 # Two INDEPENDENT venues: no INFERENCE_BAZAAR_CLOB_OPERATORS, so each is its own instance
