@@ -16,7 +16,7 @@ env:
 jobs:
   rust:
     name: rust (build · clippy · test)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ci-public]
     steps:
       - uses: actions/checkout@v4
       # rust-toolchain.toml pins the channel (1.91) + clippy/rustfmt components.
@@ -44,7 +44,7 @@ jobs:
 
   contracts:
     name: contracts (forge)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ci-public]
     defaults:
       run:
         working-directory: contracts
@@ -70,7 +70,7 @@ jobs:
     # digests. A one-sided change to a struct, domain, or typehash fails here —
     # the gate that would have caught the SettlementBatch/bookId drift.
     name: eip712 parity (rust ↔ solidity)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ci-public]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -92,7 +92,7 @@ jobs:
 
   zk:
     name: zk (host build)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ci-public]
     defaults:
       run:
         working-directory: zk
@@ -102,10 +102,6 @@ jobs:
         with:
           toolchain: "1.91"
       - uses: Swatinem/rust-cache@v2
-      # `sp1-prover-types` builds protobuf in its build script; the runner has no
-      # protoc by default, so the host build fails before touching our code.
-      - name: install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       # Host crates compile against the (changing) settlement-core + matcher
       # without the heavy succinct toolchain. The full guest ELF build +
       # in-circuit parity is exercised by the `zk-guest` job below.
@@ -116,15 +112,13 @@ jobs:
 
   zk-guest:
     name: zk (guest ELF + in-circuit parity)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ci-public]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.91"
       - uses: Swatinem/rust-cache@v2
-      - name: install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       # Install the Succinct toolchain so `cargo prove` can compile the RISC-V
       # guest ELF (sp1-helper build.rs). Without this the guest is a stub and a
       # broken circuit (or a guest/host public-values drift) would ship unnoticed.
@@ -141,7 +135,7 @@ jobs:
 
   e2e:
     name: e2e (settlement spine on anvil)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ci-public]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -167,7 +161,7 @@ jobs:
     # spend rail, voucher metering, multi-lot routing, streaming, or the
     # gateway's restart-safe acked persistence would ship unnoticed.
     name: e2e (spend + multi-lot gateway on anvil)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ci-public]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -198,7 +192,7 @@ jobs:
 
   ts:
     name: ts (packages + app)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ci-public]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

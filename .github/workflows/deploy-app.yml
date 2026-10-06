@@ -20,7 +20,7 @@ concurrency:
 jobs:
   pages:
     name: build + deploy app to Cloudflare Pages
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ci-public]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
