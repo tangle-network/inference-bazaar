@@ -15,13 +15,16 @@ permissions:
 jobs:
   operator-binary:
     name: build + publish inference-bazaar-operator
-    runs-on: [self-hosted, ci-public]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.91"
       - uses: Swatinem/rust-cache@v2
+      # blueprint-sdk's transitive build scripts compile protobuf.
+      - name: install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: build operator (blueprint, release)
         run: cargo build --release -p inference-bazaar-operator --bin inference-bazaar-operator --features blueprint
       - name: sha256
