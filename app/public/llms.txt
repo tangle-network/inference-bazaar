@@ -1,0 +1,41 @@
+# Inference Bazaar
+
+> Inference Bazaar is an open market for AI inference. Buyers purchase prepaid, collateral-backed inference-token credit lots below list price; operators sell spare inference capacity; market-makers work the spread. Fills settle atomically on the InferenceBazaarSettlement contract — the buyer's payment, the seller's payout, and the credit lot mint happen in one transaction or not at all. A lot redeems into real metered inference from the bonded operator that issued it, and unserved spend refunds to the holder from the issuer's collateral plus a penalty.
+
+To set this product up from scratch, fetch https://bazaar.tangle.tools/agent-setup.md and follow it. It is a complete prompt and a SKILL.md: fund a Tempo testnet key, deposit pathUSD, take a signed firm quote, settle it, and verify your credit lot on-chain. There is no account and no signup — an Ethereum-style key is your identity.
+
+## Start here
+
+- [Agent setup skill](https://bazaar.tangle.tools/agent-setup.md): from a funded key to a verified credit lot and first served completion
+- [Agent manifest](https://bazaar.tangle.tools/.well-known/tangle-agent.json): machine-readable contract — chain, contract, signup kind, quote sources, smoke tests
+- [Repository](https://github.com/tangle-network/inference-bazaar): settlement contracts, operator, order book, zk prover, market UI
+- [Market UI](https://inference-bazaar.blueprint.tangle.tools/): order books, firm-quote buy flow, operator directory, portfolio and redemption
+
+## Buy inference (agent buyers)
+
+- Chain: Tempo testnet (Moderato), chainId 42431, RPC https://rpc.moderato.tempo.xyz. Gas is paid in pathUSD — there is no separate gas token.
+- Settlement contract: `0x83084C8cD2282F6126e25089f0FD26b145eCa597` (InferenceBazaarSettlement). Payment token: pathUSD `0x20C0000000000000000000000000000000000000` (6 decimals).
+- Flow: `approve` + `deposit(uint256)` → request a signed firm quote from an operator venue (`POST /rfq`, no credential) → sign the matching buy `Order` (EIP-712) → `POST /rfq/fill` → the lot mints atomically (`FillSettled` event) → spend it with `requestRedemption` + `POST /redeem`, or mint an API key against the lot.
+- Every price is a signed firm quote in micro-pathUSD per 1M tokens; instruments are `<model>:<kind>`, e.g. `claude-sonnet-4-6:output`. Venue quotes are capped by the operator's on-chain funding, so a signed quote always settles.
+- Full walkthrough with curl + cast: `docs/examples/spend-a-credit.md` in the repo (Base Sepolia coordinates; the Tempo flow is identical — swap the addresses above). Live Tempo proof driver: `scripts/clob-e2e-tempo.mjs`.
+- The payment pattern (deposit stablecoins once, then sign EIP-712 authorizations instead of holding a platform key) follows the same crypto-native lane as the router: [for-agents-crypto.md](https://router.tangle.tools/for-agents-crypto.md).
+
+## Sell inference (agent operators)
+
+- The general operator path (stake, register on-chain, get discovered, serve a model) is documented at [Run a Tangle inference operator](https://router.tangle.tools/for-operators.md).
+- Bazaar-specific steps are in [`docs/OPERATOR_ONBOARDING.md`](https://github.com/tangle-network/inference-bazaar/blob/main/docs/OPERATOR_ONBOARDING.md): post collateral (`approve` + `depositCollateral(uint256)`; the contract enforces collateral ≥ 1.05 × outstanding liability on every fill), point the operator at an inference backend you run (managed vLLM or any OpenAI-compatible endpoint — router-proxy mode is refused for a bonded issuer), run the market-making sidecar, and serve under the Blueprint Manager lifecycle (the manager spawns the operator instance; never hand-run it in production).
+- Epoch batches settle two ways on one fill core: attested (the book's operator quorum re-runs the match and co-signs, M-of-N per book) or proven (an SP1 proof runs the match in-circuit). Co-signed batches use two-stage finality so a crashed proposer cannot lose a quorum-signed batch.
+
+## Pricing
+
+- There is no list price on the bazaar itself: every trade clears at a signed firm quote (an EIP-712 `Order` with `priceMicroPerM` in micro-pathUSD per 1M tokens). Quotes are free and need no credential — `POST /rfq` on any operator venue.
+- No-credential reference prices (router list, the baseline the market discounts against): [router.tangle.tools/v1/models](https://router.tangle.tools/v1/models)
+- The protocol fee (`feeBps`) and every book's fee cut are view functions on the settlement contract.
+
+## Optional
+
+- [Operator onboarding (repo)](https://github.com/tangle-network/inference-bazaar/blob/main/docs/OPERATOR_ONBOARDING.md)
+- [Spend a credit end to end (repo)](https://github.com/tangle-network/inference-bazaar/blob/main/docs/examples/spend-a-credit.md)
+- [Testnet release + trust model (repo)](https://github.com/tangle-network/inference-bazaar/blob/main/docs/testnet-release.md)
+- [Tangle Router agent manifest](https://router.tangle.tools/.well-known/tangle-agent.json)
+- [Tangle Sandbox agent manifest](https://sandbox.tangle.tools/.well-known/tangle-agent.json)

@@ -105,3 +105,13 @@ See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the full system: what's traded,
 the loop's control flow and why it's shaped that way, the two payment rails
 (Stripe/platform credits and on-chain ShieldedCredits/x402), the Tor-via-Arti
 privacy layer, and the blueprint migration map with exact source paths.
+
+## For agents
+
+The app ships the Tangle agent surfaces as static files under
+[app/public](app/public): `llms.txt`, `.well-known/tangle-agent.json`, and
+`agent-setup.md` — a complete setup prompt for both agent buyers (fund a Tempo
+key, deposit, take a signed firm quote, verify a lot on-chain) and agent
+operators (bond collateral, serve a model, quote). They serve at exact paths
+alongside the SPA (Cloudflare Pages serves matching static assets before the
+`/*` rewrite applies).
