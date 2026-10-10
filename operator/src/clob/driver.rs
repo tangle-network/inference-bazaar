@@ -124,6 +124,36 @@ impl Clob {
         json!({ "epoch": epoch, "proposer": format!("{:#x}", self.me), "batches": reports })
     }
 
+    /// One epoch-driver tick. Returns whether the epoch is DONE — the caller
+    /// (`spawn_epoch_loop`) only then marks it as attempted. Every skip case
+    /// (not elected, membership drifted, empty pool) is final for the epoch, as
+    /// is a clean run; a run whose report carries a per-instrument ERROR is
+    /// transient (RPC 429/timeout/5xx — observed constantly on public testnet
+    /// RPCs) and stays unmarked so the next tick retries it. Quorum REFUSALS
+    /// ("quorum": false) are final: peers re-evaluate next epoch, and immediate
+    /// re-proposal would just re-collect the same refusals.
+    pub async fn drive_epoch(self: &std::sync::Arc<Self>, epoch: u64) -> bool {
+        if !self
+            .membership_ok
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return true; // confirmed drift from the contract's attester set
+        }
+        if inference_bazaar_matcher::elect_proposer(&self.cfg.addresses(), epoch) != Some(self.me) {
+            return true;
+        }
+        if self.pool.lock().unwrap().is_empty() {
+            return true;
+        }
+        let report = self.run_epoch(epoch).await;
+        tracing::debug!(%report, "epoch run");
+        if epoch_attempt_failed(&report) {
+            tracing::warn!(epoch, %report, "epoch attempt hit transient errors — retrying next tick");
+            return false;
+        }
+        true
+    }
+
     async fn propose_instrument(
         self: &std::sync::Arc<Self>,
         epoch: u64,
@@ -302,6 +332,17 @@ impl Clob {
         }
         Ok(Some(client))
     }
+}
+
+/// Did an epoch report carry a per-instrument proposal ERROR (transient chain/
+/// transport failure)? Quorum refusals (`"quorum": false`) are NOT errors — the
+/// orders carry to the next epoch by design, and retrying within the epoch would
+/// re-collect the same refusals.
+pub(crate) fn epoch_attempt_failed(report: &Value) -> bool {
+    report
+        .get("batches")
+        .and_then(Value::as_array)
+        .is_some_and(|bs| bs.iter().any(|b| b.get("error").is_some()))
 }
 
 /// Extract the inner orders from a set of signed orders for matching.

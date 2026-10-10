@@ -150,7 +150,12 @@ pub fn spawn_membership_reconciler(clob: SharedClob) {
 }
 
 /// The epoch driver: at every epoch boundary, if this node is the elected
-/// proposer and holds orders, run the propose → co-sign → submit round.
+/// proposer and holds orders, run the propose → co-sign → submit round. The
+/// epoch is marked as attempted ONLY when the tick completed (skip cases and
+/// clean runs): a transient failure (RPC 429/timeout) leaves it unmarked so the
+/// next tick retries instead of silently abandoning the epoch — previously the
+/// mark happened up front and one 429 skipped the whole epoch (observed live on
+/// Tempo's public RPC: 18/18 epochs lost with an 8-fill proposal).
 pub fn spawn_epoch_loop(clob: SharedClob) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(500));
@@ -161,18 +166,9 @@ pub fn spawn_epoch_loop(clob: SharedClob) {
             if epoch == clob.last_epoch.load(Ordering::Relaxed) {
                 continue;
             }
-            clob.last_epoch.store(epoch, Ordering::Relaxed);
-            if !clob.membership_ok.load(Ordering::Relaxed) {
-                continue; // confirmed drift from the contract's attester set
+            if clob.drive_epoch(epoch).await {
+                clob.last_epoch.store(epoch, Ordering::Relaxed);
             }
-            if elect_proposer(&clob.cfg.addresses(), epoch) != Some(clob.me) {
-                continue;
-            }
-            if clob.pool.lock().unwrap().is_empty() {
-                continue;
-            }
-            let report = clob.run_epoch(epoch).await;
-            tracing::debug!(%report, "epoch run");
         }
     });
 }

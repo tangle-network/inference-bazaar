@@ -22,9 +22,10 @@ thiserror = "1"
 # stays light. Same alloy major the inference blueprints pin.
 alloy = { version = "1", features = ["provider-http", "signer-local", "contract", "sol-types"], optional = true }
 anyhow = { version = "1", optional = true }
+tokio = { version = "1", features = ["time"], optional = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 [[example]]
 name = "e2e_anvil"
@@ -32,4 +33,4 @@ required-features = ["chain"]
 
 [features]
 default = []
-chain = ["dep:alloy", "dep:anyhow"]
+chain = ["dep:alloy", "dep:anyhow", "dep:tokio"]

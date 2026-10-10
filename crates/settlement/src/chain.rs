@@ -4,6 +4,7 @@
 //! provider with a local wallet, typed `sol!` bindings, and small async
 //! wrappers per entry point. The venue uses this to clear its outbox.
 
+use crate::retry::{self, RetryPolicy};
 use crate::{Batch, SignedFill};
 use alloy::network::EthereumWallet;
 use alloy::providers::{DynProvider, Provider, ProviderBuilder};
@@ -166,12 +167,67 @@ impl SettlementClient {
             .wallet(wallet)
             .connect_http(rpc_url.parse()?)
             .erased();
-        let chain_id = provider.get_chain_id().await?;
+        let chain_id = {
+            let p = &provider;
+            retry::run(RetryPolicy::READ, "getChainId", || async move {
+                p.get_chain_id().await
+            })
+            .await?
+        };
         Ok(SettlementClient {
             contract: IInferenceBazaarSettlement::new(contract_address, provider),
             chain_id,
             address: contract_address,
         })
+    }
+
+    /// Reads and receipt polls are idempotent: full transient retry.
+    async fn read<T, E, F, Fut>(&self, label: &str, f: F) -> anyhow::Result<T>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<T, E>>,
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        retry::run(RetryPolicy::READ, label, f).await
+    }
+
+    /// Sends retry only pre-execution rejections (429/5xx) — a send that timed
+    /// out may have landed, and a blind resend could double-settle.
+    async fn send<T, E, F, Fut>(&self, label: &str, f: F) -> anyhow::Result<T>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<T, E>>,
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        retry::run(RetryPolicy::SEND, label, f).await
+    }
+
+    /// Wait for a sent tx's mined receipt, polling by hash. The pending
+    /// builder's own watcher fails hard on one transient RPC error; polling
+    /// through `read` retries instead of losing the call. `PendingTransactionBuilder`
+    /// is not `Clone` and `get_receipt` consumes it, hence the hash poll.
+    async fn confirm(
+        &self,
+        label: &str,
+        pending: &alloy::providers::PendingTransactionBuilder<alloy::network::Ethereum>,
+    ) -> anyhow::Result<alloy::rpc::types::TransactionReceipt> {
+        let hash = *pending.tx_hash();
+        let mut polls = 0u32;
+        loop {
+            match self
+                .read(label, || async move {
+                    self.contract.provider().get_transaction_receipt(hash).await
+                })
+                .await?
+            {
+                Some(r) => return Ok(r),
+                None => {
+                    polls += 1;
+                    anyhow::ensure!(polls <= 120, "{label}: receipt never landed for {hash:#x}");
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+            }
+        }
     }
 
     pub fn chain_id(&self) -> u64 {
@@ -197,13 +253,13 @@ impl SettlementClient {
         fills: &[SignedFill],
     ) -> anyhow::Result<(B256, Vec<B256>)> {
         let inputs: Vec<_> = fills.iter().map(to_fill_input).collect();
-        let receipt = self
-            .contract
-            .settleFills(inputs)
-            .send()
-            .await?
-            .get_receipt()
+        let pending = self
+            .send("settleFills", || {
+                let inputs = inputs.clone();
+                async move { self.contract.settleFills(inputs).send().await }
+            })
             .await?;
+        let receipt = self.confirm("settleFills receipt", &pending).await?;
         anyhow::ensure!(
             receipt.status(),
             "settleFills reverted: {:?}",
@@ -222,25 +278,23 @@ impl SettlementClient {
     }
 
     pub async fn deposit(&self, amount: U256) -> anyhow::Result<()> {
-        let r = self
-            .contract
-            .deposit(amount)
-            .send()
-            .await?
-            .get_receipt()
+        let pending = self
+            .send("deposit", || async move {
+                self.contract.deposit(amount).send().await
+            })
             .await?;
+        let r = self.confirm("deposit receipt", &pending).await?;
         anyhow::ensure!(r.status(), "deposit reverted");
         Ok(())
     }
 
     pub async fn deposit_collateral(&self, amount: U256) -> anyhow::Result<()> {
-        let r = self
-            .contract
-            .depositCollateral(amount)
-            .send()
-            .await?
-            .get_receipt()
+        let pending = self
+            .send("depositCollateral", || async move {
+                self.contract.depositCollateral(amount).send().await
+            })
             .await?;
+        let r = self.confirm("depositCollateral receipt", &pending).await?;
         anyhow::ensure!(r.status(), "depositCollateral reverted");
         Ok(())
     }
@@ -266,39 +320,51 @@ impl SettlementClient {
             maxTokens: max_tokens,
             expiry,
         };
-        let receipt = self
-            .contract
-            .settleSpend(
-                permit,
-                holder_sig.into(),
-                served_cumulative,
-                voucher_sig.into(),
-            )
-            .send()
-            .await?
-            .get_receipt()
+        let pending = self
+            .send("settleSpend", || {
+                let permit = permit.clone();
+                let holder_sig = holder_sig.clone();
+                let voucher_sig = voucher_sig.clone();
+                async move {
+                    self.contract
+                        .settleSpend(
+                            permit,
+                            holder_sig.into(),
+                            served_cumulative,
+                            voucher_sig.into(),
+                        )
+                        .send()
+                        .await
+                }
+            })
             .await?;
+        let receipt = self.confirm("settleSpend receipt", &pending).await?;
         anyhow::ensure!(receipt.status(), "settleSpend reverted");
         Ok(receipt.transaction_hash)
     }
 
     pub async fn spend_settled(&self, permit_digest: B256) -> anyhow::Result<u64> {
-        Ok(self.contract.spendSettled(permit_digest).call().await?)
+        self.read("spendSettled", || async move {
+            self.contract.spendSettled(permit_digest).call().await
+        })
+        .await
     }
 
     pub async fn spend_revoked(&self, permit_digest: B256) -> anyhow::Result<bool> {
-        Ok(self.contract.spendRevoked(permit_digest).call().await?)
+        self.read("spendRevoked", || async move {
+            self.contract.spendRevoked(permit_digest).call().await
+        })
+        .await
     }
 
     /// Open a redemption; returns the redemption id from the event.
     pub async fn request_redemption(&self, lot_id: B256, qty: u64) -> anyhow::Result<B256> {
-        let receipt = self
-            .contract
-            .requestRedemption(lot_id, qty)
-            .send()
-            .await?
-            .get_receipt()
+        let pending = self
+            .send("requestRedemption", || async move {
+                self.contract.requestRedemption(lot_id, qty).send().await
+            })
             .await?;
+        let receipt = self.confirm("requestRedemption receipt", &pending).await?;
         anyhow::ensure!(receipt.status(), "requestRedemption reverted");
         receipt
             .logs()
@@ -316,14 +382,21 @@ impl SettlementClient {
         &self,
         redemption_id: B256,
     ) -> anyhow::Result<IInferenceBazaarSettlement::redemptionsReturn> {
-        Ok(self.contract.redemptions(redemption_id).call().await?)
+        self.read("redemptions", || async move {
+            self.contract.redemptions(redemption_id).call().await
+        })
+        .await
     }
 
     pub async fn get_lot(
         &self,
         lot_id: B256,
     ) -> anyhow::Result<IInferenceBazaarSettlement::lotsReturn> {
-        Ok(self.contract.lots(lot_id).call().await?)
+        self.read(
+            "lots",
+            || async move { self.contract.lots(lot_id).call().await },
+        )
+        .await
     }
 
     /// Every credit lot `issuer` minted that is CURRENTLY held by `holder`,
@@ -339,10 +412,13 @@ impl SettlementClient {
         from_block: u64,
     ) -> anyhow::Result<Vec<(B256, IInferenceBazaarSettlement::lotsReturn)>> {
         let logs = self
-            .contract
-            .FillSettled_filter()
-            .from_block(from_block)
-            .query()
+            .read("FillSettled scan", || async move {
+                self.contract
+                    .FillSettled_filter()
+                    .from_block(from_block)
+                    .query()
+                    .await
+            })
             .await?;
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
@@ -351,7 +427,12 @@ impl SettlementClient {
             if lot_id == B256::ZERO || !seen.insert(lot_id) {
                 continue;
             }
-            let lot = self.contract.lots(lot_id).call().await?;
+            let lot = self
+                .read(
+                    "lots",
+                    || async move { self.contract.lots(lot_id).call().await },
+                )
+                .await?;
             if lot.holder == holder && lot.issuer == issuer {
                 out.push((lot_id, lot));
             }
@@ -365,11 +446,13 @@ impl SettlementClient {
         served: u64,
         work_commitment: B256,
     ) -> anyhow::Result<B256> {
-        Ok(self
-            .contract
-            .receiptDigest(redemption_id, served, work_commitment)
-            .call()
-            .await?)
+        self.read("receiptDigest", || async move {
+            self.contract
+                .receiptDigest(redemption_id, served, work_commitment)
+                .call()
+                .await
+        })
+        .await
     }
 
     pub async fn settle_redemption(
@@ -379,13 +462,18 @@ impl SettlementClient {
         work_commitment: B256,
         holder_sig: Vec<u8>,
     ) -> anyhow::Result<()> {
-        let r = self
-            .contract
-            .settleRedemption(redemption_id, served, work_commitment, holder_sig.into())
-            .send()
-            .await?
-            .get_receipt()
+        let pending = self
+            .send("settleRedemption", || {
+                let holder_sig = holder_sig.clone();
+                async move {
+                    self.contract
+                        .settleRedemption(redemption_id, served, work_commitment, holder_sig.into())
+                        .send()
+                        .await
+                }
+            })
             .await?;
+        let r = self.confirm("settleRedemption receipt", &pending).await?;
         anyhow::ensure!(r.status(), "settleRedemption reverted");
         Ok(())
     }
@@ -393,7 +481,10 @@ impl SettlementClient {
     /// The book a lot was minted into (NO_BOOK for trustless `settleFills` lots,
     /// which cannot be attested). Needed to drive `settleRedemptionAttested`.
     pub async fn lot_book(&self, lot_id: B256) -> anyhow::Result<B256> {
-        Ok(self.contract.lotBook(lot_id).call().await?)
+        self.read("lotBook", || async move {
+            self.contract.lotBook(lot_id).call().await
+        })
+        .await
     }
 
     /// Attest service for a redemption the holder won't receipt: the issuing
@@ -407,13 +498,26 @@ impl SettlementClient {
         work_commitment: B256,
         sigs: Vec<Vec<u8>>,
     ) -> anyhow::Result<B256> {
-        let sigs: Vec<alloy_primitives::Bytes> = sigs.into_iter().map(Into::into).collect();
+        let pending = self
+            .send("settleRedemptionAttested", || {
+                let sigs: Vec<alloy_primitives::Bytes> =
+                    sigs.iter().cloned().map(Into::into).collect();
+                async move {
+                    self.contract
+                        .settleRedemptionAttested(
+                            book_id,
+                            redemption_id,
+                            served,
+                            work_commitment,
+                            sigs,
+                        )
+                        .send()
+                        .await
+                }
+            })
+            .await?;
         let r = self
-            .contract
-            .settleRedemptionAttested(book_id, redemption_id, served, work_commitment, sigs)
-            .send()
-            .await?
-            .get_receipt()
+            .confirm("settleRedemptionAttested receipt", &pending)
             .await?;
         anyhow::ensure!(r.status(), "settleRedemptionAttested reverted");
         Ok(r.transaction_hash)
@@ -422,25 +526,23 @@ impl SettlementClient {
     /// Finalize an unchallenged attestation once its window has passed (anyone
     /// may call; the settlement is exactly what the quorum vouched).
     pub async fn finalize_attested(&self, redemption_id: B256) -> anyhow::Result<B256> {
-        let r = self
-            .contract
-            .finalizeAttested(redemption_id)
-            .send()
-            .await?
-            .get_receipt()
+        let pending = self
+            .send("finalizeAttested", || async move {
+                self.contract.finalizeAttested(redemption_id).send().await
+            })
             .await?;
+        let r = self.confirm("finalizeAttested receipt", &pending).await?;
         anyhow::ensure!(r.status(), "finalizeAttested reverted");
         Ok(r.transaction_hash)
     }
 
     pub async fn claim_default(&self, redemption_id: B256) -> anyhow::Result<U256> {
-        let receipt = self
-            .contract
-            .claimDefault(redemption_id)
-            .send()
-            .await?
-            .get_receipt()
+        let pending = self
+            .send("claimDefault", || async move {
+                self.contract.claimDefault(redemption_id).send().await
+            })
             .await?;
+        let receipt = self.confirm("claimDefault receipt", &pending).await?;
         anyhow::ensure!(receipt.status(), "claimDefault reverted");
         let payout = receipt
             .logs()
@@ -462,19 +564,24 @@ impl SettlementClient {
         book_fee_bps: u16,
         book_fee_recipient: Address,
     ) -> anyhow::Result<()> {
-        let r = self
-            .contract
-            .registerBook(
-                book_id,
-                signers,
-                threshold,
-                book_fee_bps,
-                book_fee_recipient,
-            )
-            .send()
-            .await?
-            .get_receipt()
+        let pending = self
+            .send("registerBook", || {
+                let signers = signers.clone();
+                async move {
+                    self.contract
+                        .registerBook(
+                            book_id,
+                            signers,
+                            threshold,
+                            book_fee_bps,
+                            book_fee_recipient,
+                        )
+                        .send()
+                        .await
+                }
+            })
             .await?;
+        let r = self.confirm("registerBook receipt", &pending).await?;
         anyhow::ensure!(r.status(), "registerBook reverted");
         Ok(())
     }
@@ -487,47 +594,66 @@ impl SettlementClient {
         signers: Vec<Address>,
         threshold: u16,
     ) -> anyhow::Result<()> {
-        let r = self
-            .contract
-            .rotateAttesters(book_id, signers, threshold)
-            .send()
-            .await?
-            .get_receipt()
+        let pending = self
+            .send("rotateAttesters", || {
+                let signers = signers.clone();
+                async move {
+                    self.contract
+                        .rotateAttesters(book_id, signers, threshold)
+                        .send()
+                        .await
+                }
+            })
             .await?;
+        let r = self.confirm("rotateAttesters receipt", &pending).await?;
         anyhow::ensure!(r.status(), "rotateAttesters reverted");
         Ok(())
     }
 
     pub async fn book_attesters(&self, book_id: B256) -> anyhow::Result<Vec<Address>> {
-        Ok(self.contract.bookAttesters(book_id).call().await?)
+        self.read("bookAttesters", || async move {
+            self.contract.bookAttesters(book_id).call().await
+        })
+        .await
     }
 
     pub async fn book_threshold(&self, book_id: B256) -> anyhow::Result<u16> {
-        Ok(self.contract.bookThreshold(book_id).call().await?)
+        self.read("bookThreshold", || async move {
+            self.contract.bookThreshold(book_id).call().await
+        })
+        .await
     }
 
     pub async fn set_sp1_verifier(&self, verifier: Address, vkey: B256) -> anyhow::Result<()> {
-        let r = self
-            .contract
-            .setSp1Verifier(verifier, vkey)
-            .send()
-            .await?
-            .get_receipt()
+        let pending = self
+            .send("setSp1Verifier", || async move {
+                self.contract.setSp1Verifier(verifier, vkey).send().await
+            })
             .await?;
+        let r = self.confirm("setSp1Verifier receipt", &pending).await?;
         anyhow::ensure!(r.status(), "setSp1Verifier reverted");
         Ok(())
     }
 
     pub async fn liability_of(&self, issuer: Address) -> anyhow::Result<U256> {
-        Ok(self.contract.liability(issuer).call().await?)
+        self.read("liability", || async move {
+            self.contract.liability(issuer).call().await
+        })
+        .await
     }
 
     pub async fn collateral_of(&self, issuer: Address) -> anyhow::Result<U256> {
-        Ok(self.contract.collateral(issuer).call().await?)
+        self.read("collateral", || async move {
+            self.contract.collateral(issuer).call().await
+        })
+        .await
     }
 
     pub async fn defaults_count(&self) -> anyhow::Result<U256> {
-        Ok(self.contract.defaultsCount().call().await?)
+        self.read("defaultsCount", || async move {
+            self.contract.defaultsCount().call().await
+        })
+        .await
     }
 
     pub async fn settle_batch_attested(
@@ -549,14 +675,21 @@ impl SettlementClient {
         fills: &[crate::BatchFill],
         sigs: Vec<Vec<u8>>,
     ) -> anyhow::Result<B256> {
-        let fills: Vec<_> = fills.iter().map(to_batch_fill).collect();
-        let sigs: Vec<alloy_primitives::Bytes> = sigs.into_iter().map(Into::into).collect();
+        let pending = self
+            .send("settleBatchAttested", || {
+                let fills: Vec<_> = fills.iter().map(to_batch_fill).collect();
+                let sigs: Vec<alloy_primitives::Bytes> =
+                    sigs.iter().cloned().map(Into::into).collect();
+                async move {
+                    self.contract
+                        .settleBatchAttested(book_id, fills, sigs)
+                        .send()
+                        .await
+                }
+            })
+            .await?;
         let receipt = self
-            .contract
-            .settleBatchAttested(book_id, fills, sigs)
-            .send()
-            .await?
-            .get_receipt()
+            .confirm("settleBatchAttested receipt", &pending)
             .await?;
         anyhow::ensure!(receipt.status(), "settleBatchAttested reverted");
         Ok(receipt.transaction_hash)
@@ -570,14 +703,21 @@ impl SettlementClient {
         batch: &Batch,
         sigs: Vec<Vec<u8>>,
     ) -> anyhow::Result<(B256, Vec<B256>)> {
-        let fills: Vec<_> = batch.batch_fills().iter().map(to_batch_fill).collect();
-        let sigs: Vec<alloy_primitives::Bytes> = sigs.into_iter().map(Into::into).collect();
+        let pending = self
+            .send("settleBatchAttested", || {
+                let fills: Vec<_> = batch.batch_fills().iter().map(to_batch_fill).collect();
+                let sigs: Vec<alloy_primitives::Bytes> =
+                    sigs.iter().cloned().map(Into::into).collect();
+                async move {
+                    self.contract
+                        .settleBatchAttested(book_id, fills, sigs)
+                        .send()
+                        .await
+                }
+            })
+            .await?;
         let receipt = self
-            .contract
-            .settleBatchAttested(book_id, fills, sigs)
-            .send()
-            .await?
-            .get_receipt()
+            .confirm("settleBatchAttested receipt", &pending)
             .await?;
         anyhow::ensure!(receipt.status(), "settleBatchAttested reverted");
         let lots = receipt
@@ -614,47 +754,74 @@ impl SettlementClient {
         fills: &[crate::BatchFill],
         proof: Vec<u8>,
     ) -> anyhow::Result<B256> {
-        let fills: Vec<_> = fills.iter().map(to_batch_fill).collect();
-        let receipt = self
-            .contract
-            .settleBatchProven(book_id, orders_commitment, fills, proof.into())
-            .send()
-            .await?
-            .get_receipt()
+        let pending = self
+            .send("settleBatchProven", || {
+                let fills: Vec<_> = fills.iter().map(to_batch_fill).collect();
+                let proof = proof.clone();
+                async move {
+                    self.contract
+                        .settleBatchProven(book_id, orders_commitment, fills, proof.into())
+                        .send()
+                        .await
+                }
+            })
             .await?;
+        let receipt = self.confirm("settleBatchProven receipt", &pending).await?;
         anyhow::ensure!(receipt.status(), "settleBatchProven reverted");
         Ok(receipt.transaction_hash)
     }
 
     pub async fn book_nonce(&self, book_id: B256) -> anyhow::Result<u64> {
-        Ok(self.contract.bookNonce(book_id).call().await?)
+        self.read("bookNonce", || async move {
+            self.contract.bookNonce(book_id).call().await
+        })
+        .await
     }
 
     pub async fn balance_of(&self, account: Address) -> anyhow::Result<U256> {
-        Ok(self.contract.balances(account).call().await?)
+        self.read("balances", || async move {
+            self.contract.balances(account).call().await
+        })
+        .await
     }
 
     pub async fn filled(&self, order_hash: B256) -> anyhow::Result<u64> {
-        Ok(self.contract.filled(order_hash).call().await?)
+        self.read("filled", || async move {
+            self.contract.filled(order_hash).call().await
+        })
+        .await
     }
 
     pub async fn cancelled(&self, order_hash: B256) -> anyhow::Result<bool> {
-        Ok(self.contract.cancelled(order_hash).call().await?)
+        self.read("cancelled", || async move {
+            self.contract.cancelled(order_hash).call().await
+        })
+        .await
     }
 
     pub async fn free_collateral(&self, issuer: Address) -> anyhow::Result<U256> {
-        Ok(self.contract.freeCollateral(issuer).call().await?)
+        self.read("freeCollateral", || async move {
+            self.contract.freeCollateral(issuer).call().await
+        })
+        .await
     }
 
     pub async fn default_penalty_bps(&self) -> anyhow::Result<u16> {
-        Ok(self.contract.defaultPenaltyBps().call().await?)
+        self.read("defaultPenaltyBps", || async move {
+            self.contract.defaultPenaltyBps().call().await
+        })
+        .await
     }
 
     /// Sanity check: the deployed contract's domain separator must equal the
     /// one this client signs against. Call once at startup; a mismatch means
     /// wrong chain id or wrong contract address, and every signature would fail.
     pub async fn assert_domain(&self) -> anyhow::Result<()> {
-        let on_chain = self.contract.domainSeparator().call().await?;
+        let on_chain = self
+            .read("domainSeparator", || async move {
+                self.contract.domainSeparator().call().await
+            })
+            .await?;
         let local = crate::domain(self.chain_id, self.address).separator();
         anyhow::ensure!(
             on_chain == local,

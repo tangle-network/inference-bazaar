@@ -182,6 +182,14 @@ impl Clob {
                 "order expires too soon to batch".into(),
             ));
         }
+        // A zero-size order can never match (the engine drops qty < min_qty) but
+        // would occupy a pool slot until expiry — cheap inflation toward MAX_POOL.
+        if signed.order.qtyTokens == 0 {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "qtyTokens must be > 0".into(),
+            ));
+        }
         // The integer matching book is i64-domained; an order whose price or qty
         // exceeds i64::MAX is settleable via settleFills but `match_epoch` would
         // silently drop it (audit L2). Reject it here with a clear reason rather

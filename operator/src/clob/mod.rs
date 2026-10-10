@@ -303,3 +303,191 @@ mod finality_tests {
         assert_eq!(attest_deadline(1), Duration::from_millis(1000)); // floor
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Instrument, OperatorConfig, QuoteParams, RiskLimits, SettlementConfig};
+    use crate::market::{now_unix, SignedOrderBody};
+    use crate::venue::Venue;
+    use inference_bazaar_matcher::Attestation;
+    use inference_bazaar_settlement::{instrument_hash, Order, Signer};
+    use serde_json::json;
+
+    const INST: &str = "test/model:output";
+
+    struct StubNet;
+
+    #[async_trait::async_trait]
+    impl ClobNet for StubNet {
+        fn gossip_order(&self, _: &WireOrder) {}
+        fn gossip_cancel(&self, _: &WireCancel) {}
+        async fn collect_attestations(
+            &self,
+            _: &WireProposal,
+            _: B256,
+            _: usize,
+        ) -> Vec<Attestation> {
+            vec![]
+        }
+    }
+
+    fn signer() -> Signer {
+        Signer::from_hex(&inference_bazaar_settlement::core::hex::encode([0x42; 32])).unwrap()
+    }
+
+    /// A single-node CLOB over a stub transport. `rpc_url None` => dry mode
+    /// (the consensus round runs, chain reads/submits are skipped).
+    fn test_clob(rpc_url: Option<&str>) -> Arc<Clob> {
+        let key = inference_bazaar_settlement::core::hex::encode_prefixed([0x42; 32]);
+        let cfg = OperatorConfig {
+            sidecar_url: "http://127.0.0.1:1".into(),
+            router_url: "http://127.0.0.1:1".into(),
+            instruments: vec![Instrument {
+                id: INST.into(),
+                model_id: "test/model".into(),
+                token_kind: "output".into(),
+                tick_size: 1000,
+                min_qty: 1000,
+            }],
+            params: QuoteParams {
+                gamma: 0.0,
+                sigma: 0.0,
+                horizon_ticks: 0.0,
+                k: 0.0,
+                size: 0.0,
+                max_inventory: 0.0,
+                tick_size: 1000.0,
+            },
+            limits: RiskLimits {
+                max_inventory: 0.0,
+                max_quote_notional: 0.0,
+                max_deviation_bps: 0.0,
+                min_spread_bps: 0.0,
+                kill_switch_drawdown: 0.0,
+            },
+            settlement: Some(SettlementConfig {
+                chain_id: 31_337,
+                contract: format!("{:#x}", Address::with_last_byte(0xcc)),
+                operator_key: Some(key),
+                submitter_key: None,
+                rpc_url: rpc_url.map(str::to_string),
+                rfq_ttl_secs: 60,
+                from_block: 0,
+            }),
+        };
+        let venue = Arc::new(Venue::new(cfg));
+        let me = signer().address();
+        let clob_cfg = ClobConfig {
+            book_id: B256::ZERO,
+            epoch_secs: 3600, // election is stable for the whole test
+            threshold: 1,
+            operators: vec![(me, "http://127.0.0.1:1".into())],
+        };
+        Arc::new(Clob::with_net(venue, clob_cfg, Arc::new(StubNet)).unwrap())
+    }
+
+    fn signed_body(
+        clob: &Clob,
+        signer: &Signer,
+        side: u8,
+        price: u64,
+        qty: u64,
+        salt: u8,
+    ) -> SignedOrderBody {
+        let order = Order {
+            instrument: instrument_hash(INST),
+            side,
+            priceMicroPerM: price,
+            qtyTokens: qty,
+            lotId: B256::ZERO,
+            trader: signer.address(),
+            expiry: now_unix() + 3600,
+            salt: B256::with_last_byte(salt),
+        };
+        let signed = signer.sign_order(&order, clob.domain());
+        SignedOrderBody {
+            instrument_id: INST.into(),
+            order,
+            signature: format!(
+                "0x{}",
+                inference_bazaar_settlement::core::hex::encode(&signed.signature)
+            ),
+        }
+    }
+
+    #[test]
+    fn zero_qty_order_is_rejected() {
+        let clob = test_clob(None);
+        let trader =
+            Signer::from_hex(&inference_bazaar_settlement::core::hex::encode([0x11; 32])).unwrap();
+        let err = clob
+            .admit(signed_body(&clob, &trader, 0, 15_000_000, 0, 1))
+            .unwrap_err();
+        assert_eq!(err.0, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(err.1.contains("qtyTokens must be > 0"), "{:?}", err);
+        // …while a sized order admits fine.
+        assert!(clob
+            .admit(signed_body(&clob, &trader, 0, 15_000_000, 1000, 2))
+            .is_ok());
+    }
+
+    #[test]
+    fn epoch_report_error_detection() {
+        use super::driver::epoch_attempt_failed;
+        assert!(epoch_attempt_failed(
+            &json!({"batches": [{"instrumentId": INST, "error": "HTTP error 429"}]})
+        ));
+        // Quorum refusal is NOT a transient error: orders carry to next epoch.
+        assert!(!epoch_attempt_failed(
+            &json!({"batches": [{"instrumentId": INST, "quorum": false}]})
+        ));
+        assert!(!epoch_attempt_failed(&json!({"batches": []})));
+        assert!(!epoch_attempt_failed(&json!({"epoch": 1})));
+    }
+
+    #[tokio::test]
+    async fn epoch_done_on_dry_success() {
+        let clob = test_clob(None);
+        let buyer =
+            Signer::from_hex(&inference_bazaar_settlement::core::hex::encode([0x21; 32])).unwrap();
+        let seller =
+            Signer::from_hex(&inference_bazaar_settlement::core::hex::encode([0x22; 32])).unwrap();
+        clob.admit(signed_body(&clob, &seller, 1, 14_000_000, 1000, 1))
+            .unwrap();
+        clob.admit(signed_body(&clob, &buyer, 0, 15_000_000, 1000, 2))
+            .unwrap();
+        let epoch = clob.current_epoch();
+        assert!(
+            clob.drive_epoch(epoch).await,
+            "dry-mode quorum must complete"
+        );
+        // …and the orders were pruned by the quorum'd batch.
+        assert!(clob.pool.lock().unwrap().is_empty());
+    }
+
+    /// A dead RPC makes the pre-match simulation fail the proposal with a
+    /// transient error: the tick must report NOT-done so the loop retries the
+    /// epoch instead of abandoning it (the Tempo 429 finding).
+    #[cfg(feature = "chain")]
+    #[tokio::test]
+    async fn epoch_not_done_on_transient_chain_failure() {
+        let clob = test_clob(Some("http://127.0.0.1:1")); // nothing listens here
+        let buyer =
+            Signer::from_hex(&inference_bazaar_settlement::core::hex::encode([0x21; 32])).unwrap();
+        let seller =
+            Signer::from_hex(&inference_bazaar_settlement::core::hex::encode([0x22; 32])).unwrap();
+        clob.admit(signed_body(&clob, &seller, 1, 14_000_000, 1000, 1))
+            .unwrap();
+        clob.admit(signed_body(&clob, &buyer, 0, 15_000_000, 1000, 2))
+            .unwrap();
+        let epoch = clob.current_epoch();
+        assert!(
+            !clob.drive_epoch(epoch).await,
+            "a chain-read failure must leave the epoch retryable"
+        );
+        // The orders were NOT pruned (no quorum was ever collected), so the
+        // retry has them.
+        assert_eq!(clob.pool.lock().unwrap().len(), 2);
+    }
+}
