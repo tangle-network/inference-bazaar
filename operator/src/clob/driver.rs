@@ -254,15 +254,30 @@ impl Clob {
         crate::metrics::inc(crate::metrics::names::QUORUM_REACHED);
 
         // Quorum reached on a pre-simulated batch (every fill checked against
-        // live chain state above), so it is expected to settle. Prune — peers
-        // co-signed the same clean set; re-matching filled orders would poison
-        // the next epoch.
-        self.prune_filled(&batch.fills);
+        // live chain state above). Mark the batch's orders PENDING — retained,
+        // excluded from matching — rather than pruning: if the submission fails
+        // or the tx is evicted from the mempool, the settlement watcher releases
+        // them for a re-drive instead of losing the batch off-chain forever.
+        let pending_deadline =
+            crate::market::now_unix() + super::pending_settle_ttl(self.cfg.epoch_secs);
+        self.mark_pending(&batch.fills, batch_nonce, pending_deadline);
         let submitted = match self.submit(&batch.fills, sigs).await {
             Ok(tx) => {
                 crate::metrics::inc(crate::metrics::names::BATCHES_SUBMITTED);
+                // `submit` returns only after the receipt is mined (or "dry"
+                // with no chain): the batch is OBSERVED — confirm finality now.
+                let domain = self.domain().clone();
+                let digests: Vec<_> = batch
+                    .fills
+                    .iter()
+                    .flat_map(|f| [&f.buy, &f.sell])
+                    .map(|o| inference_bazaar_settlement::core::order_digest(o, &domain))
+                    .collect();
+                self.confirm_orders(&digests);
                 tx
             }
+            // Left pending: the watcher releases the orders at the deadline and
+            // a later elected proposer re-drives the batch.
             Err(e) => {
                 crate::metrics::inc(crate::metrics::names::SUBMIT_REVERTS);
                 return Err(e);
@@ -331,6 +346,55 @@ impl Clob {
             self.domain_checked.store(true, Ordering::Relaxed);
         }
         Ok(Some(client))
+    }
+
+    /// Settlement watcher tick: resolve every pending (co-signed, unobserved)
+    /// batch. With a live chain, a batch whose nonce the book has advanced PAST
+    /// is confirmed (the book's nonce is sequential — a later batch cannot land
+    /// without it); expired-but-unobserved batches are RELEASED for a re-drive
+    /// by a later elected proposer. Without chain access (dry mode) there is
+    /// nothing to observe, so expiry confirms locally — the old prune, delayed
+    /// by the deadline. RPC errors are transient: skip the tick, retry next.
+    pub async fn reconcile_pending(self: &std::sync::Arc<Self>) {
+        let can_settle = self
+            .venue
+            .settle
+            .as_ref()
+            .is_some_and(|s| s.rpc_url.is_some());
+        #[cfg(feature = "chain")]
+        if can_settle {
+            let nonces = self.pending_batch_nonces();
+            if !nonces.is_empty() {
+                if let Ok(Some(client)) = self.chain_client().await {
+                    if let Ok(nonce) = client.book_nonce(self.cfg.book_id).await {
+                        for bn in nonces.into_iter().filter(|bn| *bn < nonce) {
+                            let n = self.confirm_batch(bn);
+                            tracing::info!(
+                                batch_nonce = bn,
+                                orders = n,
+                                "co-signed batch observed on-chain — confirmed final"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        let now = crate::market::now_unix();
+        let expired = self.expired_pending(now);
+        if expired.is_empty() {
+            return;
+        }
+        if can_settle {
+            let n = self.release_pending(&expired);
+            tracing::warn!(
+                orders = n,
+                "co-signed batch never observed on-chain — orders released for re-drive"
+            );
+        } else {
+            let n = expired.len();
+            self.confirm_orders(&expired);
+            tracing::info!(orders = n, "dry mode: pending batch confirmed at deadline");
+        }
     }
 }
 

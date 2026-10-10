@@ -129,6 +129,7 @@ pub fn start_from_env(venue: Arc<Venue>) -> anyhow::Result<Option<(SharedClob, R
     let clob = Arc::new(Clob::new(venue, cfg)?);
     spawn_membership_reconciler(clob.clone());
     spawn_epoch_loop(clob.clone());
+    spawn_settlement_watcher(clob.clone());
     let r = router(clob.clone());
     Ok(Some((clob, r)))
 }
@@ -147,6 +148,21 @@ pub fn spawn_membership_reconciler(clob: SharedClob) {
     });
     #[cfg(not(feature = "chain"))]
     let _ = clob;
+}
+
+/// The settlement watcher: every few seconds, resolve pending (co-signed,
+/// not-yet-observed) batches — confirm those the book's on-chain nonce has
+/// passed, release expired ones for a re-drive. No-op costs nothing: with no
+/// pending batches it never touches the RPC.
+pub fn spawn_settlement_watcher(clob: SharedClob) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(2));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            clob.reconcile_pending().await;
+        }
+    });
 }
 
 /// The epoch driver: at every epoch boundary, if this node is the elected

@@ -278,6 +278,7 @@ pub fn start(venue: Arc<Venue>, cfg: ClobConfig) -> anyhow::Result<(SharedClob, 
     spawn_mesh_loop(clob.clone(), net, handle);
     crate::clob::spawn_membership_reconciler(clob.clone());
     spawn_epoch_loop(clob.clone());
+    crate::clob::spawn_settlement_watcher(clob.clone());
     let router = crate::clob::router(clob.clone());
     tracing::info!(
         instance = %format!("{chain_id}-{contract:#x}"),

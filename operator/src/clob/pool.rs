@@ -10,8 +10,8 @@ use inference_bazaar_settlement::core::{order_digest, recover_signer, BatchFill}
 use serde_json::{json, Value};
 
 use super::{
-    cancel_digest, Clob, FinalityJournal, PoolEntry, WireCancel, WireOrder, CANCEL_TTL_SECS,
-    EXPIRY_MARGIN_SECS, MAX_POOL,
+    cancel_digest, Clob, FinalityJournal, PendingBatch, PoolEntry, WireCancel, WireOrder,
+    CANCEL_TTL_SECS, EXPIRY_MARGIN_SECS, MAX_POOL,
 };
 use crate::market::{now_unix, SignedOrderBody};
 
@@ -225,11 +225,16 @@ impl Clob {
         if pool.len() >= MAX_POOL && !pool.contains_key(&digest) {
             return Err((StatusCode::TOO_MANY_REQUESTS, "order pool full".into()));
         }
+        // A replay of a PENDING order (co-signed into a batch not yet observed
+        // on-chain) must not clear its pending state — that would re-open it to
+        // matching while the batch may still land.
+        let pending = pool.get(&digest).and_then(|e| e.pending);
         pool.insert(
             digest,
             PoolEntry {
                 instrument_id: instrument_id.clone(),
                 signed,
+                pending,
             },
         );
         crate::metrics::set_gauge(crate::metrics::names::POOL_SIZE, pool.len() as i64);
@@ -243,8 +248,10 @@ impl Clob {
 
     /// Snapshot the pool for one instrument for the given epoch, dropping orders
     /// that won't survive to this epoch's settlement (the contract reverts the
-    /// whole batch on one `OrderExpired`). The cutoff is epoch-deterministic so
-    /// every verifier drops exactly the same orders.
+    /// whole batch on one `OrderExpired`). PENDING orders (co-signed into a batch
+    /// awaiting on-chain observation) are excluded until their deadline passes —
+    /// they must not re-match while their batch may still land. The cutoff is
+    /// epoch-deterministic so every verifier drops exactly the same orders.
     pub(crate) fn snapshot(
         &self,
         instrument_id: &str,
@@ -256,30 +263,115 @@ impl Clob {
         let now = now_unix();
         pool.retain(|_, e| e.signed.order.expiry >= now);
         pool.values()
-            .filter(|e| e.instrument_id == instrument_id && e.signed.order.expiry >= deadline)
+            .filter(|e| {
+                e.instrument_id == instrument_id
+                    && e.signed.order.expiry >= deadline
+                    && e.pending.is_none_or(|p| p.deadline <= now)
+            })
             .map(|e| e.signed.clone())
             .collect()
     }
 
-    /// Remove every order touched by a fill AND remember it as settled, so a
-    /// replay can never re-admit it. Mandatory after co-signing or submitting a
-    /// batch: an order that filled (even partially) would overfill on re-match
-    /// and revert the next batch.
-    pub(crate) fn prune_filled(&self, fills: &[BatchFill]) {
+    /// Mark every order touched by a co-signed batch as PENDING: retained but
+    /// excluded from matching until the batch is observed on-chain
+    /// ([`Self::confirm_orders`] / [`Self::confirm_batch`]) or the deadline
+    /// releases it for a re-drive ([`Self::release_expired_pending`]). This
+    /// replaces pruning at quorum time — pruning there stranded the batch
+    /// off-chain forever when the settle tx never landed (observed live on
+    /// Tempo: RPC accepted two `settleBatchAttested` txs, mempool evicted both).
+    pub(crate) fn mark_pending(&self, fills: &[BatchFill], batch_nonce: u64, deadline: u64) {
         let domain = self.domain().clone();
         let mut pool = self.pool.lock().unwrap();
-        let mut settled = self.settled.lock().unwrap();
         for f in fills {
             for o in [&f.buy, &f.sell] {
                 let digest = order_digest(o, &domain);
-                pool.remove(&digest);
-                settled.insert(digest, o.expiry);
+                if let Some(e) = pool.get_mut(&digest) {
+                    e.pending = Some(PendingBatch {
+                        batch_nonce,
+                        deadline,
+                    });
+                }
+            }
+        }
+        crate::metrics::set_gauge(crate::metrics::names::POOL_SIZE, pool.len() as i64);
+    }
+
+    /// Final for these orders: the batch landed on-chain. Move them from the
+    /// pool into the settled finality set so a replay can never re-admit them.
+    pub(crate) fn confirm_orders(&self, digests: &[B256]) {
+        if digests.is_empty() {
+            return;
+        }
+        let mut pool = self.pool.lock().unwrap();
+        let mut settled = self.settled.lock().unwrap();
+        for d in digests {
+            if let Some(e) = pool.remove(d) {
+                settled.insert(*d, e.signed.order.expiry);
             }
         }
         crate::metrics::set_gauge(crate::metrics::names::POOL_SIZE, pool.len() as i64);
         drop(pool);
         drop(settled);
         self.persist_finality();
+    }
+
+    /// Confirm every order pending on `batch_nonce` — the watcher observed the
+    /// book's on-chain nonce advance PAST it (the book's nonce is sequential,
+    /// so a later batch cannot land without this one).
+    pub(crate) fn confirm_batch(&self, batch_nonce: u64) -> usize {
+        let digests: Vec<B256> = self
+            .pool
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, e)| e.pending.is_some_and(|p| p.batch_nonce == batch_nonce))
+            .map(|(d, _)| *d)
+            .collect();
+        let n = digests.len();
+        self.confirm_orders(&digests);
+        n
+    }
+
+    /// Book nonces with pending orders, deduped — the watcher's watch list.
+    pub(crate) fn pending_batch_nonces(&self) -> Vec<u64> {
+        let mut v: Vec<u64> = self
+            .pool
+            .lock()
+            .unwrap()
+            .values()
+            .filter_map(|e| e.pending.map(|p| p.batch_nonce))
+            .collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
+    /// Digests whose pending deadline passed without on-chain observation.
+    pub(crate) fn expired_pending(&self, now: u64) -> Vec<B256> {
+        self.pool
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, e)| e.pending.is_some_and(|p| p.deadline <= now))
+            .map(|(d, _)| *d)
+            .collect()
+    }
+
+    /// Release expired pending orders back into matching — a later elected
+    /// proposer re-drives the batch with a fresh quorum round. Safe against a
+    /// late-landing original tx: the contract's `filled` cap reverts a
+    /// double-fill, and the proposer's pre-match sim evicts orders the chain
+    /// already reports filled.
+    pub(crate) fn release_pending(&self, digests: &[B256]) -> usize {
+        let mut pool = self.pool.lock().unwrap();
+        let mut n = 0;
+        for d in digests {
+            if let Some(e) = pool.get_mut(d) {
+                e.pending = None;
+                n += 1;
+            }
+        }
+        n
     }
 
     /// Evict orders from the pool by EIP-712 digest (the pool key). Used to drop
