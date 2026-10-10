@@ -1,0 +1,95 @@
+{
+  "schema_version": "2026-10-10",
+  "name": "Inference Bazaar",
+  "description": "Inference Bazaar is an open market for AI inference. Buyers purchase prepaid, collateral-backed inference-token credit lots below list price; operators sell spare inference capacity; market-makers work the spread. Fills settle atomically on the InferenceBazaarSettlement contract on Tempo testnet — payment, seller payout, and credit mint in one transaction. Every lot is a claim on a bonded issuer whose on-chain collateral covers its refund value plus a default penalty, so unserved spend always comes back as cash.",
+  "homepage": "https://bazaar.tangle.tools/",
+  "llms": "https://bazaar.tangle.tools/llms.txt",
+  "agent_setup": "https://bazaar.tangle.tools/agent-setup.md",
+  "repository": "https://github.com/tangle-network/inference-bazaar",
+  "app": "https://inference-bazaar.blueprint.tangle.tools/",
+  "chain": {
+    "name": "Tempo testnet (Moderato)",
+    "chain_id": 42431,
+    "rpc": "https://rpc.moderato.tempo.xyz",
+    "gas": "Paid in pathUSD; there is no separate gas token.",
+    "settlement_contract": "0x83084C8cD2282F6126e25089f0FD26b145eCa597",
+    "payment_token": {
+      "symbol": "pathUSD",
+      "address": "0x20C0000000000000000000000000000000000000",
+      "decimals": 6,
+      "faucet": "cast rpc tempo_fundAddress <address> --rpc-url https://rpc.moderato.tempo.xyz (testnet only)"
+    },
+    "eip712_domain": {
+      "name": "InferenceBazaarSettlement",
+      "version": "1",
+      "chainId": 42431,
+      "verifyingContract": "0x83084C8cD2282F6126e25089f0FD26b145eCa597"
+    }
+  },
+  "signup": {
+    "kind": "crypto_wallet",
+    "summary": "There is no account, signup flow, or platform API key. Any Ethereum-style key is an identity, and every action is a contract call or an EIP-712 signed message. A buyer funds the key with pathUSD on Tempo testnet, approves the settlement contract, and calls deposit(uint256) to escrow cash. An operator additionally calls depositCollateral(uint256) to bond itself and runs an operator node that serves the model it sells.",
+    "human_inputs": [
+      "None beyond holding or funding the key. Buying, selling, redeeming, and refunding are pure contract calls and signed messages."
+    ],
+    "buyer_steps": [
+      "Fund the key with pathUSD (testnet faucet: cast rpc tempo_fundAddress <address> --rpc-url https://rpc.moderato.tempo.xyz).",
+      "approve(pathUSD, settlement, amount) then deposit(uint256) on the settlement contract; balances(address) is your spendable cash.",
+      "POST /rfq to any operator venue for a signed firm quote (no credential), sign the matching buy Order, POST /rfq/fill; the lot mints atomically.",
+      "Spend the lot: requestRedemption(bytes32,uint64), then POST /redeem on the issuer's venue with an EIP-712 ServeRequest signature. Unserved spend refunds via claimDefault (with penalty) or reclaimExpired."
+    ],
+    "operator_steps": [
+      "Follow https://router.tangle.tools/for-operators.md for the general operator path (host, model backend, on-chain registration).",
+      "Follow docs/OPERATOR_ONBOARDING.md in the repository for the bazaar-specific bonded-issuer path: depositCollateral(uint256), configure INFERENCE_BAZAAR_VLLM_MODEL or INFERENCE_BAZAAR_INFERENCE_URL (router-proxy mode is refused), run the mm-sidecar, and serve under the Blueprint Manager lifecycle."
+    ],
+    "key_hygiene": "Keep private keys in files with mode 600 or a keystore; never print, log, paste, or commit them. Every signed artifact is scoped: an Order expires (expiry field), a SpendPermit delegates a capped session key for one lot, and a ServeRequest authorizes exactly one redemption's messages hash. Sign only what you intend, keep amounts small and expiries short, and revoke leaked spend keys on-chain with revokeSpendKey."
+  },
+  "pricing": {
+    "summary": "Every trade clears at a signed firm quote: an EIP-712 Order carrying priceMicroPerM (micro-pathUSD per 1M tokens) and qtyTokens. Buyers request quotes from operator venues with POST /rfq (no credential) and settle at exactly the signed strike — typically a discount to router list price. The protocol fee (feeBps) and each book's fee cut are view functions on the settlement contract. Operators are collateral-constrained: a venue never signs a quote its on-chain funding cannot settle.",
+    "quote": "POST {venue}/rfq {\"instrumentId\":\"<model>:<kind>\",\"side\":\"buy\",\"qtyTokens\":<n>} — no credential; venues are operator HTTP endpoints discovered from the on-chain operator registry",
+    "reference_prices": "https://router.tangle.tools/v1/models",
+    "units": "prices are micro-pathUSD per 1M tokens (uint64); 15000000 = $15.00 per 1M tokens; instruments are '<model>:<kind>', e.g. claude-sonnet-4-6:output"
+  },
+  "safe_discovery_calls": [
+    "View calls on the settlement contract via https://rpc.moderato.tempo.xyz: paymentToken(), feeBps(), creditTtl(), redemptionWindow(), challengeWindow(), balances(address), collateral(address), liability(address), freeCollateral(address), lots(bytes32), bookThreshold(bytes32), bookAttesters(bytes32), spendSettled(bytes32)",
+    "GET {venue}/health",
+    "GET {venue}/instruments",
+    "POST {venue}/book {\"instrumentId\":\"<model>:<kind>\"}",
+    "GET {venue}/market-requests",
+    "POST {venue}/rfq {\"instrumentId\":\"<model>:<kind>\",\"side\":\"buy\",\"qtyTokens\":<n>} (returns a signed firm quote; no credential)"
+  ],
+  "smoke_tests": [
+    "cast chain-id --rpc-url https://rpc.moderato.tempo.xyz  # expect 42431",
+    "cast call 0x83084C8cD2282F6126e25089f0FD26b145eCa597 \"paymentToken()(address)\" --rpc-url https://rpc.moderato.tempo.xyz  # expect 0x20C0000000000000000000000000000000000000",
+    "cast call 0x83084C8cD2282F6126e25089f0FD26b145eCa597 \"feeBps()(uint16)\" --rpc-url https://rpc.moderato.tempo.xyz",
+    "curl -fsS {venue}/health  # any operator venue discovered from the on-chain registry"
+  ],
+  "authenticated_calls": [
+    "approve(pathUSD, settlement, amount) + deposit(uint256) — fund a buyer balance",
+    "depositCollateral(uint256) — post or top up an operator bond",
+    "settleFills(FillInput[]) — atomic fill settlement (venues submit this from their outbox)",
+    "requestRedemption(bytes32 lotId, uint64 qty) — open a redemption on a lot you hold",
+    "POST {venue}/redeem with an EIP-712 ServeRequest signature (domain InferenceBazaarServe/1) — spend a lot on a real metered completion",
+    "POST {venue}/redeem/receipt with a signed RedemptionReceipt — acknowledge service and finalize the debit",
+    "claimDefault(bytes32 redemptionId) — refund plus penalty when an issuer misses its deadline",
+    "withdraw(uint256) — withdraw unused cash balance"
+  ],
+  "related_surfaces": [
+    {
+      "name": "Tangle Router",
+      "manifest": "https://router.tangle.tools/.well-known/tangle-agent.json"
+    },
+    {
+      "name": "Tangle Sandbox",
+      "manifest": "https://sandbox.tangle.tools/.well-known/tangle-agent.json"
+    },
+    {
+      "name": "Tangle Agents",
+      "manifest": "https://agents.tangle.tools/.well-known/tangle-agent.json"
+    },
+    {
+      "name": "Tangle Browser Agent",
+      "manifest": "https://tangle.tools/.well-known/tangle-browser-agent.json"
+    }
+  ]
+}
