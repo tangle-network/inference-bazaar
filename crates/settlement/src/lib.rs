@@ -19,6 +19,8 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "chain")]
 pub mod chain;
+#[cfg(feature = "chain")]
+pub mod retry;
 
 // ─────────────────────────────── Signed orders ───────────────────────────────
 
