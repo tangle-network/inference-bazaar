@@ -198,7 +198,6 @@ fn elected_index(operators: &[(Address, String)], epoch: u64) -> usize {
 async fn two_nodes_gossip_cosign_and_prune() {
     let (operators, _clobs) = spawn_pair().await;
     let http = reqwest::Client::new();
-
     // A crossing pair, entering the market at DIFFERENT nodes.
     let sell = signed_wire(SIDE_SELL, 15_000_000, 10_000, SELLER_KEY, 1);
     let buy = signed_wire(SIDE_BUY, 15_000_000, 10_000, BUYER_KEY, 2);
@@ -264,21 +263,43 @@ async fn two_nodes_gossip_cosign_and_prune() {
         .unwrap();
     assert_eq!(r.status(), reqwest::StatusCode::CONFLICT);
 
-    // Both nodes pruned the filled orders — the batch cannot re-match.
-    for url in [&operators[0].1, &operators[1].1] {
-        let s: serde_json::Value = http
-            .get(format!("{url}/clob/status"))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        assert_eq!(
-            s["poolSize"], 0,
-            "filled orders must leave the pool at {url}"
-        );
-    }
+    // Two-stage finality: the PROPOSER's batch is confirmed final by its own
+    // (dry) submit, so its pool is empty. The PEER retains the co-signed orders
+    // as PENDING — excluded from matching but recoverable — until the settlement
+    // watcher observes the batch on-chain (no chain in this test).
+    let s: serde_json::Value = http
+        .get(format!("{}/clob/status", operators[leader].1))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(s["poolSize"], 0, "proposer confirmed on submit");
+    let s: serde_json::Value = http
+        .get(format!("{}/clob/status", operators[1 - leader].1))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(s["poolSize"], 2, "peer retains co-signed orders as pending");
+    assert_eq!(s["poolPending"], 2, "peer's orders are pending observation");
+
+    // Pending orders cannot re-match: a second epoch run matches nothing.
+    let report: serde_json::Value = http
+        .post(format!("{}/clob/run-epoch", operators[leader].1))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        report["batches"].as_array().unwrap().is_empty(),
+        "pending orders must not re-match: {report}"
+    );
 }
 
 #[tokio::test]

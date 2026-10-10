@@ -24,20 +24,26 @@
 //! with one ecrecover before any expensive work — co-sign side effects (pool
 //! prune, settled marking) are only reachable by the epoch's real proposer.
 //!
-//! Failure mode is liveness, never safety: orders touched by a co-signed batch
-//! leave the pool (re-matching a filled order would overfill and revert the next
-//! batch on-chain), so if a submission fails after quorum the affected orders
-//! must be resubmitted — they can never double-settle (`batchNonce` scopes each
-//! quorum signature, the contract's `filled` map caps every order).
+//! Failure mode is liveness, never safety. Co-signed batches are TWO-STAGE:
+//! quorum/co-sign marks the batch's orders PENDING (retained in the pool but
+//! excluded from matching), and only the on-chain observation — the proposer's
+//! mined receipt, or the settlement watcher seeing `bookNonce` advance past the
+//! batch's nonce — moves them to the settled finality set. If the batch is never
+//! observed within [`pending_settle_ttl`] (submit failed, or the tx was accepted
+//! then evicted by the mempool — observed live on Tempo), the orders are
+//! RELEASED back into matching so the next elected proposer re-drives the batch.
+//! Double-settle stays impossible: `batchNonce` scopes each quorum signature,
+//! the contract's `filled` map caps every order, and the pre-match sim evicts
+//! any order the chain reports filled.
 //!
 //! Module layout (audit M4 — `clob.rs` was a ~1.4k-line god-object):
 //!   - [`config`] — `ClobConfig` + env parsing.
 //!   - [`net`] — the `ClobNet` transport trait + the HTTP peer-list impl.
 //!   - [`wire`] — the JSON wire types (`WireOrder`/`WireCancel`/…).
 //!   - [`pool`] — order/cancel admission, the settled/cancelled finality sets,
-//!     the epoch snapshot, prune/evict (state mutation).
-//!   - [`driver`] — proposer side: match → pre-sim → quorum → submit, plus the
-//!     on-chain client and membership reconciliation.
+//!     the epoch snapshot, pending/confirm/release (state mutation).
+//!   - [`driver`] — proposer side: match → pre-sim → quorum → submit, the
+//!     settlement watcher, plus the on-chain client and membership reconciliation.
 //!   - [`peer`] — verifier side: `attest`, plus `status`.
 //!   - [`http`] — the axum router, handlers, and the boot/loop spawners.
 //! The `Clob` struct, its constructors, and the shared accessors live here so
@@ -66,7 +72,9 @@ mod wire;
 pub mod http;
 
 pub use config::ClobConfig;
-pub use http::{router, spawn_epoch_loop, spawn_membership_reconciler, start_from_env};
+pub use http::{
+    router, spawn_epoch_loop, spawn_membership_reconciler, spawn_settlement_watcher, start_from_env,
+};
 pub use net::{ClobNet, HttpNet};
 pub use wire::{WireAttestation, WireCancel, WireOrder, WireProposal};
 
@@ -79,6 +87,27 @@ pub(crate) const MAX_POOL: usize = 10_000;
 /// outlive the order it kills; once the order is in hand we extend to its exact
 /// expiry. Two days bounds the unseen-order case without growing the set.
 pub(crate) const CANCEL_TTL_SECS: u64 = 2 * 24 * 3600;
+
+/// A co-signed batch's orders stay pending at least this long (and 3 epochs) —
+/// long enough for the settle tx to be mined and observed, short enough that a
+/// lost submission (submit error, mempool eviction) re-matches promptly.
+pub(crate) const PENDING_SETTLE_MIN_SECS: u64 = 30;
+pub(crate) const PENDING_SETTLE_EPOCHS: u64 = 3;
+
+/// Deadline for a co-signed batch to be OBSERVED on-chain before its orders are
+/// released back into matching for a re-drive.
+pub(crate) fn pending_settle_ttl(epoch_secs: u64) -> u64 {
+    (PENDING_SETTLE_EPOCHS * epoch_secs).max(PENDING_SETTLE_MIN_SECS)
+}
+
+/// A batch this order was co-signed into, awaiting on-chain observation.
+/// `batch_nonce` is the book nonce the quorum signature binds to; `deadline` is
+/// the unix time after which the order is released for a re-drive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PendingBatch {
+    pub batch_nonce: u64,
+    pub deadline: u64,
+}
 
 /// How long a proposer waits for peer co-signatures, derived from the epoch so
 /// it can never overrun a short epoch into the next round (audit M7: a fixed
@@ -136,6 +165,11 @@ pub(crate) struct FinalityJournal {
 pub(crate) struct PoolEntry {
     pub(crate) instrument_id: String,
     pub(crate) signed: SignedOrder,
+    /// Set at quorum/co-sign: the batch this order is part of, awaiting on-chain
+    /// observation. Pending orders stay in the pool but are excluded from
+    /// snapshots (matching) until the batch confirms or the deadline releases
+    /// them for a re-drive.
+    pub(crate) pending: Option<PendingBatch>,
 }
 
 pub struct Clob {
@@ -146,10 +180,12 @@ pub struct Clob {
     /// Gossiped order pool, keyed by order digest. Orders persist across epochs
     /// until matched, expired, or evicted.
     pub(crate) pool: Mutex<HashMap<B256, PoolEntry>>,
-    /// Digest → expiry of every order a co-signed batch ever touched. A settled
-    /// order is a signed public object — replaying it (late gossip, or an
-    /// attacker) would re-admit it, re-match it next epoch, and revert that
-    /// whole batch on the contract's `filled` cap: a liveness grief. This set
+    /// Digest → expiry of every order a batch OBSERVED on-chain ever touched
+    /// (the proposer's mined receipt, or the watcher seeing `bookNonce` advance
+    /// past the batch nonce). A settled order is a signed public object —
+    /// replaying it (late gossip, or an attacker) would re-admit it, re-match
+    /// it next epoch, and revert that whole batch on the contract's `filled`
+    /// cap: a liveness grief. This set
     /// makes settlement final at admission; it self-bounds by order expiry.
     pub(crate) settled: Mutex<HashMap<B256, u64>>,
     /// orderHash → (trader, gc-expiry) for every order a signed cancel has
@@ -314,7 +350,7 @@ mod tests {
     use inference_bazaar_settlement::{instrument_hash, Order, Signer};
     use serde_json::json;
 
-    const INST: &str = "test/model:output";
+    pub(super) const INST: &str = "test/model:output";
 
     struct StubNet;
 
@@ -338,8 +374,28 @@ mod tests {
 
     /// A single-node CLOB over a stub transport. `rpc_url None` => dry mode
     /// (the consensus round runs, chain reads/submits are skipped).
-    fn test_clob(rpc_url: Option<&str>) -> Arc<Clob> {
+    pub(super) fn test_clob(rpc_url: Option<&str>) -> Arc<Clob> {
+        let me = signer();
+        test_clob_as(
+            rpc_url,
+            &me,
+            vec![(me.address(), "http://127.0.0.1:1".into())],
+            1,
+        )
+    }
+
+    pub(super) fn test_clob_as(
+        rpc_url: Option<&str>,
+        me: &Signer,
+        operators: Vec<(Address, String)>,
+        threshold: usize,
+    ) -> Arc<Clob> {
         let key = inference_bazaar_settlement::core::hex::encode_prefixed([0x42; 32]);
+        // The venue's signer is the `me` identity: recover its raw key.
+        let me_key = match me.address() == signer().address() {
+            true => key.clone(),
+            false => inference_bazaar_settlement::core::hex::encode_prefixed([0x43; 32]),
+        };
         let cfg = OperatorConfig {
             sidecar_url: "http://127.0.0.1:1".into(),
             router_url: "http://127.0.0.1:1".into(),
@@ -369,7 +425,7 @@ mod tests {
             settlement: Some(SettlementConfig {
                 chain_id: 31_337,
                 contract: format!("{:#x}", Address::with_last_byte(0xcc)),
-                operator_key: Some(key),
+                operator_key: Some(me_key),
                 submitter_key: None,
                 rpc_url: rpc_url.map(str::to_string),
                 rfq_ttl_secs: 60,
@@ -377,17 +433,16 @@ mod tests {
             }),
         };
         let venue = Arc::new(Venue::new(cfg));
-        let me = signer().address();
         let clob_cfg = ClobConfig {
             book_id: B256::ZERO,
             epoch_secs: 3600, // election is stable for the whole test
-            threshold: 1,
-            operators: vec![(me, "http://127.0.0.1:1".into())],
+            threshold,
+            operators,
         };
         Arc::new(Clob::with_net(venue, clob_cfg, Arc::new(StubNet)).unwrap())
     }
 
-    fn signed_body(
+    pub(super) fn signed_body(
         clob: &Clob,
         signer: &Signer,
         side: u8,
@@ -489,5 +544,149 @@ mod tests {
         // The orders were NOT pruned (no quorum was ever collected), so the
         // retry has them.
         assert_eq!(clob.pool.lock().unwrap().len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod pending_tests {
+    //! Two-stage finality for co-signed batches (post-quorum recovery): co-sign
+    //! marks orders PENDING, not settled; only on-chain observation confirms
+    //! them, and an unobserved batch is released for a re-drive at its deadline.
+    use super::tests::*;
+    use super::*;
+    use crate::market::now_unix;
+    use inference_bazaar_matcher::match_epoch;
+    use inference_bazaar_settlement::core::{batch_digest, order_digest};
+    use inference_bazaar_settlement::{Order, Signer, SIDE_BUY, SIDE_SELL};
+
+    fn key(b: u8) -> String {
+        inference_bazaar_settlement::core::hex::encode_prefixed([b; 32])
+    }
+    fn signer_b(b: u8) -> Signer {
+        Signer::from_hex(&key(b)).unwrap()
+    }
+
+    /// A two-operator CLOB where THIS node is the peer (not the epoch's elected
+    /// proposer). Returns (clob, proposer signer, epoch).
+    fn peer_clob() -> (Arc<Clob>, Signer, u64) {
+        let s42 = signer_b(0x42);
+        let s43 = signer_b(0x43);
+        let epoch = now_unix() / 3600;
+        let mut addrs = [s42.address(), s43.address()];
+        addrs.sort_unstable();
+        let elected = addrs[(epoch % 2) as usize];
+        let (proposer, me) = if elected == s42.address() {
+            (signer_b(0x42), signer_b(0x43))
+        } else {
+            (signer_b(0x43), signer_b(0x42))
+        };
+        let clob = test_clob_as(
+            None,
+            &me,
+            vec![
+                (s42.address(), "http://127.0.0.1:1".into()),
+                (s43.address(), "http://127.0.0.1:2".into()),
+            ],
+            2,
+        );
+        (clob, proposer, epoch)
+    }
+
+    /// Admit a crossing pair, build the exact proposal a proposer would
+    /// broadcast, and co-sign it via `attest` — the post-quorum state on a peer.
+    fn cosigned_pair(clob: &Arc<Clob>, proposer: &Signer, epoch: u64) -> (B256, B256) {
+        let seller = signer_b(0x22);
+        let buyer = signer_b(0x21);
+        let sell = signed_body(clob, &seller, SIDE_SELL, 14_000_000, 1000, 1);
+        let buy = signed_body(clob, &buyer, SIDE_BUY, 15_000_000, 1000, 2);
+        let sell_digest = order_digest(&sell.order, clob.domain());
+        let buy_digest = order_digest(&buy.order, clob.domain());
+        clob.admit(sell).unwrap();
+        clob.admit(buy).unwrap();
+
+        let orders: Vec<inference_bazaar_settlement::SignedOrder> = clob.snapshot(INST, epoch);
+        assert_eq!(orders.len(), 2);
+        let inner: Vec<Order> = orders.iter().map(|s| s.order.clone()).collect();
+        let batch = match_epoch(INST, 1000, 1000, clob.domain(), &inner);
+        assert_eq!(batch.fills.len(), 1, "the pair must cross");
+        let digest = batch_digest(B256::ZERO, 0, batch.fills_hash, clob.domain());
+        let wire = WireProposal {
+            epoch,
+            book_id: B256::ZERO,
+            batch_nonce: 0,
+            instrument_id: INST.into(),
+            proposer: proposer.address(),
+            proposer_sig: format!(
+                "0x{}",
+                inference_bazaar_settlement::core::hex::encode(proposer.sign_digest(digest))
+            ),
+            orders,
+            fills_hash: batch.fills_hash,
+        };
+        let att = clob
+            .attest(wire)
+            .expect("peer must co-sign an honest batch");
+        assert_eq!(att.attester, clob.me);
+        (buy_digest, sell_digest)
+    }
+
+    #[test]
+    fn cosigned_orders_are_pending_not_pruned() {
+        let (clob, proposer, epoch) = peer_clob();
+        cosigned_pair(&clob, &proposer, epoch);
+        // Retained in the pool…
+        assert_eq!(clob.pool.lock().unwrap().len(), 2);
+        // …but excluded from matching (cannot double-match while the batch may land)…
+        assert!(clob.snapshot(INST, epoch).is_empty());
+        // …and NOT in the settled finality set (nothing was observed on-chain).
+        assert!(clob.settled.lock().unwrap().is_empty());
+        assert_eq!(clob.pending_batch_nonces(), vec![0]);
+        // A replayed pending order keeps its pending state (no silent un-pend).
+        let buyer = signer_b(0x21);
+        let again = signed_body(&clob, &buyer, SIDE_BUY, 15_000_000, 1000, 2);
+        clob.admit(again).unwrap();
+        assert!(clob.snapshot(INST, epoch).is_empty());
+    }
+
+    #[test]
+    fn lost_batch_is_released_for_redrive() {
+        let (clob, proposer, epoch) = peer_clob();
+        cosigned_pair(&clob, &proposer, epoch);
+        // The settle tx never lands; the deadline passes.
+        let ttl = pending_settle_ttl(3600);
+        let expired = clob.expired_pending(now_unix() + ttl + 1);
+        assert_eq!(expired.len(), 2);
+        assert_eq!(clob.release_pending(&expired), 2);
+        // The orders re-enter matching: a later elected proposer re-drives them.
+        let snapshot = clob.snapshot(INST, epoch);
+        assert_eq!(snapshot.len(), 2);
+        let inner: Vec<Order> = snapshot.iter().map(|s| s.order.clone()).collect();
+        assert_eq!(
+            match_epoch(INST, 1000, 1000, clob.domain(), &inner)
+                .fills
+                .len(),
+            1
+        );
+        assert!(
+            clob.settled.lock().unwrap().is_empty(),
+            "still never settled"
+        );
+    }
+
+    #[test]
+    fn observed_batch_confirms_and_never_resttles() {
+        let (clob, proposer, epoch) = peer_clob();
+        let (buy_digest, sell_digest) = cosigned_pair(&clob, &proposer, epoch);
+        // The watcher observes bookNonce advance past 0 → confirm.
+        assert_eq!(clob.confirm_batch(0), 2);
+        assert!(clob.pool.lock().unwrap().is_empty());
+        assert!(clob.settled.lock().unwrap().contains_key(&buy_digest));
+        assert!(clob.settled.lock().unwrap().contains_key(&sell_digest));
+        // Replays are refused as settled — a late second landing cannot re-match.
+        let buyer = signer_b(0x21);
+        let replay = signed_body(&clob, &buyer, SIDE_BUY, 15_000_000, 1000, 2);
+        let err = clob.admit(replay).unwrap_err();
+        assert_eq!(err.0, axum::http::StatusCode::CONFLICT);
+        assert!(err.1.contains("settled in a prior batch"), "{:?}", err);
     }
 }

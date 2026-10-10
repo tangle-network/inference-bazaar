@@ -113,11 +113,13 @@ impl Clob {
                         json!({ "verdict": "cancelled", "order": format!("{:#x}", o.digest(&domain)) }),
                     ));
                 }
-                // Final for this node: prune what the batch fills so the next
-                // epoch cannot re-match (and overfill) settled orders. The
-                // verified batch came back with the verdict — no second
-                // match_epoch run.
-                self.prune_filled(&batch.fills);
+                // Co-signed: mark the batch's orders PENDING (retained but
+                // excluded from matching) until the settlement watcher observes
+                // the batch on-chain or its deadline releases it for a re-drive.
+                // Pruning here stranded batches whose settle tx never landed.
+                let deadline =
+                    crate::market::now_unix() + super::pending_settle_ttl(self.cfg.epoch_secs);
+                self.mark_pending(&batch.fills, wire.batch_nonce, deadline);
                 crate::metrics::inc(crate::metrics::names::ATTEST_SIGNED);
                 Ok(WireAttestation {
                     attester: self.me,
@@ -174,6 +176,7 @@ impl Clob {
                 "address": format!("{a:#x}"), "url": u,
             })).collect::<Vec<_>>(),
             "poolSize": pool.len(),
+            "poolPending": pool.values().filter(|e| e.pending.is_some()).count(),
             "poolByInstrument": per_instrument,
         })
     }
