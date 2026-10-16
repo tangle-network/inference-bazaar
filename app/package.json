@@ -2,7 +2,7 @@
   "name": "@inference-bazaar/app",
   "private": true,
   "type": "module",
-  "description": "InferenceBazaar Intelligence — marketplace UI for prepaid inference-token credits.",
+  "description": "InferenceBazaar Intelligence \u2014 marketplace UI for prepaid inference-token credits.",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
@@ -14,7 +14,8 @@
     "@lobehub/icons-static-svg": "^1.91.0",
     "@nanostores/react": "^0.7.3",
     "@tangle-network/blueprint-ui": "^0.5.7",
-    "@tangle-network/sandbox-ui": "^0.17.0",
+    "@tangle-network/brand": "1.25.1",
+    "@tangle-network/ui": "11.39.0",
     "@tanstack/react-query": "^5.101.0",
     "chart.js": "^4.5.1",
     "clsx": "^2.1.1",
