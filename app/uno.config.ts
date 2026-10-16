@@ -2,19 +2,19 @@ import { icons as phIcons } from '@iconify-json/ph'
 import { defineConfig, presetIcons, transformerDirectives } from 'unocss'
 import { presetWind4 } from 'unocss/preset-wind4'
 
-/*
- * VIOLET TERMINAL — InferenceBazaar
- * A purple-native take on the arena's terminal system: a dark aubergine base
- * (clearly purple, not near-black), light-violet primary actions, periwinkle
- * brand (the Tangle mark's violet→blue), emerald gains / crimson losses / amber
- * highlights, glass-card surfaces with backdrop blur and semantic glow shadows.
- * Numbers are mono (IBM Plex Mono, tabular).
- */
-
 export default defineConfig({
+  content: {
+    filesystem: [
+      './src/**/*.{ts,tsx}',
+      './node_modules/@tangle-network/ui/src/primitives/badge.tsx',
+      './node_modules/@tangle-network/ui/src/markdown/code-block.tsx',
+      './node_modules/@tangle-network/ui/src/lib/focus.ts',
+      './node_modules/@tangle-network/ui/src/lib/code-presentation.ts',
+    ],
+  },
   presets: [
     presetWind4({
-      dark: { light: '[data-theme="light"]', dark: '[data-theme="dark"]' },
+      dark: { light: '[data-theme="aubergine-light"]', dark: '[data-theme="aubergine"]' },
     }),
     presetIcons({ warn: true, collections: { ph: () => phIcons } }),
   ],
@@ -38,27 +38,18 @@ export default defineConfig({
       'inline-flex items-center justify-center gap-1.5 rounded-[8px] border border-[var(--s-border)] bg-[var(--s-glass)] px-4 font-data text-[15px] font-semibold uppercase tracking-wide text-[var(--s-text-secondary)] backdrop-blur-[8px] transition-colors hover:border-[var(--s-border-hover)] hover:text-[var(--s-text)] disabled:opacity-40 disabled:cursor-not-allowed',
     'btn-brand':
       'inline-flex items-center justify-center gap-1.5 rounded-[8px] bg-[var(--s-brand-soft)] border border-[var(--s-brand)]/30 px-4 font-data text-[15px] font-semibold uppercase tracking-wide text-[var(--s-brand)] transition-colors hover:bg-[var(--s-brand)]/24 hover:border-[var(--s-brand)]/50 disabled:opacity-40 disabled:cursor-not-allowed',
-    'glow-emerald': 'shadow-[var(--s-glow-emerald)]',
-    'glow-crimson': 'shadow-[var(--s-glow-crimson)]',
-    'glow-violet': 'shadow-[var(--s-glow-violet)]',
     'focus-ring':
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--s-accent)]/60',
   },
-  rules: [
-    [/^font-display$/, () => ({ 'font-family': "'Outfit', system-ui, sans-serif" })],
-    [/^font-body$/, () => ({ 'font-family': "'DM Sans', system-ui, sans-serif" })],
-    [/^font-data$/, () => ({ 'font-family': "'IBM Plex Mono', 'JetBrains Mono', monospace" })],
-  ],
   theme: {
-    colors: {
-      // Violet Terminal hues, usable directly.
-      emerald: { DEFAULT: '#3DDC97', soft: 'rgba(61,220,151,0.12)' },
-      crimson: { DEFAULT: '#FF5D7A', soft: 'rgba(255,93,122,0.13)' },
-      amber: { DEFAULT: '#FFC15E', soft: 'rgba(255,193,94,0.12)' },
-      accent: { DEFAULT: '#B69DFF' },
-      brand: { DEFAULT: '#8090FF' },
-      violet: { DEFAULT: '#9B7CFF', 400: '#B69DFF' },
-    },
+    font: { sans: 'var(--font-sans)', mono: 'var(--font-mono)' },
+    colors: Object.fromEntries(
+      [
+        'background', 'foreground', 'card', 'card-foreground',
+        'primary', 'primary-foreground', 'secondary', 'secondary-foreground',
+        'muted', 'muted-foreground', 'border', 'ring',
+      ].map((role) => [role, `hsl(var(--hsl-${role}))`]),
+    ),
   },
   preflights: [
     {

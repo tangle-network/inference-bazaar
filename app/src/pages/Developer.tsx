@@ -7,11 +7,11 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@tangle-network/sandbox-ui/primitives'
+} from '@tangle-network/ui/primitives'
 import type { Address, Hex } from 'viem'
 import { PageHeader } from '~/components/PageHeader'
 import { ApiKeyMint } from '~/components/ApiKeyMint'
-import { CodeBlock } from '~/components/CodeBlock'
+import { CodeBlock, CopyButton } from '@tangle-network/ui/markdown'
 import { Badge, Panel, Segmented, Stat } from '~/components/ui'
 import { cn } from '~/lib/cn'
 import { compactUsd, formatNumber, pricePerM, tokens, truncAddr } from '~/lib/format'
@@ -275,9 +275,10 @@ function chatCost(microUsd: number): string {
 /** Three ways to spend credits over the API. Each tab is the real integration
  * for that path; availability is tagged honestly — the router credit-debit and
  * the tcloud SDK surface are still rolling out, so they're marked, not faked. */
-const TABS: Record<Tab, { label: string; badge: { tone: 'emerald' | 'amber'; text: string }; note: string; code: string }> = {
+const TABS: Record<Tab, { label: string; badge: { tone: 'emerald' | 'amber'; text: string }; note: string; code: string; language: 'python' | 'typescript' }> = {
   gateway: {
     label: 'Gateway',
+    language: 'python',
     badge: { tone: 'emerald', text: 'Live' },
     note: 'Local gateway for lot-backed API keys. Your app talks OpenAI-compatible HTTP; the gateway signs spend vouchers.',
     code: `from openai import OpenAI
@@ -292,6 +293,7 @@ resp = client.chat.completions.create(
   },
   router: {
     label: 'Router',
+    language: 'python',
     badge: { tone: 'amber', text: 'Credits rolling out' },
     note: 'Live model router. Auto-spending Bazaar lots through the router is not the default path yet.',
     code: `from openai import OpenAI
@@ -306,6 +308,7 @@ resp = client.chat.completions.create(
   },
   tcloud: {
     label: 'tcloud',
+    language: 'typescript',
     badge: { tone: 'amber', text: 'Preview · tcloud#41' },
     note: 'SDK preview for cloud apps. Credit-lot pricing is still behind the preview surface.',
     code: `import { chat } from "@tangle-network/tcloud"
@@ -336,7 +339,9 @@ function Quickstart() {
         <Badge tone={t.badge.tone}>{t.badge.text}</Badge>
         <span className="font-body text-[15px] text-[var(--s-text-muted)]">{t.note}</span>
       </div>
-      <CodeBlock code={t.code} className="mt-3" />
+      <CodeBlock code={t.code} language={t.language} className="mt-3">
+        <CopyButton text={t.code} label="Copy" />
+      </CodeBlock>
     </Panel>
   )
 }

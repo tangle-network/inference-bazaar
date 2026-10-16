@@ -6,12 +6,13 @@ const listeners = new Set<() => void>()
 
 function current(): Theme {
   if (typeof document === 'undefined') return 'dark'
-  return (document.documentElement.getAttribute('data-theme') as Theme) ?? 'dark'
+  const theme = document.documentElement.getAttribute('data-theme')
+  return theme === 'light' || theme === 'aubergine-light' ? 'light' : 'dark'
 }
 
 export function toggleTheme() {
   const next: Theme = current() === 'dark' ? 'light' : 'dark'
-  document.documentElement.setAttribute('data-theme', next)
+  document.documentElement.setAttribute('data-theme', next === 'light' ? 'aubergine-light' : 'aubergine')
   try {
     localStorage.setItem(KEY, next)
   } catch {

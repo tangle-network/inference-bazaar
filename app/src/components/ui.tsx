@@ -1,4 +1,5 @@
-import { type ReactNode } from 'react'
+import { type ComponentProps, type ReactNode } from 'react'
+import { Badge as SharedBadge } from '@tangle-network/ui/primitives'
 import { cn } from '~/lib/cn'
 
 // ── Brand mark for a lab/venue: tinted square with glyph or initials ──────────
@@ -40,14 +41,14 @@ export function Mark({
 
 // ── Badge / pill ──────────────────────────────────────────────────────────────
 
-type Tone = 'neutral' | 'accent' | 'brand' | 'emerald' | 'crimson' | 'amber'
-const toneVars: Record<Tone, { fg: string; bg: string }> = {
-  neutral: { fg: 'var(--s-text-secondary)', bg: 'color-mix(in srgb, var(--s-text-muted) 14%, transparent)' },
-  accent: { fg: 'var(--s-accent)', bg: 'var(--s-accent-soft)' },
-  brand: { fg: 'var(--s-brand)', bg: 'var(--s-brand-soft)' },
-  emerald: { fg: 'var(--s-emerald)', bg: 'var(--s-emerald-soft)' },
-  crimson: { fg: 'var(--s-crimson)', bg: 'var(--s-crimson-soft)' },
-  amber: { fg: 'var(--s-amber)', bg: 'var(--s-amber-soft)' },
+type Tone = 'neutral' | 'accent' | 'emerald' | 'crimson' | 'amber'
+// Market meanings stay here; the shared primitive owns their rendering.
+const toneVariants: Record<Tone, ComponentProps<typeof SharedBadge>['variant']> = {
+  neutral: 'secondary',
+  accent: 'sandbox',
+  emerald: 'success',
+  crimson: 'error',
+  amber: 'warning',
 }
 
 export function Badge({
@@ -61,18 +62,11 @@ export function Badge({
   className?: string
   icon?: string
 }) {
-  const v = toneVars[tone]
   return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1 rounded-[5px] px-1.5 py-0.5 font-data text-[15px] font-semibold uppercase tracking-wider leading-none',
-        className,
-      )}
-      style={{ color: v.fg, background: v.bg }}
-    >
-      {icon && <span className={cn(icon, 'text-[15px]')} />}
+    <SharedBadge variant={toneVariants[tone]} className={className}>
+      {icon && <span className={cn(icon, 'text-[15px]')} aria-hidden="true" />}
       {children}
-    </span>
+    </SharedBadge>
   )
 }
 
