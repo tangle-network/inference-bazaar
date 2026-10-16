@@ -1,0 +1,58 @@
+import { chromium } from '/home/drew/code/agent-app/node_modules/playwright/index.mjs';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+const [base,out,phase]=process.argv.slice(2);
+const browser=await chromium.launch({headless:true});
+const summary=[];
+try {
+ for(const width of [1440,390])for(const theme of ['dark','light']) {
+  const name=`${width}-${theme}`,dir=path.join(out,name);await fs.mkdir(dir,{recursive:true});
+  const context=await browser.newContext({viewport:{width,height:width===390?844:1000},deviceScaleFactor:1,colorScheme:theme,reducedMotion:'no-preference',recordVideo:{dir,size:{width,height:width===390?844:1000}}});
+  await context.grantPermissions(['clipboard-read','clipboard-write']);
+  const page=await context.newPage(),errors=[],blocked=[],requests=[],checks=[];const video=page.video();
+  page.on('pageerror',e=>errors.push(String(e)));
+  page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
+  await context.route('**/*',async route=>{const req=route.request(),u=new URL(req.url());
+   const read=req.method()==='GET'&&(u.origin===new URL(base).origin||['fonts.googleapis.com','fonts.gstatic.com','router.tangle.tools','bazaar.178.104.232.124.sslip.io'].includes(u.hostname));
+   if(read){requests.push({method:req.method(),origin:u.origin,path:u.pathname,type:req.resourceType()});await route.continue();}
+   else {blocked.push({method:req.method(),origin:u.origin,path:u.pathname,type:req.resourceType()});await route.abort('blockedbyclient');}
+  });
+  const check=(name,pass,details)=>{checks.push({name,pass,details});if(!pass)throw new Error(name);};
+  let result={name,phase,source:process.env.INFERENCE_EXPECTED_SOURCE,checks,errors,blocked,requests};
+  try {
+   await page.goto(`${base}/developer?theme=${theme}`,{waitUntil:'domcontentloaded'});
+   const heading=page.getByRole('heading',{name:'API access',exact:true});await heading.waitFor({state:'visible',timeout:30000});
+   const panel=heading.locator('xpath=ancestor::section[1]');await panel.scrollIntoViewIfNeeded();
+   check('native viewport meta and width',await page.evaluate(w=>Boolean(document.querySelector('meta[name="viewport"]'))&&innerWidth===w,width),{width});
+   await page.screenshot({path:path.join(dir,'00-public-controls.png'),fullPage:false});
+   for(const tab of ['Gateway','Router','tcloud']) {
+    const selector=panel.getByRole('button',{name:tab,exact:true});await selector.click();
+    const code=await panel.locator('pre code').innerText();check(`${tab} actual nonempty snippet`,code.length>40,{length:code.length});
+    const button=panel.getByRole('button',{name:/^copy$/i});
+    if(tab==='tcloud'){
+     await page.keyboard.press('Tab');check('native Tab reaches copy',await button.evaluate(el=>el===document.activeElement),{});
+     await page.screenshot({path:path.join(dir,'01-native-copy-focus.png'),fullPage:false});await page.keyboard.press('Enter');
+    }else await button.click();
+    await page.waitForFunction(async expected=>await navigator.clipboard.readText()===expected,code,{timeout:5000});
+    check(`${tab} exact native clipboard`,await page.evaluate(()=>navigator.clipboard.readText())===code,{});
+    const copied=panel.getByRole('button',{name:/^copied(?: ✓)?$/i});await copied.waitFor({state:'visible',timeout:5000});
+    check(`${tab} acknowledged label`,true,{label:await copied.getAttribute('aria-label')??await copied.innerText()});
+   }
+   await page.screenshot({path:path.join(dir,'02-copy-acknowledged.png'),fullPage:false});
+   const toggle=page.getByTitle('Toggle theme',{exact:true}).first();await toggle.click();
+   const other=theme==='dark'?'light':'dark';
+   check('theme toggle preserves stored light/dark contract',await page.evaluate(expected=>localStorage.getItem('inference_bazaar_theme')===expected,other),{});
+   await page.screenshot({path:path.join(dir,'03-theme-alternate.png'),fullPage:false});await toggle.click();
+   result.document=await page.evaluate(()=>({width:innerWidth,scrollWidth:document.documentElement.scrollWidth,overflow:Math.max(0,document.documentElement.scrollWidth-innerWidth),theme:document.documentElement.dataset.theme,bodyColor:getComputedStyle(document.body).color,bodyBackground:getComputedStyle(document.body).backgroundColor,bodyFont:getComputedStyle(document.body).fontFamily}));
+   check('document fits viewport',result.document.overflow===0,result.document);
+   result.consoleClassification={pageErrorsAndConsoleErrors:errors,blockedRequests:blocked};
+   check('no unexpected browser exceptions or console errors',errors.length===0,{errors});
+   result.status='PASS';
+  }catch(e){result.status='FAIL';result.failure=String(e);await page.screenshot({path:path.join(dir,'failure.png'),fullPage:false}).catch(()=>{});}
+  finally {
+   result.finalDOM=await page.locator('body').innerText().catch(()=>null);
+   await context.close();result.video=await video.path();await fs.writeFile(path.join(dir,'observations.json'),JSON.stringify(result,null,2));summary.push(result);
+  }
+ }
+}finally{await browser.close();await fs.writeFile(path.join(out,'summary.json'),JSON.stringify(summary.map(({finalDOM,...x})=>x),null,2));}
+if(summary.some(x=>x.status!=='PASS'))process.exitCode=1;

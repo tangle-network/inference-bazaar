@@ -1,0 +1,32 @@
+{
+  "source": "8eaac9238bc3a013261dfb466590cbb338960de5",
+  "purpose": "public-local-controls-before-migration",
+  "appNode": "v22.23.3",
+  "captureNode": "v24.18.0",
+  "Playwright": "1.63.0",
+  "ChromiumCacheRevision": 1243,
+  "inputs": {
+    "app/src/components/CodeBlock.tsx": "04af143ddc65e0ec83a9dc79e536a39e2264e4f558763626e06fcd4e1aea018b",
+    "app/src/components/ui.tsx": "9de724de8d0d28f1a292add23e8739ac7127da77e317a466676d78cf1e705be2",
+    "app/src/styles.css": "7e2fb890e462166aa1454eaecdaf75c12b3022059f09058d941462f976c79a24",
+    "app/pnpm-lock.yaml": "48be458ab9a2efbe24561950a822a4252a654c21709aa048d39dfdf2612e6a2f"
+  },
+  "dist": {
+    "_redirects": "6036983e5fc00f0169c9e939b1816ed771eee00e27f2fcc517b819041460b9ef",
+    "llms.txt": "8ee5f34cbe68fa9bf7685832f1c0cc757c286bd1506f8892c2d82bef650e773c",
+    "index.md": "9ca5466d6ac633b172d5de955f5a8a9b513dc4b429ae6524ea26fe62505ed538",
+    "_headers": "7e9f14d85b4b6a055da1b7edee4470d1a41a74e1a06ed485478d5c64df217ec4",
+    "index.html": "0ffb41b4beeef6a8138507ba1984d2b2fc5dd02c9dc117e98afa8d722cbdc183",
+    "agent-setup.md": "3768a92e9fa5ba3c3eed07dade3b44178516e885d2c10e466db572c2a69179b2",
+    ".well-known/tangle-agent.json": "eb191f14760bf5c2d2472980bd046a2b9ed4eb643d8364622afc3c344d883553",
+    "assets/meta-color-DjXqXA8M.svg": "adf9f2c1a646ccd3a37ca8c2e7e5985d64630cd633f4b95fba393d1d44e0578c",
+    "assets/connectors-DAWtxdNk.js": "b346aefb5f457a8c8df18ffe2dbcaba13438ec61b6847adc40ce730908e5063f",
+    "assets/index-DsFadZeQ.js": "19224003a97345784f16a54ebbcd5759f31e2129ba502f0b9315cc68aa262a77",
+    "assets/connectors-mXb62Iam.js": "b346aefb5f457a8c8df18ffe2dbcaba13438ec61b6847adc40ce730908e5063f",
+    "assets/connectors-BkiAkXrA.js": "b346aefb5f457a8c8df18ffe2dbcaba13438ec61b6847adc40ce730908e5063f",
+    "assets/ccip-DENAlnlq.js": "e5de2f23043ff9a3fda0d93bfd8f658953988e773bddc7f2d14097f36d304803",
+    "assets/connectors-BIqtKyuJ.js": "b346aefb5f457a8c8df18ffe2dbcaba13438ec61b6847adc40ce730908e5063f",
+    "assets/index-DaHxNLKY.css": "157841150489e6ef9cdb4390f6c7e25265a444393cfe5f0d5ce8272c44a90811",
+    "assets/index-DrAshLsx-MjFjA2jv.js": "d65e67efe381114d69781631aa1c823fb4573c9270e2e422ef7e7f7e6f2b7bb4"
+  }
+}

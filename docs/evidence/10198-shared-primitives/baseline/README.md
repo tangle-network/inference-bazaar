@@ -1,0 +1,28 @@
+# Inference Bazaar shared primitives: before-state evidence
+
+This is the original before-state at executable `8eaac9238bc3a013261dfb466590cbb338960de5`, not acceptance of the proposed shared-owner migration at source candidate `8a77a46eb167a7387e0ebc1edb4c2f12a250aa62`.
+
+The app's actual public `/developer` page was locally built and served. Source and fixture guards were retained. Gate `beelink2-353751515f9ec76ea341fbd21aeaf0fc` exited1 (124s overall,0s admission wait,113s command). Its separate app frozen install passed in3.5s with the repository's pnpm10.33.4; `tsc -b && vite build` passed, Vite12.59s. No unit/mock suite or paid inference was run. The original actor/build/source hashes are in provenance/identity.json.raw.txt; browser owner was Node24.18.0, Playwright1.63, Chromium1243, separate from app Node22.23.3.
+
+| Original condition | Case result | Observed scope |
+| --- | --- | --- |
+| [Desktop dark1440×1000](1440-dark/) | FAIL | Three exact clipboard/label checks, native Tab+Enter, visible theme toggle/storage and document-fit checks passed; final console assertion failed. |
+| [Desktop light1440×1000](1440-light/) | FAIL | Same observed scope; final console assertion failed. |
+| [Phone dark390×844](390-dark/) | FAIL | Three exact clipboard/label checks and native Tab+Enter passed; theme locator selected the hidden desktop instance and timed out. |
+| [Phone light390×844](390-light/) | FAIL | Same observed scope; theme locator timed out. |
+
+All four cases remain FAIL in their original JSON. There is no relabelled runtime PASS. In total, twelve actual exact clipboard reads and four native Tab/Enter copy activations were observed before the later instrument failures. All contexts used fresh unauthenticated storage and genuine browser clipboard permissions; clipboard APIs were not mocked. No account, wallet connection, funded action, paid inference or production write occurred. Allowed network requests were read-only GETs; RPC POSTs and wallet embed requests were deliberately blocked. Those aborts produced ERR_BLOCKED_BY_CLIENT console diagnostics. The old observer stored message text without enough location/failure correlation to qualify a complete unexpected-console classification.
+
+The two phone failures identify an observer premise: `.getByTitle('Toggle theme').first()` selects the hidden desktop control, while the mobile page has a visible theme control. A future observer must use the visible native control and separately correlate exact intentional request aborts with console locations/requestfailed events. Unexpected page exceptions and unmatched console errors stay fail-closed. These corrections do not establish a product fix or a byte-identical-runner pass.
+
+All18 original viewport PNGs, four original uncut WebMs and four raw case observations are retained here. Screenshots were not full-page during recording. No derivatives count as originals. Initial desktop/phone both-theme stills were inspected; chronological decoded video samples are separate derivatives, not native full playback. Before-state code uses the local generic regex highlighter and optimistic copy feedback; the candidate delegates those to shared CodeBlock/CopyButton with explicit Python/TypeScript languages.
+
+## Candidate and blockers
+
+Three inventoried paths are authored: local CodeBlock renderer deleted (one page importer), Badge rendering delegated while retaining the five live market tones/icons (17 JSX uses in five page files), and26 domain CSS aliases delegated to Brand's existing aubergine/aubergine-light palette/type roles (24 consumer files). The unused Badge brand tone has no live callers and is removed. Theme query/storage retains light/dark values while selecting the owning named Brand theme. Uno scans the exact shared CodeBlock, Badge, focus and menu/SurfaceMotion source recipes and binds canonical semantic roles. The single legacy Sandbox DropdownMenu import forwards directly to UI/primitives; its actual menu flow is still UNCHECKED after migration.
+
+Source diff is eight files +94/-248, net154 lines removed. This excludes evidence additions. Checked UI11.39.0/Brand1.25.1 are declared. The app's BlueprintUI0.5.7 requires Nano0.10/reactNano0.7, incompatible with the newer optional UI peer plane. BlueprintUI0.6.0 supports the intended cohort in its owning source, but checked publication is pending under root's request `dedupe-10198-blueprintui-supported-cohort-request`. No unpublished Blueprint version is pinned, no peer or release-age exemption is added, and app/pnpm-lock.yaml intentionally remains unqualified pending the checked cohort. Host policy currently refuses a separate normal B2 execution for disk floor/install reserve; that refusal is not runtime or source acceptance of this candidate.
+
+**Do not merge:** checked Blueprint cohort and coherent lock/frozen install; fresh base/type/build on an admitted host; corrected actual after-state copy/tab/theme/visible Badge/menu/focus/CSS identity proof and original media inspection; relevant design/QA rows and independent source review remain unmet. Full Bible, physical-device, latency and served production proof are UNKNOWN. The draft does not close board10198.
+
+The manifest is made from committed Git objects after normal hooks, then verified again after publication. It excludes only itself and preserves every original raw/media byte. Source candidate, baseline executable and documentation publication identities are distinct.

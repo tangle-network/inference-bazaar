@@ -1,0 +1,50 @@
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +525
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 525, reused 301, downloaded 218, added 412
+Progress: resolved 525, reused 301, downloaded 223, added 524
+Progress: resolved 525, reused 301, downloaded 224, added 525, done
+.../esbuild@0.25.12/node_modules/esbuild postinstall$ node install.js
+.../esbuild@0.25.12/node_modules/esbuild postinstall: Done
+
+dependencies:
++ @lobehub/icons-static-svg 1.91.0
++ @nanostores/react 0.7.3
++ @tangle-network/blueprint-ui 0.5.7
++ @tangle-network/sandbox-ui 0.17.0
++ @tanstack/react-query 5.101.0
++ chart.js 4.5.1
++ clsx 2.1.1
++ connectkit 1.9.2
++ nanostores 0.10.3
++ react 19.2.7
++ react-chartjs-2 5.3.1
++ react-dom 19.2.7
++ react-router-dom 7.18.1
++ tailwind-merge 3.6.0
++ viem 2.52.2
++ wagmi 3.6.16
+
+devDependencies:
++ @iconify-json/ph 1.2.2
++ @types/node 22.19.21
++ @types/react 19.2.17
++ @types/react-dom 19.2.3
++ @unocss/preset-wind4 66.7.0
++ @vitejs/plugin-react 4.7.0
++ events 3.3.0
++ tsx 4.22.4
++ typescript 5.9.3
++ unocss 66.7.0
++ vite 6.4.3
++ wrangler 4.115.0
+
+╭ Warning ─────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│   Ignored build scripts: canvas@3.2.3, workerd@1.20260722.1.                 │
+│   Run "pnpm approve-builds" to pick which dependencies should be allowed     │
+│   to run scripts.                                                            │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Done in 3.5s using pnpm v10.33.4

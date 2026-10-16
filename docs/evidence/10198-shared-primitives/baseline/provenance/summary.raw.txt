@@ -1,0 +1,1116 @@
+[
+  {
+    "name": "1440-dark",
+    "phase": "before",
+    "source": "8eaac9238bc3a013261dfb466590cbb338960de5",
+    "checks": [
+      {
+        "name": "native viewport meta and width",
+        "pass": true,
+        "details": {
+          "width": 1440
+        }
+      },
+      {
+        "name": "Gateway actual nonempty snippet",
+        "pass": true,
+        "details": {
+          "length": 309
+        }
+      },
+      {
+        "name": "Gateway exact native clipboard",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "Gateway acknowledged label",
+        "pass": true,
+        "details": {
+          "label": "copied ✓"
+        }
+      },
+      {
+        "name": "Router actual nonempty snippet",
+        "pass": true,
+        "details": {
+          "length": 320
+        }
+      },
+      {
+        "name": "Router exact native clipboard",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "Router acknowledged label",
+        "pass": true,
+        "details": {
+          "label": "copied ✓"
+        }
+      },
+      {
+        "name": "tcloud actual nonempty snippet",
+        "pass": true,
+        "details": {
+          "length": 208
+        }
+      },
+      {
+        "name": "native Tab reaches copy",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "tcloud exact native clipboard",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "tcloud acknowledged label",
+        "pass": true,
+        "details": {
+          "label": "copied ✓"
+        }
+      },
+      {
+        "name": "theme toggle preserves stored light/dark contract",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "document fits viewport",
+        "pass": true,
+        "details": {
+          "width": 1440,
+          "scrollWidth": 1440,
+          "overflow": 0,
+          "theme": "dark",
+          "bodyColor": "rgb(244, 241, 253)",
+          "bodyBackground": "rgb(15, 10, 26)",
+          "bodyFont": "\"DM Sans\", system-ui, sans-serif"
+        }
+      },
+      {
+        "name": "no unexpected browser exceptions or console errors",
+        "pass": false,
+        "details": {
+          "errors": [
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "[Aave Account] Failed to establish lazy connection BN: EIP1193 provider connection timeout. Make sure to call `AaveAccountSdk.connect()` before using the provider.\n    at wle.waitForConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:17937)\n    at async wle.initializeLazyConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:12805)",
+            "Error: Aave Account is not connected. Make sure to call AaveAccountSdk.connect() first."
+          ]
+        }
+      }
+    ],
+    "errors": [
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "[Aave Account] Failed to establish lazy connection BN: EIP1193 provider connection timeout. Make sure to call `AaveAccountSdk.connect()` before using the provider.\n    at wle.waitForConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:17937)\n    at async wle.initializeLazyConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:12805)",
+      "Error: Aave Account is not connected. Make sure to call AaveAccountSdk.connect() first."
+    ],
+    "blocked": [
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "GET",
+        "origin": "https://app.family.co",
+        "path": "/injected/master",
+        "type": "document"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/developer",
+        "type": "document"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.googleapis.com",
+        "path": "/css2",
+        "type": "stylesheet"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/index-DsFadZeQ.js",
+        "type": "script"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/index-DaHxNLKY.css",
+        "type": "stylesheet"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/dmsans/v17/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K4.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/connectors-BIqtKyuJ.js",
+        "type": "script"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/index-DrAshLsx-MjFjA2jv.js",
+        "type": "script"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/outfit/v15/QGYvz_MVcBeNP4NJtEtq.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/ibmplexmono/v20/-F63fjptAgt5VM-kVkqdyU8n1i8q1w.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/ibmplexmono/v20/-F6qfjptAgt5VM-kVkqdyU8n3vAOwlBFgg.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/ibmplexmono/v20/-F6qfjptAgt5VM-kVkqdyU8n3twJwlBFgg.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/ccip-DENAlnlq.js",
+        "type": "script"
+      }
+    ],
+    "document": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "overflow": 0,
+      "theme": "dark",
+      "bodyColor": "rgb(244, 241, 253)",
+      "bodyBackground": "rgb(15, 10, 26)",
+      "bodyFont": "\"DM Sans\", system-ui, sans-serif"
+    },
+    "consoleClassification": {
+      "pageErrorsAndConsoleErrors": [
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "[Aave Account] Failed to establish lazy connection BN: EIP1193 provider connection timeout. Make sure to call `AaveAccountSdk.connect()` before using the provider.\n    at wle.waitForConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:17937)\n    at async wle.initializeLazyConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:12805)",
+        "Error: Aave Account is not connected. Make sure to call AaveAccountSdk.connect() first."
+      ],
+      "blockedRequests": [
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        },
+        {
+          "method": "GET",
+          "origin": "https://app.family.co",
+          "path": "/injected/master",
+          "type": "document"
+        },
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        },
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        },
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        },
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        },
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        },
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        },
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        }
+      ]
+    },
+    "status": "FAIL",
+    "failure": "Error: no unexpected browser exceptions or console errors",
+    "video": "/home/drew/.local/state/agent-work/inference-dedupe/baseline-8eaac923-20261016T052800Z/media/1440-dark/page@4deb63b1dc96bd20707b00a953fecc73.webm"
+  },
+  {
+    "name": "1440-light",
+    "phase": "before",
+    "source": "8eaac9238bc3a013261dfb466590cbb338960de5",
+    "checks": [
+      {
+        "name": "native viewport meta and width",
+        "pass": true,
+        "details": {
+          "width": 1440
+        }
+      },
+      {
+        "name": "Gateway actual nonempty snippet",
+        "pass": true,
+        "details": {
+          "length": 309
+        }
+      },
+      {
+        "name": "Gateway exact native clipboard",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "Gateway acknowledged label",
+        "pass": true,
+        "details": {
+          "label": "copied ✓"
+        }
+      },
+      {
+        "name": "Router actual nonempty snippet",
+        "pass": true,
+        "details": {
+          "length": 320
+        }
+      },
+      {
+        "name": "Router exact native clipboard",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "Router acknowledged label",
+        "pass": true,
+        "details": {
+          "label": "copied ✓"
+        }
+      },
+      {
+        "name": "tcloud actual nonempty snippet",
+        "pass": true,
+        "details": {
+          "length": 208
+        }
+      },
+      {
+        "name": "native Tab reaches copy",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "tcloud exact native clipboard",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "tcloud acknowledged label",
+        "pass": true,
+        "details": {
+          "label": "copied ✓"
+        }
+      },
+      {
+        "name": "theme toggle preserves stored light/dark contract",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "document fits viewport",
+        "pass": true,
+        "details": {
+          "width": 1440,
+          "scrollWidth": 1440,
+          "overflow": 0,
+          "theme": "light",
+          "bodyColor": "rgb(27, 19, 48)",
+          "bodyBackground": "rgb(244, 241, 252)",
+          "bodyFont": "\"DM Sans\", system-ui, sans-serif"
+        }
+      },
+      {
+        "name": "no unexpected browser exceptions or console errors",
+        "pass": false,
+        "details": {
+          "errors": [
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+            "[Aave Account] Failed to establish lazy connection BN: EIP1193 provider connection timeout. Make sure to call `AaveAccountSdk.connect()` before using the provider.\n    at wle.waitForConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:17937)\n    at async wle.initializeLazyConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:12805)",
+            "Error: Aave Account is not connected. Make sure to call AaveAccountSdk.connect() first."
+          ]
+        }
+      }
+    ],
+    "errors": [
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "[Aave Account] Failed to establish lazy connection BN: EIP1193 provider connection timeout. Make sure to call `AaveAccountSdk.connect()` before using the provider.\n    at wle.waitForConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:17937)\n    at async wle.initializeLazyConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:12805)",
+      "Error: Aave Account is not connected. Make sure to call AaveAccountSdk.connect() first."
+    ],
+    "blocked": [
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "GET",
+        "origin": "https://app.family.co",
+        "path": "/injected/master",
+        "type": "document"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/developer",
+        "type": "document"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.googleapis.com",
+        "path": "/css2",
+        "type": "stylesheet"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/index-DsFadZeQ.js",
+        "type": "script"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/index-DaHxNLKY.css",
+        "type": "stylesheet"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/connectors-BIqtKyuJ.js",
+        "type": "script"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/index-DrAshLsx-MjFjA2jv.js",
+        "type": "script"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/outfit/v15/QGYvz_MVcBeNP4NJtEtq.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/ibmplexmono/v20/-F63fjptAgt5VM-kVkqdyU8n1i8q1w.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/ibmplexmono/v20/-F6qfjptAgt5VM-kVkqdyU8n3vAOwlBFgg.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/ibmplexmono/v20/-F6qfjptAgt5VM-kVkqdyU8n3twJwlBFgg.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/dmsans/v17/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K4.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/ccip-DENAlnlq.js",
+        "type": "script"
+      }
+    ],
+    "document": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "overflow": 0,
+      "theme": "light",
+      "bodyColor": "rgb(27, 19, 48)",
+      "bodyBackground": "rgb(244, 241, 252)",
+      "bodyFont": "\"DM Sans\", system-ui, sans-serif"
+    },
+    "consoleClassification": {
+      "pageErrorsAndConsoleErrors": [
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "[Aave Account] Failed to establish lazy connection BN: EIP1193 provider connection timeout. Make sure to call `AaveAccountSdk.connect()` before using the provider.\n    at wle.waitForConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:17937)\n    at async wle.initializeLazyConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:12805)",
+        "Error: Aave Account is not connected. Make sure to call AaveAccountSdk.connect() first."
+      ],
+      "blockedRequests": [
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        },
+        {
+          "method": "GET",
+          "origin": "https://app.family.co",
+          "path": "/injected/master",
+          "type": "document"
+        },
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        },
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        },
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        },
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        },
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        },
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        },
+        {
+          "method": "POST",
+          "origin": "https://sepolia.base.org",
+          "path": "/",
+          "type": "fetch"
+        }
+      ]
+    },
+    "status": "FAIL",
+    "failure": "Error: no unexpected browser exceptions or console errors",
+    "video": "/home/drew/.local/state/agent-work/inference-dedupe/baseline-8eaac923-20261016T052800Z/media/1440-light/page@ff6f9ce48e2accf4d3519a51963b027d.webm"
+  },
+  {
+    "name": "390-dark",
+    "phase": "before",
+    "source": "8eaac9238bc3a013261dfb466590cbb338960de5",
+    "checks": [
+      {
+        "name": "native viewport meta and width",
+        "pass": true,
+        "details": {
+          "width": 390
+        }
+      },
+      {
+        "name": "Gateway actual nonempty snippet",
+        "pass": true,
+        "details": {
+          "length": 309
+        }
+      },
+      {
+        "name": "Gateway exact native clipboard",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "Gateway acknowledged label",
+        "pass": true,
+        "details": {
+          "label": "copied ✓"
+        }
+      },
+      {
+        "name": "Router actual nonempty snippet",
+        "pass": true,
+        "details": {
+          "length": 320
+        }
+      },
+      {
+        "name": "Router exact native clipboard",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "Router acknowledged label",
+        "pass": true,
+        "details": {
+          "label": "copied ✓"
+        }
+      },
+      {
+        "name": "tcloud actual nonempty snippet",
+        "pass": true,
+        "details": {
+          "length": 208
+        }
+      },
+      {
+        "name": "native Tab reaches copy",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "tcloud exact native clipboard",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "tcloud acknowledged label",
+        "pass": true,
+        "details": {
+          "label": "copied ✓"
+        }
+      }
+    ],
+    "errors": [
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "[Aave Account] Failed to establish lazy connection BN: EIP1193 provider connection timeout. Make sure to call `AaveAccountSdk.connect()` before using the provider.\n    at wle.waitForConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:17937)\n    at async wle.initializeLazyConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:12805)",
+      "Error: Aave Account is not connected. Make sure to call AaveAccountSdk.connect() first."
+    ],
+    "blocked": [
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "GET",
+        "origin": "https://app.family.co",
+        "path": "/injected/master",
+        "type": "document"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/developer",
+        "type": "document"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.googleapis.com",
+        "path": "/css2",
+        "type": "stylesheet"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/index-DsFadZeQ.js",
+        "type": "script"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/index-DaHxNLKY.css",
+        "type": "stylesheet"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/connectors-BIqtKyuJ.js",
+        "type": "script"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/index-DrAshLsx-MjFjA2jv.js",
+        "type": "script"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/dmsans/v17/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K4.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/outfit/v15/QGYvz_MVcBeNP4NJtEtq.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/ibmplexmono/v20/-F63fjptAgt5VM-kVkqdyU8n1i8q1w.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/ibmplexmono/v20/-F6qfjptAgt5VM-kVkqdyU8n3vAOwlBFgg.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/ccip-DENAlnlq.js",
+        "type": "script"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/connectors-DAWtxdNk.js",
+        "type": "script"
+      }
+    ],
+    "status": "FAIL",
+    "failure": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByTitle('Toggle theme', { exact: true }).first()\n    - locator resolved to <button title=\"Toggle theme\" class=\"flex h-9 w-9 items-center justify-center rounded-[6px] border border-[var(--s-border)] bg-[var(--s-panel)] text-[var(--s-text-muted)] transition-colors hover:border-[var(--s-border-hover)] hover:text-[var(--s-text)]\">…</button>\n  - attempting click action\n    2 × waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 × waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    58 × waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+    "video": "/home/drew/.local/state/agent-work/inference-dedupe/baseline-8eaac923-20261016T052800Z/media/390-dark/page@fb84aec29b64f9abe4460fc393e306c7.webm"
+  },
+  {
+    "name": "390-light",
+    "phase": "before",
+    "source": "8eaac9238bc3a013261dfb466590cbb338960de5",
+    "checks": [
+      {
+        "name": "native viewport meta and width",
+        "pass": true,
+        "details": {
+          "width": 390
+        }
+      },
+      {
+        "name": "Gateway actual nonempty snippet",
+        "pass": true,
+        "details": {
+          "length": 309
+        }
+      },
+      {
+        "name": "Gateway exact native clipboard",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "Gateway acknowledged label",
+        "pass": true,
+        "details": {
+          "label": "copied ✓"
+        }
+      },
+      {
+        "name": "Router actual nonempty snippet",
+        "pass": true,
+        "details": {
+          "length": 320
+        }
+      },
+      {
+        "name": "Router exact native clipboard",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "Router acknowledged label",
+        "pass": true,
+        "details": {
+          "label": "copied ✓"
+        }
+      },
+      {
+        "name": "tcloud actual nonempty snippet",
+        "pass": true,
+        "details": {
+          "length": 208
+        }
+      },
+      {
+        "name": "native Tab reaches copy",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "tcloud exact native clipboard",
+        "pass": true,
+        "details": {}
+      },
+      {
+        "name": "tcloud acknowledged label",
+        "pass": true,
+        "details": {
+          "label": "copied ✓"
+        }
+      }
+    ],
+    "errors": [
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "[Aave Account] Failed to establish lazy connection BN: EIP1193 provider connection timeout. Make sure to call `AaveAccountSdk.connect()` before using the provider.\n    at wle.waitForConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:17937)\n    at async wle.initializeLazyConnection (http://127.0.0.1:5357/assets/index-DsFadZeQ.js:123:12805)",
+      "Error: Aave Account is not connected. Make sure to call AaveAccountSdk.connect() first."
+    ],
+    "blocked": [
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "GET",
+        "origin": "https://app.family.co",
+        "path": "/injected/master",
+        "type": "document"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      },
+      {
+        "method": "POST",
+        "origin": "https://sepolia.base.org",
+        "path": "/",
+        "type": "fetch"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/developer",
+        "type": "document"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.googleapis.com",
+        "path": "/css2",
+        "type": "stylesheet"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/index-DsFadZeQ.js",
+        "type": "script"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/index-DaHxNLKY.css",
+        "type": "stylesheet"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/connectors-BIqtKyuJ.js",
+        "type": "script"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/index-DrAshLsx-MjFjA2jv.js",
+        "type": "script"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/outfit/v15/QGYvz_MVcBeNP4NJtEtq.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/ibmplexmono/v20/-F63fjptAgt5VM-kVkqdyU8n1i8q1w.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/dmsans/v17/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K4.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "https://fonts.gstatic.com",
+        "path": "/s/ibmplexmono/v20/-F6qfjptAgt5VM-kVkqdyU8n3vAOwlBFgg.woff2",
+        "type": "font"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/ccip-DENAlnlq.js",
+        "type": "script"
+      },
+      {
+        "method": "GET",
+        "origin": "http://127.0.0.1:5357",
+        "path": "/assets/connectors-DAWtxdNk.js",
+        "type": "script"
+      }
+    ],
+    "status": "FAIL",
+    "failure": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByTitle('Toggle theme', { exact: true }).first()\n    - locator resolved to <button title=\"Toggle theme\" class=\"flex h-9 w-9 items-center justify-center rounded-[6px] border border-[var(--s-border)] bg-[var(--s-panel)] text-[var(--s-text-muted)] transition-colors hover:border-[var(--s-border-hover)] hover:text-[var(--s-text)]\">…</button>\n  - attempting click action\n    2 × waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 × waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    58 × waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+    "video": "/home/drew/.local/state/agent-work/inference-dedupe/baseline-8eaac923-20261016T052800Z/media/390-light/page@05e0be7b396a8376ea22924072d537a9.webm"
+  }
+]
