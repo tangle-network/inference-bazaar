@@ -7,6 +7,8 @@ export default defineConfig({
     filesystem: [
       './src/**/*.{ts,tsx}',
       './node_modules/@tangle-network/ui/src/primitives/badge.tsx',
+      './node_modules/@tangle-network/ui/src/primitives/dropdown-menu.tsx',
+      './node_modules/@tangle-network/ui/src/lib/surface-motion.tsx',
       './node_modules/@tangle-network/ui/src/markdown/code-block.tsx',
       './node_modules/@tangle-network/ui/src/lib/focus.ts',
       './node_modules/@tangle-network/ui/src/lib/code-presentation.ts',
@@ -47,7 +49,9 @@ export default defineConfig({
       [
         'background', 'foreground', 'card', 'card-foreground',
         'primary', 'primary-foreground', 'secondary', 'secondary-foreground',
-        'muted', 'muted-foreground', 'border', 'ring',
+        'muted', 'muted-foreground', 'popover', 'popover-foreground',
+        'accent', 'accent-foreground', 'destructive', 'destructive-foreground',
+        'border', 'input', 'ring',
       ].map((role) => [role, `hsl(var(--hsl-${role}))`]),
     ),
   },
