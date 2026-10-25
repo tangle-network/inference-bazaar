@@ -58,7 +58,7 @@ no real custody gain). C2 closes at the first **value-bearing** deploy, where
 ## Status
 
 - Mechanism: **proven** — `scripts/timelock-anvil.sh` (live ceremony on anvil),
-  `test/Timelock.t.sol` (CI gate: delay enforced, EOA can't act, rotation only
+  `test/Timelock.t.sol` (local qualification: delay enforced, EOA can't act, rotation only
   after the delay via the timelock).
 - Deploy path: **ready** — `Deploy.s.sol USE_TIMELOCK=1`.
 - Live: **gated on the Safe signer decision + the next value-bearing deploy.**

@@ -17,8 +17,8 @@ Run these before/after a deploy — they are the end-to-end proof:
   (non-session) voucher refused.
 - **Circuit parity** — `bash scripts/prove-batch.sh execute`: the SP1 guest's
   committed public values equal the host's recomputation.
-- CI gates: `forge test` (settlement + invariants), Rust parity pins, the guest
-  ELF + parity job, and the settlement-spine e2e.
+- Local qualification: `forge test` (settlement + invariants), Rust parity pins, the guest
+  ELF + parity check, and the settlement-spine e2e.
 
 ## 1. Contracts (governance-owned)
 

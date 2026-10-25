@@ -18,5 +18,5 @@ Read the installed manager's command help and maintained deployment scripts befo
 [venue.rs](operator/src/venue.rs) rejects router-mode inference for a bonded issuer.
 An explicit external inference backend must satisfy the configured endpoint and authorization contract; a router fallback is insufficient.
 Check current configuration before claiming which network or inference service the operator uses.
-Use [Cargo.toml](Cargo.toml), the toolchain file, and CI for build requirements and checks.
+Use [Cargo.toml](Cargo.toml), the toolchain file, and README local qualification for build requirements and checks.
 Blueprint-feature builds require a working `protoc`; resolve its installed path instead of assuming a host-specific location.
