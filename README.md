@@ -115,3 +115,15 @@ key, deposit, take a signed firm quote, verify a lot on-chain) and agent
 operators (bond collateral, serve a model, quote). They serve at exact paths
 alongside the SPA (Cloudflare Pages serves matching static assets before the
 `/*` rewrite applies).
+
+## Local qualification
+
+Before merge, merge the fresh default branch into the working branch and run affected source checks and real integration checks through the admitted Beelink launcher. Workflow/docs-only changes use YAML, content, link, diff and static checks. Comprehensive commands below are references for the relevant full qualification, selected by the changed surface.
+
+[rust-toolchain.toml](rust-toolchain.toml), the root/app package manifests and their locks own toolchain/dependency selection. The admitted host also needs Foundry, `protoc` and the maintained SP1 toolchain used by [scripts/prove-batch.sh](scripts/prove-batch.sh). The following comprehensive reference preserves the former Rust feature surfaces, Solidity suite, cross-stack parity, separate zk host/guest workspaces, Anvil integration paths and root/app TypeScript populations:
+
+```bash
+beelink-gate auto https://github.com/tangle-network/inference-bazaar.git "$(git rev-parse HEAD)" -- bash -c 'set -e; cargo fetch --locked; cargo fmt --all --check; cargo clippy -p inference-bazaar-orderbook -p inference-bazaar-settlement-core -p inference-bazaar-matcher -p inference-bazaar-settlement --all-targets -- -D warnings; cargo test --workspace; cargo build -p inference-bazaar-operator --features chain; cargo build -p inference-bazaar-operator --features mesh; cargo build -p inference-bazaar-matcher --no-default-features; (cd contracts && forge soldeer install && forge fmt --check && forge build --sizes && forge test -vvv); cargo test -p inference-bazaar-settlement --test parity; (cd contracts && forge test --match-path "test/Eip712Parity.t.sol" -vvv); (cd zk && SP1_SKIP_PROGRAM_BUILD=1 cargo build --release); bash scripts/prove-batch.sh execute; bash scripts/settlement-e2e.sh; pnpm install --frozen-lockfile; bash scripts/spend-e2e.sh; bash scripts/gateway-multilot-e2e.sh; pnpm -r typecheck; pnpm -r test; (cd app && pnpm install --frozen-lockfile && pnpm typecheck && pnpm test)'
+```
+
+These integration references use disposable local Anvil and the existing synthetic upstreams; circuit qualification uses `execute`, not the funded submit mode. The [operator publisher](.github/workflows/release.yml) and [Pages deploy](.github/workflows/deploy-app.yml) retain their independent builds and release authority. PR/push CI is retired; pre/post-deploy evidence in [the testnet release guide](docs/testnet-release.md) remains required.
