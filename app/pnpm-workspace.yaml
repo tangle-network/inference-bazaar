@@ -7,6 +7,8 @@ onlyBuiltDependencies:
 overrides:
   postcss: 8.5.24
   ws: 8.21.0
+  'sharp@<0.35.5': 0.35.5
+  'undici@>=7.0.0 <7.30.1': 7.30.1
 
 auditConfig:
   ignoreGhsas:
