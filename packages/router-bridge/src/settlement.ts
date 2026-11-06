@@ -1,24 +1,4 @@
-/**
- * Two-sided settlement, two rails.
- *
- * A filled token-credit trade has to move money. InferenceBazaar supports BOTH rails
- * the fleet already runs, chosen per order — never one hard-wired:
- *
- *  - `router-credits`: the buyer's balance lives on the live platform
- *    (`id.tangle.tools`) funded by Stripe / on-ramp; the router deducts the
- *    buyer and pays the operator their cut. This is the default path for most
- *    buyers and reuses the router exactly as it ships.
- *  - `shielded`: on-chain ShieldedCredits — the buyer pre-signs an EIP-712
- *    `SpendAuth`, the operator `authorizeSpend` then `claimPayment`. This is the
- *    private/native-crypto path.
- *
- * Both rails reach EXISTING live systems through injected ports — this module
- * does not reimplement the router or the chain, it adapts the marketplace's
- * "settle this fill" to whichever rail the order names. The fee split (operator
- * cut vs platform take) is identical across rails so a fill nets the same to an
- * operator regardless of how the buyer paid.
- */
-
+/** Filled trades choose Platform credits or ShieldedCredits through settlement ports. */
 import { tokenLotCostBaseUnits, type SpendAuthPayload } from './spend-auth'
 
 export type SettlementRailKind = 'router-credits' | 'shielded'

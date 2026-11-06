@@ -1,16 +1,6 @@
-/**
- * InferenceBazaarSettlement firm orders — the buyer-side mirror of
- * `crates/settlement-core` and `contracts/src/InferenceBazaarSettlement.sol`.
- *
- * A CLOB order and an RFQ quote are the same EIP-712 `Order`. This module
- * builds the typed data a wallet signs (viem `signTypedData` / EIP-1193
- * `eth_signTypedData_v4`); it deliberately carries no crypto deps, like
- * `spend-auth.ts`. Byte parity Rust<->Solidity is pinned by
- * crates/settlement/tests/parity.rs + contracts/test/Eip712Parity.t.sol;
- * this module's types are pinned to the same canonical type strings below.
- * Drift here is a fund-loss bug: change only in lockstep with the contract.
- */
-
+/** Firm orders share the contract schema in crates/settlement-core and
+ * contracts/src/InferenceBazaarSettlement.sol. Cross-language parity is checked
+ * by crates/settlement/tests/parity.rs and contracts/test/Eip712Parity.t.sol. */
 export const INFERENCE_BAZAAR_SETTLEMENT_DOMAIN = {
   name: 'InferenceBazaarSettlement',
   version: '1',
