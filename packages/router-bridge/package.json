@@ -11,6 +11,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@tangle-network/tcloud": "^1.0.3"
+  },
   "devDependencies": {
     "@types/node": "^25.9.2",
     "typescript": "^5.8.0",
